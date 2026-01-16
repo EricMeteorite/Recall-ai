@@ -9,18 +9,18 @@ class RelationExtractor:
     
     # 关系模式（正则匹配）
     PATTERNS: List[Tuple[str, Callable]] = [
-        # 中文模式
-        (r'(.{2,10})是(.{2,10})的(朋友|敌人|家人|老师|学生|上司|下属)', 
+        # 中文模式 - 使用非贪婪匹配和适当的边界
+        (r'([\u4e00-\u9fa5A-Za-z]{1,15})是([\u4e00-\u9fa5A-Za-z]{1,15})的(朋友|敌人|家人|老师|学生|上司|下属)', 
          lambda m: (m.group(1), 'IS_' + {'朋友':'FRIEND', '敌人':'ENEMY', '家人':'FAMILY', 
                     '老师':'MENTOR', '学生':'STUDENT', '上司':'BOSS', '下属':'SUBORDINATE'}.get(m.group(3), 'RELATED') + '_OF', m.group(2))),
         
-        (r'(.{2,10})爱上了(.{2,10})', lambda m: (m.group(1), 'LOVES', m.group(2))),
-        (r'(.{2,10})喜欢(.{2,10})', lambda m: (m.group(1), 'LIKES', m.group(2))),
-        (r'(.{2,10})讨厌(.{2,10})', lambda m: (m.group(1), 'HATES', m.group(2))),
-        (r'(.{2,10})住在(.{2,10})', lambda m: (m.group(1), 'LIVES_IN', m.group(2))),
-        (r'(.{2,10})去了(.{2,10})', lambda m: (m.group(1), 'TRAVELS_TO', m.group(2))),
-        (r'(.{2,10})拥有(.{2,10})', lambda m: (m.group(1), 'OWNS', m.group(2))),
-        (r'(.{2,10})给(.{2,10})了(.{2,10})', lambda m: (m.group(1), 'GAVE_TO', m.group(2))),
+        (r'([\u4e00-\u9fa5A-Za-z]{1,15})爱上了([\u4e00-\u9fa5A-Za-z]{1,15})', lambda m: (m.group(1), 'LOVES', m.group(2))),
+        (r'([\u4e00-\u9fa5A-Za-z]{1,15})喜欢([\u4e00-\u9fa5A-Za-z]{1,15})', lambda m: (m.group(1), 'LIKES', m.group(2))),
+        (r'([\u4e00-\u9fa5A-Za-z]{1,15})讨厌([\u4e00-\u9fa5A-Za-z]{1,15})', lambda m: (m.group(1), 'HATES', m.group(2))),
+        (r'([\u4e00-\u9fa5A-Za-z]{1,15})住在([\u4e00-\u9fa5]{1,10})', lambda m: (m.group(1), 'LIVES_IN', m.group(2))),
+        (r'([\u4e00-\u9fa5A-Za-z]{1,15})去了([\u4e00-\u9fa5]{1,10})', lambda m: (m.group(1), 'TRAVELS_TO', m.group(2))),
+        (r'([\u4e00-\u9fa5A-Za-z]{1,15})拥有([\u4e00-\u9fa5A-Za-z]{1,15})', lambda m: (m.group(1), 'OWNS', m.group(2))),
+        (r'([\u4e00-\u9fa5A-Za-z]{1,15})给([\u4e00-\u9fa5A-Za-z]{1,15})了(.{1,15})', lambda m: (m.group(1), 'GAVE_TO', m.group(2))),
         
         # 英文模式
         (r'(\w+) is (?:a )?friend of (\w+)', lambda m: (m.group(1), 'IS_FRIEND_OF', m.group(2))),
