@@ -119,6 +119,24 @@ class KnowledgeGraph:
         self._save()
         return rel
     
+    def add_entity(self, entity_id: str, entity_type: str = "ENTITY") -> bool:
+        """添加实体（创建一个自环关系来记录实体）
+        
+        Args:
+            entity_id: 实体ID/名称
+            entity_type: 实体类型
+        
+        Returns:
+            bool: 是否成功
+        """
+        # 通过添加一个 IS_A 关系来记录实体
+        self.add_relation(
+            source_id=entity_id,
+            target_id=entity_type,
+            relation_type="IS_A"
+        )
+        return True
+    
     def get_neighbors(self, entity_id: str, relation_type: str = None, 
                       direction: str = 'both') -> List[Tuple[str, Relation]]:
         """获取邻居实体

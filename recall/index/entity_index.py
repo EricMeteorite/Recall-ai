@@ -102,3 +102,47 @@ class EntityIndex:
             reverse=True
         )
         return sorted_entities[:limit]
+    
+    def add_entity_occurrence(self, entity_name: str, turn_id: str, context: str = "") -> None:
+        """添加实体出现记录
+        
+        Args:
+            entity_name: 实体名称
+            turn_id: 轮次/记忆ID
+            context: 上下文文本
+        """
+        # 查找或创建实体
+        existing = self.get_by_name(entity_name)
+        
+        if existing:
+            # 更新已有实体
+            if turn_id not in existing.turn_references:
+                existing.turn_references.append(turn_id)
+            self._save()
+        else:
+            # 创建新实体
+            import uuid
+            entity = IndexedEntity(
+                id=f"ent_{uuid.uuid4().hex[:8]}",
+                name=entity_name,
+                aliases=[],
+                entity_type="UNKNOWN",
+                turn_references=[turn_id]
+            )
+            self.add(entity)
+    
+    def get_related_turns(self, entity_name: str) -> List[IndexedEntity]:
+        """获取实体相关的轮次
+        
+        Args:
+            entity_name: 实体名称
+        
+        Returns:
+            List[IndexedEntity]: 包含该实体的实体列表（携带 turn_references）
+        """
+        results = self.search(entity_name)
+        return results
+    
+    def get_entity(self, name: str) -> Optional[IndexedEntity]:
+        """通过名称获取实体（get_by_name 的别名）"""
+        return self.get_by_name(name)

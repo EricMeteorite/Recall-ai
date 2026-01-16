@@ -129,7 +129,8 @@ class EightLayerRetriever:
             input_count = len(candidates)
             
             if keywords:
-                inverted_results = self.inverted_index.search(keywords)
+                # 使用 search_any 来搜索任一关键词
+                inverted_results = self.inverted_index.search_any(keywords)
                 candidates.update(inverted_results)
             
             self._record_stats(RetrievalLayer.L2_INVERTED_INDEX, input_count, len(candidates), start)
@@ -150,8 +151,9 @@ class EightLayerRetriever:
             start = time.time()
             input_count = len(candidates)
             
-            ngram_results = self.ngram_index.search(query, threshold=0.3)
-            for doc_id, score in ngram_results:
+            ngram_results = self.ngram_index.search(query)
+            # ngram_results 是 turn_id 列表，不是元组
+            for doc_id in ngram_results:
                 candidates.add(doc_id)
             
             self._record_stats(RetrievalLayer.L4_NGRAM_INDEX, input_count, len(candidates), start)

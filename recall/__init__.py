@@ -7,8 +7,8 @@ Recall - AI永久记忆系统
     from recall import RecallEngine
     
     engine = RecallEngine()
-    engine.process_turn("用户说的话", "AI回复")
-    context = engine.build_context("新的问题")
+    engine.add("用户说的话", user_id="user1")
+    context = engine.build_context("新的问题", user_id="user1")
 """
 
 from .version import __version__

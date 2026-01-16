@@ -1,7 +1,7 @@
 """向量索引 - 语义相似度检索"""
 
 import os
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Any
 
 import numpy as np
 
@@ -84,25 +84,35 @@ class VectorIndex:
         embedding = self.model.encode(text, normalize_embeddings=True)
         return embedding.astype('float32')
     
-    def add(self, turn_id: int, embedding: np.ndarray):
-        """添加向量"""
+    def add(self, doc_id: Any, embedding: np.ndarray):
+        """添加向量
+        
+        Args:
+            doc_id: 文档ID（可以是 int 或 str）
+            embedding: 向量
+        """
         if embedding.ndim == 1:
             embedding = embedding.reshape(1, -1)
         
         self.index.add(embedding)
-        self.turn_mapping.append(turn_id)
+        self.turn_mapping.append(doc_id)
         
         # 每100次添加保存一次
         if len(self.turn_mapping) % 100 == 0:
             self._save()
     
-    def add_text(self, turn_id: int, text: str):
-        """直接添加文本"""
+    def add_text(self, doc_id: Any, text: str):
+        """直接添加文本
+        
+        Args:
+            doc_id: 文档ID（可以是 int 或 str）
+            text: 文本内容
+        """
         embedding = self.encode(text)
-        self.add(turn_id, embedding)
+        self.add(doc_id, embedding)
     
-    def search(self, query: str, top_k: int = 20) -> List[Tuple[int, float]]:
-        """搜索最相似的轮次"""
+    def search(self, query: str, top_k: int = 20) -> List[Tuple[Any, float]]:
+        """搜索最相似的文档"""
         if self.index.ntotal == 0:
             return []
         
@@ -114,12 +124,12 @@ class VectorIndex:
         results = []
         for dist, idx in zip(distances[0], indices[0]):
             if idx >= 0 and idx < len(self.turn_mapping):
-                turn_id = self.turn_mapping[idx]
-                results.append((turn_id, float(dist)))
+                doc_id = self.turn_mapping[idx]
+                results.append((doc_id, float(dist)))
         
         return results
     
-    def search_by_embedding(self, embedding: np.ndarray, top_k: int = 20) -> List[Tuple[int, float]]:
+    def search_by_embedding(self, embedding: np.ndarray, top_k: int = 20) -> List[Tuple[Any, float]]:
         """通过向量搜索"""
         if self.index.ntotal == 0:
             return []
@@ -132,7 +142,7 @@ class VectorIndex:
         results = []
         for dist, idx in zip(distances[0], indices[0]):
             if idx >= 0 and idx < len(self.turn_mapping):
-                turn_id = self.turn_mapping[idx]
-                results.append((turn_id, float(dist)))
+                doc_id = self.turn_mapping[idx]
+                results.append((doc_id, float(dist)))
         
         return results

@@ -25,6 +25,7 @@ from .utils import (
     LLMClient, WarmupManager, PerformanceMonitor,
     EnvironmentManager, AutoMaintainer
 )
+from .utils.perf_monitor import MetricType
 
 
 @dataclass
@@ -137,11 +138,7 @@ class RecallEngine:
         if not self.lightweight:
             self._init_indexes()
         
-        # 图谱层
-        self.knowledge_graph = KnowledgeGraph()
-        self.relation_extractor = RelationExtractor()
-        
-        # 处理器层
+        # 处理器层（需要先初始化，因为图谱层依赖）
         self.entity_extractor = EntityExtractor()
         self.foreshadowing_tracker = ForeshadowingTracker(
             storage_path=os.path.join(self.data_root, 'data', 'foreshadowing.json')
@@ -149,6 +146,14 @@ class RecallEngine:
         self.consistency_checker = ConsistencyChecker()
         self.memory_summarizer = MemorySummarizer(llm_client=self.llm_client)
         self.scenario_detector = ScenarioDetector()
+        
+        # 图谱层
+        self.knowledge_graph = KnowledgeGraph(
+            data_path=os.path.join(self.data_root, 'data')
+        )
+        self.relation_extractor = RelationExtractor(
+            entity_extractor=self.entity_extractor
+        )
         
         # 检索层
         self.retriever = EightLayerRetriever(
@@ -168,12 +173,9 @@ class RecallEngine:
         index_path = os.path.join(self.data_root, 'index')
         os.makedirs(index_path, exist_ok=True)
         
-        self._entity_index = EntityIndex()
-        self._inverted_index = InvertedIndex()
-        self._vector_index = VectorIndex(
-            dimension=384,  # 默认维度
-            index_path=os.path.join(index_path, 'vector.faiss')
-        )
+        self._entity_index = EntityIndex(data_path=self.data_root)
+        self._inverted_index = InvertedIndex(data_path=self.data_root)
+        self._vector_index = VectorIndex(data_path=self.data_root)
         self._ngram_index = OptimizedNgramIndex()
     
     def _warmup(self):
@@ -252,9 +254,9 @@ class RecallEngine:
                 'created_at': time.time()
             }
             
-            # 存储到工作记忆
+            # 存储到作用域
             scope = self.storage.get_scope(user_id)
-            scope.working_memory.add(content, metadata={
+            scope.add(content, metadata={
                 'id': memory_id,
                 'entities': entity_names,
                 'keywords': keywords,
@@ -274,21 +276,32 @@ class RecallEngine:
                 self._inverted_index.add(memory_id, keywords)
             
             if self._ngram_index:
-                self._ngram_index.add_document(memory_id, content)
+                # NgamIndex.add 接受 (turn_id, content)
+                self._ngram_index.add(memory_id, content)
             
             if self._vector_index:
-                self._vector_index.add(memory_id, content)
+                # VectorIndex.add_text 接受 (turn_id, text)
+                self._vector_index.add_text(memory_id, content)
             
             # 6. 更新知识图谱
-            relations = self.relation_extractor.extract(content, entity_names)
+            relations = self.relation_extractor.extract(content, 0)  # 传入turn=0
             for rel in relations:
-                self.knowledge_graph.add_relation(rel)
+                source_id, relation_type, target_id, source_text = rel
+                self.knowledge_graph.add_relation(
+                    source_id=source_id,
+                    target_id=target_id,
+                    relation_type=relation_type,
+                    source_text=source_text
+                )
             
             # 记录性能
-            self.monitor.record(
-                PerformanceMonitor.MetricType.LATENCY if hasattr(PerformanceMonitor, 'MetricType') else None,
-                (time.time() - start_time) * 1000
-            ) if hasattr(self.monitor, 'record') else None
+            try:
+                self.monitor.record(
+                    MetricType.LATENCY,
+                    (time.time() - start_time) * 1000
+                )
+            except Exception:
+                pass  # 忽略性能监控错误
             
             return AddResult(
                 id=memory_id,
@@ -340,7 +353,7 @@ class RecallEngine:
         
         # 4. 补充从存储获取
         scope = self.storage.get_scope(user_id)
-        stored_memories = scope.working_memory.search(query, top_k=top_k)
+        stored_memories = scope.search(query, limit=top_k)
         
         # 5. 合并结果
         results = []
@@ -358,7 +371,7 @@ class RecallEngine:
                 seen_ids.add(r.id)
         
         for m in stored_memories:
-            mem_id = m.get('id', '')
+            mem_id = m.get('metadata', {}).get('id', '') or m.get('id', '')
             if mem_id and mem_id not in seen_ids:
                 results.append(SearchResult(
                     id=mem_id,
@@ -386,7 +399,48 @@ class RecallEngine:
             List[Dict]: 记忆列表
         """
         scope = self.storage.get_scope(user_id)
-        return scope.working_memory.get_all(limit=limit)
+        return scope.get_all(limit=limit)
+    
+    def get(
+        self,
+        memory_id: str,
+        user_id: str = "default"
+    ) -> Optional[Dict[str, Any]]:
+        """获取单条记忆
+        
+        Args:
+            memory_id: 记忆ID
+            user_id: 用户ID
+        
+        Returns:
+            Dict: 记忆数据，如果不存在则返回 None
+        """
+        scope = self.storage.get_scope(user_id)
+        all_memories = scope.get_all()
+        for memory in all_memories:
+            if memory.get('metadata', {}).get('id') == memory_id:
+                return memory
+        return None
+    
+    def clear(
+        self,
+        user_id: str = "default"
+    ) -> bool:
+        """清空用户的所有记忆
+        
+        Args:
+            user_id: 用户ID
+        
+        Returns:
+            bool: 是否成功
+        """
+        scope = self.storage.get_scope(user_id)
+        scope.clear()
+        return True
+    
+    def stats(self) -> Dict[str, Any]:
+        """获取统计信息（get_stats 的别名）"""
+        return self.get_stats()
     
     def delete(
         self,
@@ -403,7 +457,7 @@ class RecallEngine:
             bool: 是否成功
         """
         scope = self.storage.get_scope(user_id)
-        return scope.working_memory.delete(memory_id)
+        return scope.delete(memory_id)
     
     def update(
         self,
@@ -424,7 +478,7 @@ class RecallEngine:
             bool: 是否成功
         """
         scope = self.storage.get_scope(user_id)
-        return scope.working_memory.update(memory_id, content, metadata)
+        return scope.update(memory_id, content, metadata)
     
     def build_context(
         self,
@@ -449,7 +503,7 @@ class RecallEngine:
         
         # 2. 获取最近对话
         scope = self.storage.get_scope(user_id)
-        recent = scope.working_memory.get_recent(include_recent)
+        recent = scope.get_recent(include_recent)
         
         # 3. 构建上下文
         context = self.context_builder.build(
@@ -517,7 +571,7 @@ class RecallEngine:
             'data_root': self.data_root,
             'lightweight': self.lightweight,
             'storage': {
-                'scopes': len(self.storage.scopes)
+                'scopes': len(self.storage._scopes)
             },
             'indexes': {
                 'entity_index': self._entity_index is not None,
@@ -534,7 +588,7 @@ class RecallEngine:
         scope = self.storage.get_scope(user_id)
         
         # 获取工作记忆
-        working = scope.working_memory.get_all()
+        working = scope.get_all()
         
         # 使用摘要器压缩
         from .processor.memory_summarizer import MemoryItem, MemoryPriority
@@ -560,7 +614,7 @@ class RecallEngine:
         """重置（谨慎使用）"""
         if user_id:
             scope = self.storage.get_scope(user_id)
-            scope.working_memory.clear()
+            scope.clear()
         else:
             # 重置所有
             self.storage = MultiTenantStorage(
