@@ -1,0 +1,89 @@
+# Recall v3 - AI永久记忆系统
+# pyproject.toml
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "recall-ai"
+version = "3.0.0"
+description = "AI永久记忆系统 - 让AI永远不会忘记你说过的每一句话"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    {name = "Recall Team"}
+]
+keywords = ["ai", "memory", "recall", "llm", "roleplay", "sillytavern"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+    # 核心框架
+    "pydantic>=2.0",           # 数据模型验证
+    
+    # NLP处理
+    "spacy>=3.5",              # 实体识别
+    "jieba>=0.42",             # 中文分词
+    
+    # 向量检索（标准模式需要）
+    "sentence-transformers>=2.2",  # Embedding模型（会自动安装torch）
+    "faiss-cpu>=1.7",          # 向量索引
+    
+    # LLM调用
+    "litellm>=1.0",            # 统一LLM接口
+    "openai>=1.0",             # OpenAI SDK
+    "httpx>=0.24",             # 异步HTTP
+    
+    # Web服务
+    "fastapi>=0.100",          # HTTP API框架
+    "uvicorn>=0.22",           # ASGI服务器
+    
+    # 系统监控
+    "psutil>=5.9",             # 系统资源监控
+    "schedule>=1.2",           # 任务调度
+    
+    # 工具库
+    "click>=8.0",              # CLI框架
+    "rich>=13.0",              # 终端美化
+    "numpy>=1.24",             # 数值计算
+    "pybloom-live>=4.0",       # 布隆过滤器
+]
+
+[project.optional-dependencies]
+lightweight = []               # 轻量模式无额外依赖
+dev = ["pytest>=7.0", "black", "ruff"]
+
+[project.scripts]
+recall = "recall.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/recall-ai/recall"
+Documentation = "https://github.com/recall-ai/recall"
+Repository = "https://github.com/recall-ai/recall"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["recall*"]
+
+[tool.setuptools.package-data]
+"*" = ["*.json", "*.css", "*.js"]
+
+[tool.black]
+line-length = 100
+target-version = ['py310', 'py311', 'py312']
+
+[tool.ruff]
+line-length = 100
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]

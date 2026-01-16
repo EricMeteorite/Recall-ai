@@ -1,0 +1,16 @@
+{
+    "display_name": "Recall Memory",
+    "loading_order": 10,
+    "requires": [],
+    "optional": [],
+    "js": "index.js",
+    "css": "style.css",
+    "author": "Recall Team",
+    "version": "3.0.0",
+    "description": "Recall - 智能记忆管理系统插件。为 SillyTavern 提供持久化记忆、实体追踪、伏笔管理等功能。",
+    "homePage": "https://github.com/your-repo/recall-ai",
+    "i18n": {
+        "zh-CN": "i18n/zh-CN.json",
+        "en": "i18n/en.json"
+    }
+}
