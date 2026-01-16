@@ -80,8 +80,14 @@ class ScopedMemory:
         
         return results[:limit]
     
-    def get_all(self, limit: int = 100) -> List[Dict[str, Any]]:
-        """获取所有记忆"""
+    def get_all(self, limit: int = None) -> List[Dict[str, Any]]:
+        """获取所有记忆
+        
+        Args:
+            limit: 限制数量，None表示返回全部
+        """
+        if limit is None:
+            return self._memories.copy()
         return self._memories[-limit:]
     
     def get_recent(self, limit: int = 5) -> List[Dict[str, Any]]:

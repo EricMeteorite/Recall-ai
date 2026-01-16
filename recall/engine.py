@@ -387,13 +387,13 @@ class RecallEngine:
     def get_all(
         self,
         user_id: str = "default",
-        limit: int = 100
+        limit: int = None
     ) -> List[Dict[str, Any]]:
         """获取所有记忆
         
         Args:
             user_id: 用户ID
-            limit: 限制数量
+            limit: 限制数量，None表示返回全部
         
         Returns:
             List[Dict]: 记忆列表
