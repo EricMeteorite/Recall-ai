@@ -2,59 +2,94 @@
  * Recall Memory Plugin for SillyTavern
  * 
  * 为 SillyTavern 提供智能记忆管理功能。
+ * 
+ * 安全说明：
+ * - 此插件完全独立运行，不修改 SillyTavern 核心代码
+ * - 所有错误都被捕获，不会影响 ST 正常运行
+ * - 删除 recall-memory 文件夹即可完全卸载
  */
 
-// 插件配置
-const defaultSettings = {
-    enabled: true,
-    apiUrl: 'http://127.0.0.1:18888',
-    autoInject: true,
-    maxMemories: 10,
-    injectPosition: 'before_system',  // before_system, after_system, before_chat
-    showPanel: true,
-    language: 'zh-CN'
-};
+// 使用 IIFE 避免污染全局命名空间
+(function() {
+    'use strict';
+    
+    // 插件配置
+    const defaultSettings = {
+        enabled: true,
+        apiUrl: 'http://127.0.0.1:18888',
+        autoInject: true,
+        maxMemories: 10,
+        injectPosition: 'before_system',
+        showPanel: true,
+        language: 'zh-CN'
+    };
 
-// 插件状态
-let pluginSettings = { ...defaultSettings };
-let isConnected = false;
-let currentCharacterId = null;
+    // 插件状态
+    let pluginSettings = { ...defaultSettings };
+    let isConnected = false;
+    let currentCharacterId = null;
+    let isInitialized = false;
 
-/**
- * 初始化插件
- */
-jQuery(async () => {
-    console.log('[Recall] 插件初始化...');
-    
-    // 等待 SillyTavern 完全加载
-    const context = SillyTavern.getContext();
-    
-    // 加载设置
-    loadSettings();
-    
-    // 创建UI
-    createUI();
-    
-    // 注册事件监听
-    registerEventHandlers(context);
-    
-    // 检查连接
-    await checkConnection();
-    
-    console.log('[Recall] 插件初始化完成');
-});
+    /**
+     * 安全执行函数 - 捕获所有错误，不影响 ST
+     */
+    function safeExecute(fn, errorMsg = 'Recall 插件错误') {
+        return async function(...args) {
+            try {
+                return await fn.apply(this, args);
+            } catch (e) {
+                console.warn(`[Recall] ${errorMsg}:`, e.message);
+                return null;
+            }
+        };
+    }
+
+    /**
+     * 初始化插件
+     */
+    jQuery(async () => {
+        try {
+            console.log('[Recall] 插件初始化...');
+            
+            // 检查 SillyTavern 是否就绪
+            if (typeof SillyTavern === 'undefined' || !SillyTavern.getContext) {
+                console.warn('[Recall] SillyTavern 未就绪，插件将不会加载');
+                return;
+            }
+            
+            const context = SillyTavern.getContext();
+            
+            // 加载设置
+            loadSettings();
+            
+            // 创建UI（安全模式）
+            safeCreateUI();
+            
+            // 注册事件监听（安全模式）
+            safeRegisterEventHandlers(context);
+            
+            // 检查连接（不阻塞）
+            checkConnection().catch(() => {});
+            
+            isInitialized = true;
+            console.log('[Recall] 插件初始化完成');
+        } catch (e) {
+            console.error('[Recall] 插件初始化失败，但不影响 SillyTavern:', e.message);
+        }
+    });
 
 /**
  * 加载设置
  */
 function loadSettings() {
-    const saved = localStorage.getItem('recall_settings');
-    if (saved) {
-        try {
+    try {
+        const saved = localStorage.getItem('recall_settings');
+        if (saved) {
             pluginSettings = { ...defaultSettings, ...JSON.parse(saved) };
-        } catch (e) {
-            console.error('[Recall] 加载设置失败:', e);
         }
+    } catch (e) {
+        console.warn('[Recall] 加载设置失败，使用默认值:', e.message);
+        pluginSettings = { ...defaultSettings };
     }
 }
 
@@ -62,7 +97,22 @@ function loadSettings() {
  * 保存设置
  */
 function saveSettings() {
-    localStorage.setItem('recall_settings', JSON.stringify(pluginSettings));
+    try {
+        localStorage.setItem('recall_settings', JSON.stringify(pluginSettings));
+    } catch (e) {
+        console.warn('[Recall] 保存设置失败:', e.message);
+    }
+}
+
+/**
+ * 安全创建 UI
+ */
+function safeCreateUI() {
+    try {
+        createUI();
+    } catch (e) {
+        console.warn('[Recall] 创建 UI 失败，插件功能受限:', e.message);
+    }
 }
 
 /**
@@ -147,12 +197,23 @@ function createUI() {
         sidebar.insertAdjacentHTML('beforeend', memoryPanelHtml + foreshadowingPanelHtml);
     }
     
-    // 绑定事件
-    document.getElementById('recall-save-settings')?.addEventListener('click', onSaveSettings);
-    document.getElementById('recall-test-connection')?.addEventListener('click', onTestConnection);
-    document.getElementById('recall-search-btn')?.addEventListener('click', onSearch);
-    document.getElementById('recall-add-btn')?.addEventListener('click', onAddMemory);
-    document.getElementById('recall-foreshadowing-btn')?.addEventListener('click', onPlantForeshadowing);
+    // 绑定事件（使用安全包装）
+    document.getElementById('recall-save-settings')?.addEventListener('click', safeExecute(onSaveSettings, '保存设置失败'));
+    document.getElementById('recall-test-connection')?.addEventListener('click', safeExecute(onTestConnection, '测试连接失败'));
+    document.getElementById('recall-search-btn')?.addEventListener('click', safeExecute(onSearch, '搜索失败'));
+    document.getElementById('recall-add-btn')?.addEventListener('click', safeExecute(onAddMemory, '添加记忆失败'));
+    document.getElementById('recall-foreshadowing-btn')?.addEventListener('click', safeExecute(onPlantForeshadowing, '埋下伏笔失败'));
+}
+
+/**
+ * 安全注册事件处理器
+ */
+function safeRegisterEventHandlers(context) {
+    try {
+        registerEventHandlers(context);
+    } catch (e) {
+        console.warn('[Recall] 注册事件失败，自动记忆功能不可用:', e.message);
+    }
 }
 
 /**
@@ -162,21 +223,15 @@ function registerEventHandlers(context) {
     const { eventSource, event_types } = context;
     
     if (eventSource && event_types) {
-        // 监听用户消息发送
-        eventSource.on(event_types.MESSAGE_SENT, onMessageSent);
-        
-        // 监听AI响应
-        eventSource.on(event_types.MESSAGE_RECEIVED, onMessageReceived);
-        
-        // 监听聊天切换（角色/群组切换时触发）
-        eventSource.on(event_types.CHAT_CHANGED, onChatChanged);
-        
-        // 监听生成前 - 用于注入记忆上下文
-        eventSource.on(event_types.GENERATION_AFTER_COMMANDS, onBeforeGeneration);
+        // 使用安全包装的事件处理器
+        eventSource.on(event_types.MESSAGE_SENT, safeExecute(onMessageSent, '处理发送消息失败'));
+        eventSource.on(event_types.MESSAGE_RECEIVED, safeExecute(onMessageReceived, '处理接收消息失败'));
+        eventSource.on(event_types.CHAT_CHANGED, safeExecute(onChatChanged, '处理聊天切换失败'));
+        eventSource.on(event_types.GENERATION_AFTER_COMMANDS, safeExecute(onBeforeGeneration, '准备记忆上下文失败'));
         
         console.log('[Recall] 事件监听器已注册');
     } else {
-        console.warn('[Recall] SillyTavern 事件系统不可用');
+        console.warn('[Recall] SillyTavern 事件系统不可用，自动记忆功能将不可用');
     }
 }
 
@@ -563,16 +618,20 @@ async function getMemoryContext(query) {
  * HTML 转义
  */
 function escapeHtml(text) {
+    if (!text) return '';
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
 }
 
-// 导出供 SillyTavern 使用
+// 导出供外部使用（安全方式）
 window.RecallPlugin = {
-    getMemoryContext,
-    loadMemories,
-    loadForeshadowings,
+    getMemoryContext: safeExecute(getMemoryContext, '获取记忆上下文失败'),
+    loadMemories: safeExecute(loadMemories, '加载记忆失败'),
+    loadForeshadowings: safeExecute(loadForeshadowings, '加载伏笔失败'),
     isConnected: () => isConnected,
-    settings: pluginSettings
+    isInitialized: () => isInitialized,
+    getSettings: () => ({ ...pluginSettings })
 };
+
+})(); // IIFE 结束
