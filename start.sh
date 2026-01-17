@@ -1,114 +1,353 @@
 #!/bin/bash
 # 
-# Recall AI - Linux/Mac 一键启动脚本
+# Recall AI - Linux/Mac 启动脚本 v2.0
 # 
-# 使用方法: 
+# 用法: 
 #   前台运行: ./start.sh
-#   后台运行: ./start.sh --daemon
-#   停止服务: ./start.sh --stop
+#   后台运行: ./start.sh --daemon 或 ./start.sh -d
+#   停止服务: ./start.sh --stop 或 ./start.sh stop
+#   查看状态: ./start.sh --status 或 ./start.sh status
+#   查看日志: ./start.sh --logs 或 ./start.sh logs
 #
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PID_FILE="$SCRIPT_DIR/recall.pid"
-LOG_FILE="$SCRIPT_DIR/recall_data/logs/recall.log"
+set -e
 
-# ========================================
-# 自动修复权限
-# ========================================
+# ==================== 颜色定义 ====================
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+BOLD='\033[1m'
+
+# ==================== 全局变量 ====================
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+VENV_PATH="$SCRIPT_DIR/recall-env"
+DATA_PATH="$SCRIPT_DIR/recall_data"
+PID_FILE="$SCRIPT_DIR/recall.pid"
+LOG_FILE="$DATA_PATH/logs/recall.log"
+
+# 配置
+HOST="${RECALL_HOST:-0.0.0.0}"
+PORT="${RECALL_PORT:-18888}"
+
+# ==================== 工具函数 ====================
+
+print_header() {
+    echo ""
+    echo -e "${CYAN}╔════════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}║${NC}         ${BOLD}Recall AI v3.0.0${NC}                  ${CYAN}║${NC}"
+    echo -e "${CYAN}╚════════════════════════════════════════════╝${NC}"
+    echo ""
+}
+
+print_success() {
+    echo -e "  ${GREEN}✓${NC} $1"
+}
+
+print_error() {
+    echo -e "  ${RED}✗${NC} $1"
+}
+
+print_warning() {
+    echo -e "  ${YELLOW}!${NC} $1"
+}
+
+print_info() {
+    echo -e "  ${CYAN}→${NC} $1"
+}
+
+# ==================== 权限修复 ====================
+
 fix_permissions() {
     local CURRENT_USER=$(whoami)
     local DIR_OWNER=$(stat -c '%U' "$SCRIPT_DIR" 2>/dev/null || stat -f '%Su' "$SCRIPT_DIR" 2>/dev/null)
     
     if [ "$CURRENT_USER" != "root" ] && [ "$DIR_OWNER" = "root" ]; then
-        echo "[!] 检测到目录属于 root，当前用户是 $CURRENT_USER"
-        echo "    自动修复权限中..."
-        
+        echo -e "${YELLOW}检测到权限问题，正在修复...${NC}"
         if command -v sudo &> /dev/null; then
             sudo chown -R "$CURRENT_USER:$CURRENT_USER" "$SCRIPT_DIR"
-            echo "    权限修复成功！"
-            echo ""
+            print_success "权限修复成功"
         else
-            echo "错误: 目录属于 root 且无法使用 sudo"
-            echo "请手动执行: sudo chown -R $CURRENT_USER:$CURRENT_USER $SCRIPT_DIR"
+            print_error "无法修复权限，请运行: sudo chown -R $CURRENT_USER:$CURRENT_USER $SCRIPT_DIR"
             exit 1
         fi
     fi
 }
 
-# 先检查权限（停止操作除外）
-if [ "$1" != "--stop" ]; then
-    fix_permissions
-fi
+# ==================== 检查安装 ====================
 
-echo ""
-echo "========================================"
-echo "         Recall AI v3.0.0              "
-echo "========================================"
-echo ""
+check_install() {
+    if [ ! -d "$VENV_PATH" ]; then
+        print_error "Recall 未安装"
+        echo ""
+        echo -e "  请先运行安装: ${CYAN}./install.sh${NC}"
+        exit 1
+    fi
+    
+    if [ ! -f "$VENV_PATH/bin/recall" ]; then
+        print_error "安装不完整"
+        echo ""
+        echo -e "  请重新安装: ${CYAN}./install.sh --repair${NC}"
+        exit 1
+    fi
+}
 
-VENV_PATH="$SCRIPT_DIR/recall-env"
+# ==================== 获取进程状态 ====================
 
-if [ ! -d "$VENV_PATH" ]; then
-    echo "错误: 请先运行 ./install.sh 安装"
-    exit 1
-fi
-
-# 停止服务
-if [ "$1" == "--stop" ]; then
+get_pid() {
     if [ -f "$PID_FILE" ]; then
-        PID=$(cat "$PID_FILE")
-        if kill -0 "$PID" 2>/dev/null; then
-            echo "停止 Recall 服务 (PID: $PID)..."
-            kill "$PID"
+        cat "$PID_FILE"
+    else
+        echo ""
+    fi
+}
+
+is_running() {
+    local pid=$(get_pid)
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# ==================== 停止服务 ====================
+
+do_stop() {
+    print_header
+    echo -e "${BOLD}停止服务${NC}"
+    echo ""
+    
+    if [ -f "$PID_FILE" ]; then
+        local pid=$(cat "$PID_FILE")
+        if kill -0 "$pid" 2>/dev/null; then
+            print_info "正在停止 Recall 服务 (PID: $pid)..."
+            kill "$pid"
+            
+            # 等待进程退出
+            local count=0
+            while kill -0 "$pid" 2>/dev/null && [ $count -lt 10 ]; do
+                sleep 0.5
+                count=$((count + 1))
+            done
+            
+            if kill -0 "$pid" 2>/dev/null; then
+                print_warning "进程未响应，强制终止..."
+                kill -9 "$pid" 2>/dev/null
+            fi
+            
             rm -f "$PID_FILE"
-            echo "已停止"
+            print_success "服务已停止"
         else
-            echo "服务未运行"
             rm -f "$PID_FILE"
+            print_warning "服务未运行 (已清理残留PID文件)"
         fi
     else
-        echo "服务未运行"
+        print_warning "服务未运行"
     fi
-    exit 0
-fi
+}
 
-# 检查是否已运行
-if [ -f "$PID_FILE" ]; then
-    PID=$(cat "$PID_FILE")
-    if kill -0 "$PID" 2>/dev/null; then
-        echo "Recall 服务已在运行 (PID: $PID)"
-        echo "使用 ./start.sh --stop 停止服务"
+# ==================== 查看状态 ====================
+
+do_status() {
+    print_header
+    echo -e "${BOLD}📊 服务状态${NC}"
+    echo ""
+    
+    # 服务状态
+    if is_running; then
+        local pid=$(get_pid)
+        print_success "服务状态: ${GREEN}运行中${NC} (PID: $pid)"
+        
+        # 内存使用
+        if command -v ps &> /dev/null; then
+            local mem=$(ps -o rss= -p $pid 2>/dev/null | awk '{print int($1/1024)"MB"}')
+            print_info "内存使用: $mem"
+        fi
+        
+        # 运行时间
+        if command -v ps &> /dev/null; then
+            local uptime=$(ps -o etime= -p $pid 2>/dev/null | xargs)
+            print_info "运行时间: $uptime"
+        fi
+    else
+        print_error "服务状态: ${RED}未运行${NC}"
+    fi
+    
+    echo ""
+    
+    # API 检查
+    echo -e "${BOLD}🌐 API 状态${NC}"
+    echo ""
+    if command -v curl &> /dev/null; then
+        local response=$(curl -s --connect-timeout 2 "http://localhost:$PORT/" 2>/dev/null)
+        if [ -n "$response" ]; then
+            print_success "API 地址: http://localhost:$PORT"
+            print_success "API 响应: 正常"
+            local ver=$(echo "$response" | grep -oP '"version"\s*:\s*"\K[^"]+' 2>/dev/null || echo "未知")
+            print_info "版本: $ver"
+        else
+            print_error "API 响应: 无法连接"
+        fi
+    else
+        print_warning "无法检查 API (curl 未安装)"
+    fi
+    
+    echo ""
+    
+    # 日志
+    if [ -f "$LOG_FILE" ]; then
+        local log_size=$(du -h "$LOG_FILE" 2>/dev/null | cut -f1)
+        print_info "日志文件: $LOG_FILE ($log_size)"
+    fi
+}
+
+# ==================== 查看日志 ====================
+
+do_logs() {
+    print_header
+    
+    if [ ! -f "$LOG_FILE" ]; then
+        print_warning "日志文件不存在"
+        exit 0
+    fi
+    
+    echo -e "${BOLD}📄 最近日志 (按 Ctrl+C 退出)${NC}"
+    echo ""
+    
+    # 显示最后 50 行，然后实时跟踪
+    tail -n 50 -f "$LOG_FILE"
+}
+
+# ==================== 启动服务 ====================
+
+do_start() {
+    local daemon_mode=$1
+    
+    print_header
+    
+    # 检查权限
+    fix_permissions
+    
+    # 检查安装
+    check_install
+    
+    # 检查是否已运行
+    if is_running; then
+        local pid=$(get_pid)
+        print_warning "服务已在运行 (PID: $pid)"
+        echo ""
+        echo -e "  停止服务: ${CYAN}./start.sh --stop${NC}"
+        echo -e "  查看状态: ${CYAN}./start.sh --status${NC}"
         exit 1
     fi
-fi
-
-source "$VENV_PATH/bin/activate"
-
-HOST="${RECALL_HOST:-0.0.0.0}"
-PORT="${RECALL_PORT:-18888}"
-
-echo "API 地址: http://$HOST:$PORT"
-echo "API 文档: http://$HOST:$PORT/docs"
-echo ""
-
-# 后台运行
-if [ "$1" == "--daemon" ] || [ "$1" == "-d" ]; then
-    echo "后台启动中..."
+    
+    # 激活虚拟环境
+    source "$VENV_PATH/bin/activate"
+    
     # 确保日志目录存在
     mkdir -p "$(dirname "$LOG_FILE")"
-    nohup recall serve --host "$HOST" --port "$PORT" > "$LOG_FILE" 2>&1 &
-    echo $! > "$PID_FILE"
-    sleep 2
-    if kill -0 $(cat "$PID_FILE") 2>/dev/null; then
-        echo "启动成功! PID: $(cat $PID_FILE)"
-        echo "日志文件: $LOG_FILE"
-        echo "停止命令: ./start.sh --stop"
-    else
-        echo "启动失败，请查看日志: $LOG_FILE"
-        exit 1
-    fi
-else
-    echo "前台运行模式，按 Ctrl+C 停止服务"
+    
+    echo -e "${BOLD}启动配置${NC}"
     echo ""
-    recall serve --host "$HOST" --port "$PORT"
-fi
+    print_info "监听地址: $HOST:$PORT"
+    print_info "API 文档: http://localhost:$PORT/docs"
+    echo ""
+    
+    if [ "$daemon_mode" = true ]; then
+        # 后台运行
+        echo -e "${BOLD}🚀 后台启动${NC}"
+        echo ""
+        
+        nohup recall serve --host "$HOST" --port "$PORT" > "$LOG_FILE" 2>&1 &
+        local pid=$!
+        echo $pid > "$PID_FILE"
+        
+        # 等待启动
+        print_info "启动中..."
+        sleep 2
+        
+        if kill -0 $pid 2>/dev/null; then
+            print_success "启动成功！"
+            echo ""
+            print_info "PID: $pid"
+            print_info "日志: $LOG_FILE"
+            echo ""
+            echo -e "  查看日志: ${CYAN}./start.sh --logs${NC}"
+            echo -e "  查看状态: ${CYAN}./start.sh --status${NC}"
+            echo -e "  停止服务: ${CYAN}./start.sh --stop${NC}"
+        else
+            print_error "启动失败！"
+            rm -f "$PID_FILE"
+            echo ""
+            echo "查看日志获取详细错误:"
+            echo -e "  ${CYAN}cat $LOG_FILE${NC}"
+            exit 1
+        fi
+    else
+        # 前台运行
+        echo -e "${BOLD}🚀 前台运行 (按 Ctrl+C 停止)${NC}"
+        echo ""
+        
+        recall serve --host "$HOST" --port "$PORT"
+    fi
+}
+
+# ==================== 显示帮助 ====================
+
+do_help() {
+    print_header
+    echo "用法: ./start.sh [命令] [选项]"
+    echo ""
+    echo "命令:"
+    echo "  (无参数)        前台运行服务"
+    echo "  -d, --daemon    后台运行服务"
+    echo "  stop, --stop    停止服务"
+    echo "  status, --status 查看服务状态"
+    echo "  logs, --logs    查看实时日志"
+    echo "  -h, --help      显示帮助"
+    echo ""
+    echo "环境变量:"
+    echo "  RECALL_HOST     监听地址 (默认: 0.0.0.0)"
+    echo "  RECALL_PORT     监听端口 (默认: 18888)"
+    echo ""
+    echo "示例:"
+    echo "  ./start.sh              # 前台运行"
+    echo "  ./start.sh -d           # 后台运行"
+    echo "  ./start.sh stop         # 停止服务"
+    echo "  RECALL_PORT=9000 ./start.sh -d  # 指定端口"
+    echo ""
+}
+
+# ==================== 主入口 ====================
+
+cd "$SCRIPT_DIR"
+
+case "${1:-}" in
+    -d|--daemon)
+        do_start true
+        ;;
+    stop|--stop|-stop)
+        do_stop
+        ;;
+    status|--status|-status|-s)
+        do_status
+        ;;
+    logs|--logs|-logs|-l)
+        do_logs
+        ;;
+    -h|--help|help)
+        do_help
+        ;;
+    "")
+        do_start false
+        ;;
+    *)
+        echo "未知命令: $1"
+        echo ""
+        do_help
+        exit 1
+        ;;
+esac

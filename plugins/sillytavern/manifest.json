@@ -11,7 +11,7 @@
     "homePage": "https://github.com/your-repo/recall-ai",
     "auto_update": false,
     "i18n": {
-        "zh-cn": "i18n/zh-CN.json",
+        "zh-CN": "i18n/zh-CN.json",
         "en": "i18n/en.json"
     }
 }
