@@ -23,15 +23,13 @@ chmod +x install.sh && ./install.sh
 ### 方式二：服务器部署（Ubuntu/Debian）
 
 ```bash
-# 一键部署
+# 部署到服务器
 git clone https://github.com/your-repo/recall-ai.git
 cd recall-ai
-chmod +x deploy.sh && ./deploy.sh
-
-# 或者手动：
-chmod +x install.sh && ./install.sh
-./start.sh --daemon   # 后台运行
-./start.sh --stop     # 停止服务
+chmod +x install.sh start.sh
+./install.sh            # 安装（自动修复权限）
+./start.sh --daemon     # 后台运行
+./start.sh --stop       # 停止服务
 ```
 
 服务启动后访问: http://YOUR_IP:18888/docs
@@ -55,18 +53,21 @@ chmod +x install.sh && ./install.sh
 
 ### 安装 SillyTavern 插件
 
-**方法 1：手动复制**
-```bash
-# 复制插件到 SillyTavern 扩展目录
-cp -r plugins/sillytavern /path/to/SillyTavern/data/<用户名>/extensions/third-party/recall-memory
-
-# 重启 SillyTavern
-```
-
-**方法 2：使用安装脚本**
+**方法 1：使用安装脚本（推荐）**
 ```bash
 cd plugins/sillytavern
-./install.sh  # 按提示输入 SillyTavern 路径
+./install.sh  # 自动检测 ST 版本，按提示输入路径
+```
+
+**方法 2：手动复制**
+```bash
+# 新版 SillyTavern (1.12+) - 直接放在 extensions 下
+cp -r plugins/sillytavern /path/to/SillyTavern/data/default-user/extensions/recall-memory
+
+# 旧版 SillyTavern - 放在 third-party 下
+cp -r plugins/sillytavern /path/to/SillyTavern/public/scripts/extensions/third-party/recall-memory
+
+# 重启 SillyTavern
 ```
 
 ### 配置插件

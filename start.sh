@@ -94,6 +94,8 @@ echo ""
 # 后台运行
 if [ "$1" == "--daemon" ] || [ "$1" == "-d" ]; then
     echo "后台启动中..."
+    # 确保日志目录存在
+    mkdir -p "$(dirname "$LOG_FILE")"
     nohup recall serve --host "$HOST" --port "$PORT" > "$LOG_FILE" 2>&1 &
     echo $! > "$PID_FILE"
     sleep 2

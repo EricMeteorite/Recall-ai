@@ -30,8 +30,15 @@ $commonPaths = @(
 # 尝试自动检测
 $detectedPath = $null
 foreach ($path in $commonPaths) {
-    $checkPath = Join-Path $path "public\scripts\extensions"
-    if (Test-Path $checkPath) {
+    # 优先检测新版 SillyTavern (1.12+)
+    $newPath = Join-Path $path "data\default-user\extensions"
+    if (Test-Path $newPath) {
+        $detectedPath = $path
+        break
+    }
+    # 其次检测旧版 SillyTavern
+    $oldPath = Join-Path $path "public\scripts\extensions"
+    if (Test-Path $oldPath) {
         $detectedPath = $path
         break
     }
@@ -60,13 +67,28 @@ if ([string]::IsNullOrWhiteSpace($inputPath)) {
     $stPath = $inputPath.Trim('"').Trim("'")
 }
 
-# 验证路径
-$extensionsPath = Join-Path $stPath "public\scripts\extensions\third-party"
+# 验证路径并确定扩展目录
+$newStylePath = Join-Path $stPath "data\default-user\extensions"
+$oldStylePath = Join-Path $stPath "public\scripts\extensions\third-party"
+$oldStyleBase = Join-Path $stPath "public\scripts\extensions"
 
-if (-not (Test-Path (Join-Path $stPath "public\scripts\extensions"))) {
+if (Test-Path $newStylePath) {
+    # 新版 SillyTavern (1.12+) - 直接放在 extensions/ 下
+    $extensionsPath = $newStylePath
+    Write-Host "检测到新版 SillyTavern (data/default-user/extensions)" -ForegroundColor Gray
+} elseif (Test-Path $oldStylePath) {
+    # 旧版 SillyTavern - 放在 third-party/ 下
+    $extensionsPath = $oldStylePath
+    Write-Host "检测到旧版 SillyTavern (public/scripts/extensions/third-party)" -ForegroundColor Gray
+} elseif (Test-Path $oldStyleBase) {
+    # 旧版但没有 third-party 目录
+    $extensionsPath = $oldStylePath
+    Write-Host "检测到旧版 SillyTavern，创建 third-party 目录" -ForegroundColor Gray
+    New-Item -ItemType Directory -Path $extensionsPath -Force | Out-Null
+} else {
     Write-Host ""
     Write-Host "错误: 这不是有效的 SillyTavern 目录" -ForegroundColor Red
-    Write-Host "请确认路径包含 public\scripts\extensions 文件夹" -ForegroundColor Gray
+    Write-Host "请确认路径是 SillyTavern 的根目录" -ForegroundColor Gray
     Read-Host "按 Enter 退出"
     exit 1
 }

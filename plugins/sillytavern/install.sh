@@ -19,11 +19,18 @@ COMMON_PATHS=(
     "$HOME/Documents/SillyTavern"
     "$HOME/Desktop/SillyTavern"
     "/opt/SillyTavern"
+    "/home/ProgramFiles/SillyTavern"
 )
 
 # 尝试自动检测
 DETECTED_PATH=""
 for path in "${COMMON_PATHS[@]}"; do
+    # 优先检测新版 SillyTavern (1.12+)
+    if [ -d "$path/data/default-user/extensions" ]; then
+        DETECTED_PATH="$path"
+        break
+    fi
+    # 其次检测旧版 SillyTavern
     if [ -d "$path/public/scripts/extensions" ]; then
         DETECTED_PATH="$path"
         break
@@ -53,18 +60,26 @@ else
     ST_PATH="${INPUT_PATH/#\~/$HOME}"
 fi
 
-# 验证路径
-EXTENSIONS_PATH="$ST_PATH/public/scripts/extensions/third-party"
-
-if [ ! -d "$ST_PATH/public/scripts/extensions" ]; then
+# 验证路径并确定扩展目录
+if [ -d "$ST_PATH/data/default-user/extensions" ]; then
+    # 新版 SillyTavern (1.12+) - 直接放在 extensions/ 下
+    EXTENSIONS_PATH="$ST_PATH/data/default-user/extensions"
+    echo "检测到新版 SillyTavern (data/default-user/extensions)"
+elif [ -d "$ST_PATH/public/scripts/extensions/third-party" ]; then
+    # 旧版 SillyTavern - 放在 third-party/ 下
+    EXTENSIONS_PATH="$ST_PATH/public/scripts/extensions/third-party"
+    echo "检测到旧版 SillyTavern (public/scripts/extensions/third-party)"
+elif [ -d "$ST_PATH/public/scripts/extensions" ]; then
+    # 旧版但没有 third-party 目录
+    EXTENSIONS_PATH="$ST_PATH/public/scripts/extensions/third-party"
+    echo "检测到旧版 SillyTavern，创建 third-party 目录"
+    mkdir -p "$EXTENSIONS_PATH"
+else
     echo ""
     echo "错误: 这不是有效的 SillyTavern 目录"
-    echo "请确认路径包含 public/scripts/extensions 文件夹"
+    echo "请确认路径是 SillyTavern 的根目录"
     exit 1
 fi
-
-# 创建目录
-mkdir -p "$EXTENSIONS_PATH"
 
 # 目标路径
 TARGET_PATH="$EXTENSIONS_PATH/recall-memory"
