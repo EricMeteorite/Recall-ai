@@ -21,8 +21,59 @@
         maxMemories: 10,
         injectPosition: 'before_system',
         showPanel: true,
-        language: 'zh-CN'
+        language: 'zh-CN',
+        filterThinking: true,  // 过滤AI思考过程
+        previewLength: 200,    // 记忆预览字数
+        autoChunkLongText: true,  // 自动分段长文本
+        chunkSize: 2000        // 分段大小（字符数）
     };
+    
+    /**
+     * 过滤掉AI回复中的思考过程
+     * 支持多种常见格式：<thinking>, <thought>, <reasoning>, 【思考】等
+     */
+    function filterThinkingContent(text) {
+        if (!text) return text;
+        
+        let filtered = text;
+        
+        // 过滤 XML 风格的思考标签
+        const xmlPatterns = [
+            /<thinking>[\s\S]*?<\/thinking>/gi,
+            /<thought>[\s\S]*?<\/thought>/gi,
+            /<reasoning>[\s\S]*?<\/reasoning>/gi,
+            /<think>[\s\S]*?<\/think>/gi,
+            /<reflection>[\s\S]*?<\/reflection>/gi,
+            /<inner_thought>[\s\S]*?<\/inner_thought>/gi,
+            /<internal>[\s\S]*?<\/internal>/gi,
+        ];
+        
+        // 过滤中文风格的思考标记
+        const chinesePatterns = [
+            /【思考】[\s\S]*?【\/思考】/g,
+            /【思考过程】[\s\S]*?【\/思考过程】/g,
+            /\[思考\][\s\S]*?\[\/思考\]/g,
+            /（思考：[\s\S]*?）/g,
+            /\(思考：[\s\S]*?\)/g,
+        ];
+        
+        // 过滤代码块中的思考（某些模型会这样输出）
+        const codeBlockPatterns = [
+            /```thinking[\s\S]*?```/gi,
+            /```thought[\s\S]*?```/gi,
+        ];
+        
+        const allPatterns = [...xmlPatterns, ...chinesePatterns, ...codeBlockPatterns];
+        
+        for (const pattern of allPatterns) {
+            filtered = filtered.replace(pattern, '');
+        }
+        
+        // 清理多余的空行
+        filtered = filtered.replace(/\n{3,}/g, '\n\n').trim();
+        
+        return filtered;
+    }
 
     // 插件状态
     let pluginSettings = { ...defaultSettings };
@@ -225,6 +276,35 @@ function createUI() {
                     </div>
                     
                     <div class="recall-setting-group">
+                        <label class="recall-setting-label">
+                            <input type="checkbox" id="recall-filter-thinking" ${pluginSettings.filterThinking ? 'checked' : ''}>
+                            <span>过滤AI思考过程</span>
+                        </label>
+                        <div class="recall-setting-hint">只保存AI的最终回复，不保存&lt;thinking&gt;等思考内容</div>
+                    </div>
+                    
+                    <div class="recall-setting-group">
+                        <label class="recall-setting-label">
+                            <input type="checkbox" id="recall-auto-chunk" ${pluginSettings.autoChunkLongText ? 'checked' : ''}>
+                            <span>长文本自动分段</span>
+                        </label>
+                        <div class="recall-setting-hint">超长回复(>${pluginSettings.chunkSize || 2000}字)自动分成多条记忆保存</div>
+                    </div>
+                    
+                    <div class="recall-setting-group">
+                        <label class="recall-setting-title">分段大小 (字符数)</label>
+                        <input type="number" id="recall-chunk-size" value="${pluginSettings.chunkSize || 2000}" 
+                               min="500" max="10000" step="500" class="text_pole">
+                    </div>
+                    
+                    <div class="recall-setting-group">
+                        <label class="recall-setting-title">预览字数</label>
+                        <input type="number" id="recall-preview-length" value="${pluginSettings.previewLength || 200}" 
+                               min="50" max="500" step="50" class="text_pole">
+                        <div class="recall-setting-hint">记忆列表中显示的文字数量，可展开查看全文</div>
+                    </div>
+                    
+                    <div class="recall-setting-group">
                         <label class="recall-setting-title">最大注入记忆数</label>
                         <input type="number" id="recall-max-memories" value="${pluginSettings.maxMemories}" 
                                min="1" max="50" class="text_pole">
@@ -247,6 +327,7 @@ function createUI() {
                             <li>确保 Recall 服务已启动</li>
                             <li>切换角色会自动加载对应记忆</li>
                             <li>记忆会随对话自动积累</li>
+                            <li>长文本会自动分段，确保完整分析</li>
                         </ul>
                     </div>
                 </div>
@@ -383,6 +464,10 @@ function onSaveSettings() {
     pluginSettings.enabled = document.getElementById('recall-enabled')?.checked ?? true;
     pluginSettings.apiUrl = document.getElementById('recall-api-url')?.value ?? defaultSettings.apiUrl;
     pluginSettings.autoInject = document.getElementById('recall-auto-inject')?.checked ?? true;
+    pluginSettings.filterThinking = document.getElementById('recall-filter-thinking')?.checked ?? true;
+    pluginSettings.autoChunkLongText = document.getElementById('recall-auto-chunk')?.checked ?? true;
+    pluginSettings.chunkSize = parseInt(document.getElementById('recall-chunk-size')?.value) || 2000;
+    pluginSettings.previewLength = parseInt(document.getElementById('recall-preview-length')?.value) || 200;
     pluginSettings.maxMemories = parseInt(document.getElementById('recall-max-memories')?.value) || 10;
     
     saveSettings();
@@ -512,6 +597,61 @@ async function onMessageSent(messageIndex) {
 }
 
 /**
+ * 智能分段长文本
+ * 在段落、句号处分割，避免断在句子中间
+ */
+function chunkLongText(text, maxSize = 2000) {
+    if (text.length <= maxSize) return [text];
+    
+    const chunks = [];
+    let remaining = text;
+    
+    while (remaining.length > 0) {
+        if (remaining.length <= maxSize) {
+            chunks.push(remaining);
+            break;
+        }
+        
+        // 查找分割点（优先级：段落 > 句号 > 逗号 > 强制）
+        let splitPoint = maxSize;
+        
+        // 1. 尝试在段落处分割
+        const paragraphBreak = remaining.lastIndexOf('\n\n', maxSize);
+        if (paragraphBreak > maxSize * 0.5) {
+            splitPoint = paragraphBreak + 2;
+        } else {
+            // 2. 尝试在句号处分割
+            const sentenceEnd = Math.max(
+                remaining.lastIndexOf('。', maxSize),
+                remaining.lastIndexOf('！', maxSize),
+                remaining.lastIndexOf('？', maxSize),
+                remaining.lastIndexOf('. ', maxSize),
+                remaining.lastIndexOf('! ', maxSize),
+                remaining.lastIndexOf('? ', maxSize)
+            );
+            if (sentenceEnd > maxSize * 0.5) {
+                splitPoint = sentenceEnd + 1;
+            } else {
+                // 3. 尝试在逗号处分割
+                const commaBreak = Math.max(
+                    remaining.lastIndexOf('，', maxSize),
+                    remaining.lastIndexOf(', ', maxSize)
+                );
+                if (commaBreak > maxSize * 0.7) {
+                    splitPoint = commaBreak + 1;
+                }
+                // 4. 否则强制在 maxSize 处分割
+            }
+        }
+        
+        chunks.push(remaining.substring(0, splitPoint).trim());
+        remaining = remaining.substring(splitPoint).trim();
+    }
+    
+    return chunks;
+}
+
+/**
  * 消息接收时
  */
 async function onMessageReceived(messageIndex) {
@@ -524,22 +664,59 @@ async function onMessageReceived(messageIndex) {
         
         if (!message || !message.mes) return;
         
-        // 保存AI响应作为记忆
-        await fetch(`${pluginSettings.apiUrl}/v1/memories`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                content: message.mes,
-                user_id: currentCharacterId || 'default',
-                metadata: { 
-                    role: 'assistant', 
-                    source: 'sillytavern',
-                    character: message.name || 'AI',
-                    timestamp: Date.now()
-                }
-            })
-        });
-        console.log('[Recall] 已保存AI响应');
+        // 过滤掉思考过程，只保留最终结果
+        let contentToSave = message.mes;
+        if (pluginSettings.filterThinking) {
+            contentToSave = filterThinkingContent(message.mes);
+            if (contentToSave !== message.mes) {
+                console.log('[Recall] 已过滤AI思考过程');
+            }
+        }
+        
+        // 如果过滤后内容为空，则跳过保存
+        if (!contentToSave || contentToSave.trim().length === 0) {
+            console.log('[Recall] 过滤后内容为空，跳过保存');
+            return;
+        }
+        
+        // 长文本分段处理
+        const chunkSize = pluginSettings.chunkSize || 2000;
+        const shouldChunk = pluginSettings.autoChunkLongText && contentToSave.length > chunkSize;
+        const chunks = shouldChunk ? chunkLongText(contentToSave, chunkSize) : [contentToSave];
+        
+        if (chunks.length > 1) {
+            console.log(`[Recall] 长文本(${contentToSave.length}字)分成${chunks.length}段保存`);
+        }
+        
+        // 保存所有分段
+        const timestamp = Date.now();
+        for (let i = 0; i < chunks.length; i++) {
+            const chunk = chunks[i];
+            const isMultiPart = chunks.length > 1;
+            
+            await fetch(`${pluginSettings.apiUrl}/v1/memories`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    content: chunk,
+                    user_id: currentCharacterId || 'default',
+                    metadata: { 
+                        role: 'assistant', 
+                        source: 'sillytavern',
+                        character: message.name || 'AI',
+                        timestamp: timestamp,
+                        // 分段信息
+                        ...(isMultiPart && {
+                            chunk_index: i + 1,
+                            chunk_total: chunks.length,
+                            original_length: contentToSave.length
+                        })
+                    }
+                })
+            });
+        }
+        
+        console.log(`[Recall] 已保存AI响应 (${chunks.length}段, 共${contentToSave.length}字)`);
     } catch (e) {
         console.warn('[Recall] 保存AI响应失败:', e);
     }
@@ -676,10 +853,41 @@ function displayMemories(memories) {
     listEl.querySelectorAll('.recall-delete-memory').forEach(btn => {
         btn.setAttribute('data-bound', 'true');
         btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
             const button = e.currentTarget;
             const id = button.dataset.id;
             if (id && confirm('确定删除这条记忆吗？')) {
                 await deleteMemory(id);
+            }
+        });
+    });
+    
+    // 绑定展开/收起事件
+    listEl.querySelectorAll('.recall-expand-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const id = btn.dataset.id;
+            const item = listEl.querySelector(`.recall-memory-item[data-id="${id}"]`);
+            if (!item) return;
+            
+            const isExpanded = item.dataset.expanded === 'true';
+            const preview = item.querySelector('.recall-memory-preview');
+            const full = item.querySelector('.recall-memory-full');
+            
+            if (isExpanded) {
+                // 收起
+                preview.style.display = '';
+                if (full) full.style.display = 'none';
+                btn.textContent = '📖 展开全文';
+                item.dataset.expanded = 'false';
+                item.classList.remove('expanded');
+            } else {
+                // 展开
+                preview.style.display = 'none';
+                if (full) full.style.display = '';
+                btn.textContent = '📕 收起';
+                item.dataset.expanded = 'true';
+                item.classList.add('expanded');
             }
         });
     });
@@ -807,23 +1015,35 @@ function appendMemories(memories) {
  */
 function createMemoryItemHtml(m) {
     const content = m.content || m.memory || '';
-    const preview = content.length > 150 ? content.substring(0, 150) + '...' : content;
+    const previewLength = pluginSettings.previewLength || 200;
+    const isLong = content.length > previewLength;
+    const preview = isLong ? content.substring(0, previewLength) + '...' : content;
     const roleRaw = m.metadata?.role || '';
     const roleIcon = roleRaw === 'user' ? '👤' : roleRaw === 'assistant' ? '🤖' : '📝';
     const roleName = roleRaw === 'user' ? '用户' : roleRaw === 'assistant' ? 'AI' : '手动';
     const roleClass = roleRaw === 'user' ? 'user' : roleRaw === 'assistant' ? 'assistant' : '';
     const time = m.created_at ? formatTime(m.created_at) : '';
+    const charCount = content.length;
     
     return `
-        <div class="recall-memory-item" data-id="${m.id}">
+        <div class="recall-memory-item ${isLong ? 'expandable' : ''}" data-id="${m.id}" data-expanded="false">
             <div class="recall-memory-header">
                 <span class="recall-memory-role ${roleClass}">${roleIcon} ${roleName}</span>
-                <span class="recall-memory-time">${time}</span>
+                <span class="recall-memory-meta">
+                    <span class="recall-memory-chars">${charCount}字</span>
+                    <span class="recall-memory-time">${time}</span>
+                </span>
             </div>
-            <p class="recall-memory-content" title="${escapeHtml(content)}">${escapeHtml(preview)}</p>
+            <div class="recall-memory-content-wrapper">
+                <p class="recall-memory-content recall-memory-preview">${escapeHtml(preview)}</p>
+                ${isLong ? `<p class="recall-memory-content recall-memory-full" style="display:none">${escapeHtml(content)}</p>` : ''}
+            </div>
             <div class="recall-memory-footer">
-                ${m.score ? `<span class="recall-memory-score">📊 相关度: ${(m.score * 100).toFixed(0)}%</span>` : '<span></span>'}
-                <button class="recall-delete-btn recall-delete-memory" data-id="${m.id}">🗑️ 删除</button>
+                <div class="recall-memory-footer-left">
+                    ${m.score ? `<span class="recall-memory-score">📊 ${(m.score * 100).toFixed(0)}%</span>` : ''}
+                    ${isLong ? `<button class="recall-expand-btn" data-id="${m.id}">📖 展开全文</button>` : ''}
+                </div>
+                <button class="recall-delete-btn recall-delete-memory" data-id="${m.id}">🗑️</button>
             </div>
         </div>
     `;
