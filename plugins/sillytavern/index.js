@@ -955,13 +955,30 @@ function displayMemories(memories) {
  * 删除记忆
  */
 async function deleteMemory(memoryId) {
+    if (!memoryId) {
+        console.error('[Recall] 删除失败: memoryId 为空');
+        return;
+    }
+    
     try {
-        await fetch(`${pluginSettings.apiUrl}/v1/memories/${memoryId}?user_id=${encodeURIComponent(currentCharacterId || 'default')}`, {
+        console.log(`[Recall] 正在删除记忆: ${memoryId}`);
+        const url = `${pluginSettings.apiUrl}/v1/memories/${encodeURIComponent(memoryId)}?user_id=${encodeURIComponent(currentCharacterId || 'default')}`;
+        
+        const response = await fetch(url, {
             method: 'DELETE'
         });
-        loadMemories();
+        
+        if (response.ok) {
+            console.log(`[Recall] 删除成功: ${memoryId}`);
+            loadMemories();
+        } else {
+            const errData = await response.json().catch(() => ({}));
+            console.error(`[Recall] 删除失败: ${response.status}`, errData);
+            alert(`删除失败: ${errData.detail || response.statusText}`);
+        }
     } catch (e) {
         console.error('[Recall] 删除记忆失败:', e);
+        alert('删除失败: ' + e.message);
     }
 }
 
@@ -1073,6 +1090,8 @@ function appendMemories(memories) {
  */
 function createMemoryItemHtml(m) {
     const content = m.content || m.memory || '';
+    // ID 在 metadata.id 中，兼容旧格式 m.id
+    const memoryId = m.metadata?.id || m.id || '';
     const previewLength = pluginSettings.previewLength || 200;
     const isLong = content.length > previewLength;
     const preview = isLong ? content.substring(0, previewLength) + '...' : content;
@@ -1080,11 +1099,11 @@ function createMemoryItemHtml(m) {
     const roleIcon = roleRaw === 'user' ? '👤' : roleRaw === 'assistant' ? '🤖' : '📝';
     const roleName = roleRaw === 'user' ? '用户' : roleRaw === 'assistant' ? 'AI' : '手动';
     const roleClass = roleRaw === 'user' ? 'user' : roleRaw === 'assistant' ? 'assistant' : '';
-    const time = m.created_at ? formatTime(m.created_at) : '';
+    const time = m.metadata?.timestamp ? formatTime(m.metadata.timestamp) : (m.created_at ? formatTime(m.created_at) : '');
     const charCount = content.length;
     
     return `
-        <div class="recall-memory-item ${isLong ? 'expandable' : ''}" data-id="${m.id}" data-expanded="false">
+        <div class="recall-memory-item ${isLong ? 'expandable' : ''}" data-id="${memoryId}" data-expanded="false">
             <div class="recall-memory-header">
                 <span class="recall-memory-role ${roleClass}">${roleIcon} ${roleName}</span>
                 <span class="recall-memory-meta">
@@ -1099,9 +1118,9 @@ function createMemoryItemHtml(m) {
             <div class="recall-memory-footer">
                 <div class="recall-memory-footer-left">
                     ${m.score ? `<span class="recall-memory-score">📊 ${(m.score * 100).toFixed(0)}%</span>` : ''}
-                    ${isLong ? `<button class="recall-expand-btn" data-id="${m.id}">📖 展开全文</button>` : ''}
+                    ${isLong ? `<button class="recall-expand-btn" data-id="${memoryId}">📖 展开全文</button>` : ''}
                 </div>
-                <button class="recall-delete-btn recall-delete-memory" data-id="${m.id}">🗑️</button>
+                <button class="recall-delete-btn recall-delete-memory" data-id="${memoryId}">🗑️</button>
             </div>
         </div>
     `;
