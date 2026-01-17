@@ -31,15 +31,15 @@ class Colors:
 
 
 def ok(msg):
-    print(f"  {Colors.GREEN}✓{Colors.END} {msg}")
+    print(f"  {Colors.GREEN}[OK]{Colors.END} {msg}")
 
 
 def fail(msg):
-    print(f"  {Colors.RED}✗{Colors.END} {msg}")
+    print(f"  {Colors.RED}[FAIL]{Colors.END} {msg}")
 
 
 def warn(msg):
-    print(f"  {Colors.YELLOW}⚠{Colors.END} {msg}")
+    print(f"  {Colors.YELLOW}[WARN]{Colors.END} {msg}")
 
 
 def header(title):

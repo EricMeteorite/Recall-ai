@@ -55,25 +55,25 @@ function Write-Step {
 
 function Write-Success {
     param([string]$Message)
-    Write-Host "    ✓ " -ForegroundColor Green -NoNewline
+    Write-Host "    [OK] " -ForegroundColor Green -NoNewline
     Write-Host $Message
 }
 
 function Write-Error2 {
     param([string]$Message)
-    Write-Host "    ✗ " -ForegroundColor Red -NoNewline
+    Write-Host "    [X] " -ForegroundColor Red -NoNewline
     Write-Host $Message
 }
 
 function Write-Warning2 {
     param([string]$Message)
-    Write-Host "    ! " -ForegroundColor Yellow -NoNewline
+    Write-Host "    [!] " -ForegroundColor Yellow -NoNewline
     Write-Host $Message
 }
 
 function Write-Info {
     param([string]$Message)
-    Write-Host "    → " -ForegroundColor Cyan -NoNewline
+    Write-Host "    -> " -ForegroundColor Cyan -NoNewline
     Write-Host $Message
 }
 
@@ -106,16 +106,16 @@ function Invoke-Cleanup {
 
 function Show-ModeSelection {
     Write-Host ""
-    Write-Host "请选择安装模式：" -ForegroundColor White
+    Write-Host "Select installation mode:" -ForegroundColor White
     Write-Host ""
-    Write-Host "  1) " -NoNewline; Write-Host "轻量模式" -ForegroundColor Green -NoNewline; Write-Host "     ~100MB 内存，仅关键词搜索"
-    Write-Host "     适合: 内存 < 1GB 的服务器" -ForegroundColor Cyan
+    Write-Host "  1) " -NoNewline; Write-Host "Lite Mode" -ForegroundColor Green -NoNewline; Write-Host "      ~100MB RAM, keyword search only"
+    Write-Host "     For: Servers with < 1GB RAM" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "  2) " -NoNewline; Write-Host "Hybrid模式" -ForegroundColor Green -NoNewline; Write-Host "   ~150MB 内存，使用云端API进行向量搜索 " -NoNewline; Write-Host "★推荐★" -ForegroundColor Yellow
-    Write-Host "     适合: 任何服务器，全功能，需要API Key" -ForegroundColor Cyan
+    Write-Host "  2) " -NoNewline; Write-Host "Hybrid Mode" -ForegroundColor Green -NoNewline; Write-Host "    ~150MB RAM, cloud API for vectors " -NoNewline; Write-Host "[Recommended]" -ForegroundColor Yellow
+    Write-Host "     For: Any server, full features, needs API Key" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "  3) " -NoNewline; Write-Host "完整模式" -ForegroundColor Green -NoNewline; Write-Host "     ~1.5GB 内存，本地向量模型"
-    Write-Host "     适合: 高配服务器，完全离线" -ForegroundColor Cyan
+    Write-Host "  3) " -NoNewline; Write-Host "Full Mode" -ForegroundColor Green -NoNewline; Write-Host "      ~1.5GB RAM, local vector model"
+    Write-Host "     For: High-spec servers, fully offline" -ForegroundColor Cyan
     Write-Host ""
     
     $modeChoice = Read-Host "请选择 [1-3，默认2]"

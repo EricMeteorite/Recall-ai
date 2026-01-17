@@ -276,7 +276,7 @@ def main():
     if all_passed:
         print("🎉 All tests passed!")
     else:
-        print("⚠️ Some tests failed, please check the output above")
+        print("[WARN] Some tests failed, please check the output above")
     
     # 自动清理测试数据
     print()

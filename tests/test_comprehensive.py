@@ -20,13 +20,13 @@ def print_header(title):
     print('=' * 60)
 
 def print_ok(msg):
-    print(f'  ✓ {msg}')
+    print(f'  [OK] {msg}')
 
 def print_fail(msg):
-    print(f'  ✗ {msg}')
+    print(f'  [FAIL] {msg}')
 
 def print_warn(msg):
-    print(f'  ⚠ {msg}')
+    print(f'  [WARN] {msg}')
 
 # 收集所有问题
 ALL_ERRORS = []
@@ -386,7 +386,7 @@ if ALL_ERRORS:
         print(f'    {i}. {err}')
 
 if ALL_WARNINGS:
-    print('\n  ⚠️ 警告列表:')
+    print('\n  [WARN] Warning list:')
     for i, warn in enumerate(ALL_WARNINGS, 1):
         print(f'    {i}. {warn}')
 

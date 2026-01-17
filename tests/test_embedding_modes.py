@@ -30,9 +30,9 @@ def test_lightweight_mode():
     except RuntimeError as e:
         assert "轻量模式不支持向量编码" in str(e)
     
-    print("✓ 轻量模式配置正确")
-    print("✓ 后端维度为 0")
-    print("✓ 编码正确抛出错误")
+    print("[OK] Lightweight mode config correct")
+    print("[OK] Backend dimension is 0")
+    print("[OK] Encode correctly throws error")
     print()
 
 
@@ -49,26 +49,26 @@ def test_hybrid_mode():
     config = EmbeddingConfig.hybrid_openai("sk-test")
     assert config.backend == EmbeddingBackendType.OPENAI
     assert config.api_model == "text-embedding-3-small"
-    print("✓ OpenAI 配置正确")
+    print("[OK] OpenAI config correct")
     
     # 测试硅基流动配置
     config = EmbeddingConfig.hybrid_siliconflow("sf-test")
     assert config.backend == EmbeddingBackendType.SILICONFLOW
     assert config.api_model == "BAAI/bge-large-zh-v1.5"
-    print("✓ 硅基流动配置正确")
+    print("[OK] SiliconFlow config correct")
     
     # 如果有真实 API key，测试实际调用
     if os.environ.get('OPENAI_API_KEY'):
         config = EmbeddingConfig.hybrid_openai(os.environ['OPENAI_API_KEY'])
         backend = create_embedding_backend(config)
         vec = backend.encode("你好世界")
-        print(f"✓ OpenAI 实际调用成功，向量维度: {vec.shape}")
+        print(f"[OK] OpenAI actual call succeeded, vector dim: {vec.shape}")
     
     if os.environ.get('SILICONFLOW_API_KEY'):
         config = EmbeddingConfig.hybrid_siliconflow(os.environ['SILICONFLOW_API_KEY'])
         backend = create_embedding_backend(config)
         vec = backend.encode("你好世界")
-        print(f"✓ 硅基流动实际调用成功，向量维度: {vec.shape}")
+        print(f"[OK] SiliconFlow actual call succeeded, vector dim: {vec.shape}")
     
     print()
 
@@ -84,13 +84,13 @@ def test_full_mode():
     
     config = EmbeddingConfig.full()
     assert config.backend == EmbeddingBackendType.LOCAL
-    print("✓ 完整模式配置正确")
+    print("[OK] Full mode config correct")
     
     try:
         import sentence_transformers
         backend = create_embedding_backend(config)
         vec = backend.encode("你好世界")
-        print(f"✓ 本地模型加载成功，向量维度: {vec.shape}")
+        print(f"[OK] Local model loaded, vector dim: {vec.shape}")
     except ImportError:
         print("! sentence-transformers 未安装，跳过实际测试")
     
@@ -106,7 +106,7 @@ def test_auto_select():
     from recall.embedding.factory import auto_select_backend
     
     config = auto_select_backend()
-    print(f"✓ 自动选择结果: {config.backend.value}")
+    print(f"[OK] Auto select result: {config.backend.value}")
     print()
 
 
@@ -126,14 +126,14 @@ def test_vector_index_disabled():
         
         assert vi.enabled == False
         assert vi.search("test") == []
-        print("✓ 轻量模式下向量索引正确禁用")
+        print("[OK] Vector index correctly disabled in lightweight mode")
     
     print()
 
 
 def main():
     print()
-    print("🧪 Recall AI Embedding 模式测试")
+    print("=== Recall AI Embedding Mode Test ===")
     print("================================")
     print()
     
@@ -153,7 +153,7 @@ def main():
             test()
             passed += 1
         except Exception as e:
-            print(f"✗ {test.__name__} 失败: {e}")
+            print(f"[FAIL] {test.__name__} failed: {e}")
             failed += 1
     
     print()

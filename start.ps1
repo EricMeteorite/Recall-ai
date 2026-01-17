@@ -50,33 +50,33 @@ function Write-Header {
     try { $host.UI.RawUI.WindowTitle = $title } catch {}
     
     Write-Host ""
-    Write-Host "╔════════════════════════════════════════════╗" -ForegroundColor Cyan
-    Write-Host "║          Recall AI v3.0.0 服务             ║" -ForegroundColor Cyan
-    Write-Host "╚════════════════════════════════════════════╝" -ForegroundColor Cyan
+    Write-Host "+============================================+" -ForegroundColor Cyan
+    Write-Host "|          Recall AI v3.0.0 Server          |" -ForegroundColor Cyan
+    Write-Host "+============================================+" -ForegroundColor Cyan
     Write-Host ""
 }
 
 function Write-Success {
     param([string]$Message)
-    Write-Host "  ✓ " -ForegroundColor Green -NoNewline
+    Write-Host "  [OK] " -ForegroundColor Green -NoNewline
     Write-Host $Message
 }
 
 function Write-Error2 {
     param([string]$Message)
-    Write-Host "  ✗ " -ForegroundColor Red -NoNewline
+    Write-Host "  [X] " -ForegroundColor Red -NoNewline
     Write-Host $Message
 }
 
 function Write-Warning2 {
     param([string]$Message)
-    Write-Host "  ! " -ForegroundColor Yellow -NoNewline
+    Write-Host "  [!] " -ForegroundColor Yellow -NoNewline
     Write-Host $Message
 }
 
 function Write-Info {
     param([string]$Message)
-    Write-Host "  → " -ForegroundColor Cyan -NoNewline
+    Write-Host "  -> " -ForegroundColor Cyan -NoNewline
     Write-Host $Message
 }
 
