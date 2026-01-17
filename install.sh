@@ -16,6 +16,32 @@ echo ""
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# ========================================
+# 自动修复权限
+# ========================================
+fix_permissions() {
+    local CURRENT_USER=$(whoami)
+    local DIR_OWNER=$(stat -c '%U' "$SCRIPT_DIR" 2>/dev/null || stat -f '%Su' "$SCRIPT_DIR" 2>/dev/null)
+    
+    if [ "$CURRENT_USER" != "root" ] && [ "$DIR_OWNER" = "root" ]; then
+        echo "[!] 检测到目录属于 root，当前用户是 $CURRENT_USER"
+        echo "    需要修改权限以便正常运行..."
+        
+        if command -v sudo &> /dev/null; then
+            echo "    执行: sudo chown -R $CURRENT_USER:$CURRENT_USER $SCRIPT_DIR"
+            sudo chown -R "$CURRENT_USER:$CURRENT_USER" "$SCRIPT_DIR"
+            echo "    权限修复成功！"
+        else
+            echo "错误: 目录属于 root 且无法使用 sudo"
+            echo "请手动执行: sudo chown -R $CURRENT_USER:$CURRENT_USER $SCRIPT_DIR"
+            exit 1
+        fi
+    fi
+}
+
+echo "[0/4] 检查目录权限..."
+fix_permissions
+
 # 检查 Python
 echo "[1/4] 检查 Python 环境..."
 
