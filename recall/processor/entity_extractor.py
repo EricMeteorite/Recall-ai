@@ -59,6 +59,8 @@ class EntityExtractor:
         model_cache_dir = os.path.join(RecallInit.get_data_root(), 'models', 'spacy')
         os.makedirs(model_cache_dir, exist_ok=True)
         
+        last_error = "未找到模型"  # 初始化错误信息
+        
         # 优先尝试从本地缓存加载
         for model_name in ['zh_core_web_sm', 'en_core_web_sm']:
             local_model_path = os.path.join(model_cache_dir, model_name)
@@ -67,17 +69,18 @@ class EntityExtractor:
             if os.path.exists(local_model_path):
                 try:
                     return spacy.load(local_model_path)
-                except Exception:
-                    pass
+                except Exception as e:
+                    last_error = str(e)
             
             # 尝试从全局加载（如果用户已安装）
             try:
                 return spacy.load(model_name)
-            except OSError:
-                pass
+            except Exception as e:
+                # 记录具体错误便于调试
+                last_error = str(e)
         
         # 如果都失败，使用空白模型（基础功能仍可用）
-        print("[Recall] 警告：无法加载 NLP 模型，实体识别功能将使用简化版本")
+        print(f"[Recall] 警告：无法加载 NLP 模型，实体识别功能将使用简化版本 (原因: {last_error})")
         return spacy.blank('zh')  # 空白模型，只有分词，没有NER
     
     def extract(self, text: str) -> List[ExtractedEntity]:

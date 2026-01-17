@@ -372,11 +372,34 @@ function Install-Models {
     Write-Info "下载 spaCy 中文模型 (约 50MB)..."
     
     $args = @("-m", "spacy", "download", "zh_core_web_sm")
-    if ($PipMirror) { $args += $PipMirror.Split(" ") }
-    
     & $pythonPath @args 2>&1 | Out-Null
     
-    Write-Success "spaCy 中文模型下载完成"
+    # 验证模型是否真正可加载
+    $testResult = & $pythonPath -c "import spacy; spacy.load('zh_core_web_sm'); print('OK')" 2>&1
+    if ($testResult -eq "OK") {
+        Write-Success "spaCy 中文模型下载完成"
+    } else {
+        Write-Warning2 "spaCy 模型安装不完整，尝试备用方案..."
+        
+        # 备用方案：从 GitHub 直接安装 (zh-core-web-sm 不在 PyPI 上)
+        # 获取已安装的 spaCy 版本的主版本号
+        $spacyVer = & $pythonPath -c "import spacy; print('.'.join(spacy.__version__.split('.')[:2]))" 2>&1
+        if (-not $spacyVer) { $spacyVer = "3.8" }
+        
+        $modelUrl = "https://github.com/explosion/spacy-models/releases/download/zh_core_web_sm-${spacyVer}.0/zh_core_web_sm-${spacyVer}.0-py3-none-any.whl"
+        
+        $pipPath = Join-Path $VenvPath "Scripts\pip.exe"
+        & $pipPath install $modelUrl 2>&1 | Out-Null
+        
+        # 再次验证
+        $testResult2 = & $pythonPath -c "import spacy; spacy.load('zh_core_web_sm'); print('OK')" 2>&1
+        if ($testResult2 -eq "OK") {
+            Write-Success "spaCy 中文模型安装完成 (备用方案)"
+        } else {
+            Write-Warning2 "模型安装失败，但不影响基本功能"
+            Write-Info "可稍后手动安装: pip install $modelUrl"
+        }
+    }
 }
 
 # ==================== 初始化 ====================
@@ -524,6 +547,18 @@ function Invoke-Repair {
             $args = @("install", "-e", $ScriptDir, "--force-reinstall")
             if ($PipMirror) { $args += $PipMirror.Split(" ") }
             & $pipPath @args
+            
+            # 重新安装 spaCy 模型（与 Install-Models 相同逻辑）
+            Write-Info "重新安装 spaCy 模型..."
+            $pythonPath = Join-Path $VenvPath "Scripts\python.exe"
+            & $pythonPath -m spacy download zh_core_web_sm 2>&1 | Out-Null
+            $testResult = & $pythonPath -c "import spacy; spacy.load('zh_core_web_sm'); print('OK')" 2>&1
+            if ($testResult -ne "OK") {
+                $spacyVer = & $pythonPath -c "import spacy; print('.'.join(spacy.__version__.split('.')[:2]))" 2>&1
+                if (-not $spacyVer) { $spacyVer = "3.8" }
+                $modelUrl = "https://github.com/explosion/spacy-models/releases/download/zh_core_web_sm-${spacyVer}.0/zh_core_web_sm-${spacyVer}.0-py3-none-any.whl"
+                & $pipPath install $modelUrl 2>&1 | Out-Null
+            }
         }
         default {
             Write-Error2 "无效选项"

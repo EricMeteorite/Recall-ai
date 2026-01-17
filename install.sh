@@ -333,12 +333,30 @@ download_models() {
     
     print_info "下载 spaCy 中文模型 (约 50MB)..."
     
-    # spacy download 不支持 pip 镜像参数
-    if python -m spacy download zh_core_web_sm 2>&1 | tee /dev/stderr | grep -qE "(✔|successfully|already)"; then
+    # spacy download 有时下载成功但安装失败，所以我们验证是否真正可用
+    python -m spacy download zh_core_web_sm 2>&1 || true
+    
+    # 验证模型是否真正可加载
+    if python -c "import spacy; spacy.load('zh_core_web_sm')" 2>/dev/null; then
         print_success "spaCy 中文模型下载完成"
     else
-        print_warning "模型下载可能不完整，但不影响基本功能"
-        print_info "可稍后手动下载: python -m spacy download zh_core_web_sm"
+        print_warning "spaCy 模型安装不完整，尝试备用方案..."
+        # 备用方案：从 GitHub 直接安装 (zh-core-web-sm 不在 PyPI 上)
+        # 获取已安装的 spaCy 版本的主版本号
+        SPACY_VER=$(python -c "import spacy; print('.'.join(spacy.__version__.split('.')[:2]))" 2>/dev/null || echo "3.8")
+        MODEL_URL="https://github.com/explosion/spacy-models/releases/download/zh_core_web_sm-${SPACY_VER}.0/zh_core_web_sm-${SPACY_VER}.0-py3-none-any.whl"
+        
+        if pip install "$MODEL_URL" 2>&1 | grep -qE "(Successfully|already)"; then
+            if python -c "import spacy; spacy.load('zh_core_web_sm')" 2>/dev/null; then
+                print_success "spaCy 中文模型安装完成 (备用方案)"
+            else
+                print_warning "模型安装失败，但不影响基本功能"
+                print_info "可稍后手动安装: pip install $MODEL_URL"
+            fi
+        else
+            print_warning "模型下载失败，但不影响基本功能"
+            print_info "可稍后手动下载: python -m spacy download zh_core_web_sm"
+        fi
     fi
 }
 
@@ -463,7 +481,14 @@ do_repair() {
         2)
             print_info "完整重装中..."
             pip install -e "$SCRIPT_DIR" $PIP_MIRROR --force-reinstall
+            
+            # 重新安装 spaCy 模型（与 download_models 相同逻辑）
+            print_info "重新安装 spaCy 模型..."
             python -m spacy download zh_core_web_sm 2>&1 || true
+            if ! python -c "import spacy; spacy.load('zh_core_web_sm')" 2>/dev/null; then
+                SPACY_VER=$(python -c "import spacy; print('.'.join(spacy.__version__.split('.')[:2]))" 2>/dev/null || echo "3.8")
+                pip install "https://github.com/explosion/spacy-models/releases/download/zh_core_web_sm-${SPACY_VER}.0/zh_core_web_sm-${SPACY_VER}.0-py3-none-any.whl" 2>&1 || true
+            fi
             ;;
         *)
             print_error "无效选项"
