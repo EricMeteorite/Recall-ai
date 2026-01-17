@@ -13,6 +13,7 @@ class EmbeddingBackendType(str, Enum):
     LOCAL = "local"           # 本地 sentence-transformers
     OPENAI = "openai"         # OpenAI API
     SILICONFLOW = "siliconflow"  # 硅基流动 API
+    CUSTOM = "custom"         # 自定义 OpenAI 兼容 API
     NONE = "none"             # 禁用（轻量模式）
 
 
@@ -43,25 +44,58 @@ class EmbeddingConfig:
         """轻量模式配置（禁用向量索引）"""
         return cls(backend=EmbeddingBackendType.NONE)
     
+    # 模型维度映射（与 api_backend.py 保持一致）
+    MODEL_DIMENSIONS = {
+        # OpenAI
+        "text-embedding-3-small": 1536,
+        "text-embedding-3-large": 3072,
+        "text-embedding-ada-002": 1536,
+        # 硅基流动
+        "BAAI/bge-large-zh-v1.5": 1024,
+        "BAAI/bge-large-en-v1.5": 1024,
+        "BAAI/bge-m3": 1024,
+    }
+    
     @classmethod
-    def hybrid_openai(cls, api_key: str) -> 'EmbeddingConfig':
+    def hybrid_openai(cls, api_key: str, api_base: str = None, model: str = "text-embedding-3-small") -> 'EmbeddingConfig':
         """Hybrid 模式 - OpenAI"""
+        dimension = cls.MODEL_DIMENSIONS.get(model, 1536)
         return cls(
             backend=EmbeddingBackendType.OPENAI,
             api_key=api_key,
-            api_model="text-embedding-3-small",
-            dimension=1536,  # OpenAI small 维度
+            api_base=api_base,  # 可自定义 base URL
+            api_model=model,
+            dimension=dimension,
         )
     
     @classmethod
-    def hybrid_siliconflow(cls, api_key: str) -> 'EmbeddingConfig':
+    def hybrid_siliconflow(cls, api_key: str, model: str = "BAAI/bge-large-zh-v1.5") -> 'EmbeddingConfig':
         """Hybrid 模式 - 硅基流动"""
+        dimension = cls.MODEL_DIMENSIONS.get(model, 1024)
         return cls(
             backend=EmbeddingBackendType.SILICONFLOW,
             api_key=api_key,
             api_base="https://api.siliconflow.cn/v1",
-            api_model="BAAI/bge-large-zh-v1.5",
-            dimension=1024,  # BGE-large 维度
+            api_model=model,
+            dimension=dimension,
+        )
+    
+    @classmethod
+    def hybrid_custom(cls, api_key: str, api_base: str, api_model: str, dimension: int = 1536) -> 'EmbeddingConfig':
+        """Hybrid 模式 - 自定义 OpenAI 兼容 API
+        
+        适用于：
+        - OpenAI 中转站
+        - Azure OpenAI
+        - 本地部署的兼容 API（如 Ollama, vLLM）
+        - 其他 OpenAI 兼容服务
+        """
+        return cls(
+            backend=EmbeddingBackendType.CUSTOM,
+            api_key=api_key,
+            api_base=api_base,
+            api_model=api_model,
+            dimension=dimension,
         )
     
     @classmethod

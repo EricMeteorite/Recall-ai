@@ -13,7 +13,7 @@ class APIEmbeddingBackend(EmbeddingBackend):
     支持：
     - OpenAI text-embedding-3-small / text-embedding-3-large
     - 硅基流动 BAAI/bge-large-zh-v1.5
-    - 其他 OpenAI 兼容 API
+    - 自定义 OpenAI 兼容 API（中转站、Azure、Ollama 等）
     
     优点：
     - 内存占用极低 (~50MB)
@@ -35,39 +35,51 @@ class APIEmbeddingBackend(EmbeddingBackend):
         "BAAI/bge-large-zh-v1.5": 1024,
         "BAAI/bge-large-en-v1.5": 1024,
         "BAAI/bge-m3": 1024,
+        # Google (通过兼容接口)
+        "text-embedding-004": 768,
+        "embedding-001": 768,
     }
     
     # 默认 API 基地址
     DEFAULT_BASES = {
         EmbeddingBackendType.OPENAI: "https://api.openai.com/v1",
         EmbeddingBackendType.SILICONFLOW: "https://api.siliconflow.cn/v1",
+        EmbeddingBackendType.CUSTOM: None,  # 必须指定
     }
     
     def __init__(self, config: EmbeddingConfig):
         super().__init__(config)
         self._client = None
         
-        # 确定 API 基地址
-        self.api_base = config.api_base or self.DEFAULT_BASES.get(
-            config.backend, 
-            "https://api.openai.com/v1"
+        # 确定 API 基地址（优先使用配置，然后环境变量，最后默认值）
+        self.api_base = (
+            config.api_base or 
+            os.environ.get('EMBEDDING_API_BASE') or
+            self.DEFAULT_BASES.get(config.backend, "https://api.openai.com/v1")
         )
         
         # 获取 API key
         self.api_key = config.api_key or self._get_api_key_from_env()
         
-        # 确定维度
-        self._dimension = self.MODEL_DIMENSIONS.get(
+        # 确定维度（优先使用配置，然后查表）
+        self._dimension = config.dimension or self.MODEL_DIMENSIONS.get(
             config.api_model, 
-            config.dimension
+            1536  # 默认
         )
     
     def _get_api_key_from_env(self) -> Optional[str]:
         """从环境变量获取 API key"""
+        # 按优先级检查
         if self.config.backend == EmbeddingBackendType.OPENAI:
             return os.environ.get('OPENAI_API_KEY')
         elif self.config.backend == EmbeddingBackendType.SILICONFLOW:
             return os.environ.get('SILICONFLOW_API_KEY')
+        elif self.config.backend == EmbeddingBackendType.CUSTOM:
+            # 自定义模式：检查通用环境变量
+            return (
+                os.environ.get('EMBEDDING_API_KEY') or
+                os.environ.get('OPENAI_API_KEY')  # 兼容
+            )
         return os.environ.get('EMBEDDING_API_KEY')
     
     @property

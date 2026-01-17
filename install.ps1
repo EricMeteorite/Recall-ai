@@ -449,12 +449,14 @@ function Invoke-Install {
                 Write-Host "  ⚠ 重要: 启动前需要配置 API Key!" -ForegroundColor Yellow
                 Write-Host ""
                 Write-Host "  支持的 API 提供商:"
-                Write-Host "    - OpenAI (text-embedding-3-small)"
                 Write-Host "    - 硅基流动 (BAAI/bge-large-zh-v1.5) " -NoNewline; Write-Host "推荐国内用户" -ForegroundColor Green
+                Write-Host "    - OpenAI (text-embedding-3-small)"
+                Write-Host "    - 自定义 API (Azure/Ollama 等)"
                 Write-Host ""
-                Write-Host "  配置方式 (二选一):"
-                Write-Host "    " -NoNewline; Write-Host '$env:OPENAI_API_KEY = "sk-xxx"' -ForegroundColor Cyan
-                Write-Host "    " -NoNewline; Write-Host '$env:SILICONFLOW_API_KEY = "sf-xxx"' -ForegroundColor Cyan
+                Write-Host "  配置方法:"
+                Write-Host "    1. 启动服务后会自动生成配置文件"
+                Write-Host "    2. 编辑: " -NoNewline; Write-Host "recall_data\config\api_keys.env" -ForegroundColor Cyan
+                Write-Host "    3. 热更新: " -NoNewline; Write-Host "curl -X POST http://localhost:18888/v1/config/reload" -ForegroundColor Cyan
             }
             "full" {
                 Write-Host "  安装模式: " -NoNewline; Write-Host "完整模式" -ForegroundColor Cyan

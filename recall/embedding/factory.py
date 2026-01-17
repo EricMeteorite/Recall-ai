@@ -32,6 +32,16 @@ def create_embedding_backend(config: Optional[EmbeddingConfig] = None) -> Embedd
         backend = create_embedding_backend(
             EmbeddingConfig.hybrid_siliconflow(api_key="sf-xxx")
         )
+        
+        # Hybrid 模式 - 自定义 API（中转站等）
+        backend = create_embedding_backend(
+            EmbeddingConfig.hybrid_custom(
+                api_key="sk-xxx",
+                api_base="https://your-proxy.com/v1",
+                api_model="text-embedding-3-small",
+                dimension=1536
+            )
+        )
     """
     if config is None:
         config = EmbeddingConfig.full()
@@ -48,7 +58,7 @@ def create_embedding_backend(config: Optional[EmbeddingConfig] = None) -> Embedd
             return NoneBackend(EmbeddingConfig.lightweight())
         return backend
     
-    elif backend_type in (EmbeddingBackendType.OPENAI, EmbeddingBackendType.SILICONFLOW):
+    elif backend_type in (EmbeddingBackendType.OPENAI, EmbeddingBackendType.SILICONFLOW, EmbeddingBackendType.CUSTOM):
         backend = APIEmbeddingBackend(config)
         if not backend.is_available:
             print(f"[Embedding] 警告: {backend_type.value} API key 未配置，回退到轻量模式")
@@ -85,10 +95,15 @@ def get_available_backends() -> List[str]:
         if os.environ.get('SILICONFLOW_API_KEY'):
             available.append("siliconflow")
         
+        # 检查自定义配置
+        if os.environ.get('EMBEDDING_API_KEY') and os.environ.get('EMBEDDING_API_BASE'):
+            available.append("custom")
+        
         # 如果有 openai 包，就可以配置使用
         if "openai" not in available and "siliconflow" not in available:
             available.append("openai")  # 可配置
             available.append("siliconflow")  # 可配置
+            available.append("custom")  # 可配置
     except ImportError:
         pass
     
@@ -100,10 +115,11 @@ def auto_select_backend() -> EmbeddingConfig:
     
     优先级：
     1. 环境变量 RECALL_EMBEDDING_MODE 指定
-    2. 硅基流动（国内快）
-    3. OpenAI
-    4. 本地模型
-    5. 轻量模式
+    2. 自定义 API（用户明确配置）
+    3. 硅基流动（国内快）
+    4. OpenAI
+    5. 本地模型
+    6. 轻量模式
     """
     import os
     
@@ -114,20 +130,36 @@ def auto_select_backend() -> EmbeddingConfig:
         print("[Embedding] 使用: 轻量模式（仅关键词搜索）")
         return EmbeddingConfig.lightweight()
     
+    if mode == 'custom':
+        api_key = os.environ.get('EMBEDDING_API_KEY', '')
+        api_base = os.environ.get('EMBEDDING_API_BASE', '')
+        api_model = os.environ.get('EMBEDDING_MODEL', 'text-embedding-3-small')
+        dimension = int(os.environ.get('EMBEDDING_DIMENSION', '1536'))
+        
+        if api_key and api_base:
+            print(f"[Embedding] 使用: 自定义 API ({api_base})")
+            return EmbeddingConfig.hybrid_custom(api_key, api_base, api_model, dimension)
+        else:
+            print("[Embedding] 警告: 自定义 API 配置不完整，回退到轻量模式")
+            return EmbeddingConfig.lightweight()
+    
     if mode == 'siliconflow':
         api_key = os.environ.get('SILICONFLOW_API_KEY', '')
+        model = os.environ.get('SILICONFLOW_MODEL', 'BAAI/bge-large-zh-v1.5')
         if api_key:
-            print("[Embedding] 使用: 硅基流动 API")
-            return EmbeddingConfig.hybrid_siliconflow(api_key)
+            print(f"[Embedding] 使用: 硅基流动 API (模型: {model})")
+            return EmbeddingConfig.hybrid_siliconflow(api_key, model=model)
         else:
             print("[Embedding] 警告: SILICONFLOW_API_KEY 未设置，回退到轻量模式")
             return EmbeddingConfig.lightweight()
     
     if mode == 'openai':
         api_key = os.environ.get('OPENAI_API_KEY', '')
+        api_base = os.environ.get('OPENAI_API_BASE', '')  # 支持自定义 base
+        model = os.environ.get('OPENAI_MODEL', 'text-embedding-3-small')
         if api_key:
-            print("[Embedding] 使用: OpenAI API")
-            return EmbeddingConfig.hybrid_openai(api_key)
+            print(f"[Embedding] 使用: OpenAI API (模型: {model})" + (f" ({api_base})" if api_base else ""))
+            return EmbeddingConfig.hybrid_openai(api_key, api_base if api_base else None, model=model)
         else:
             print("[Embedding] 警告: OPENAI_API_KEY 未设置，回退到轻量模式")
             return EmbeddingConfig.lightweight()
@@ -142,17 +174,32 @@ def auto_select_backend() -> EmbeddingConfig:
             return EmbeddingConfig.lightweight()
     
     # 未指定模式，自动检测
-    # 优先 API（内存低）
+    # 优先检查自定义配置
+    if os.environ.get('EMBEDDING_API_KEY') and os.environ.get('EMBEDDING_API_BASE'):
+        api_key = os.environ['EMBEDDING_API_KEY']
+        api_base = os.environ['EMBEDDING_API_BASE']
+        api_model = os.environ.get('EMBEDDING_MODEL', 'text-embedding-3-small')
+        dimension = int(os.environ.get('EMBEDDING_DIMENSION', '1536'))
+        print(f"[Embedding] 自动选择: 自定义 API ({api_base})")
+        return EmbeddingConfig.hybrid_custom(api_key, api_base, api_model, dimension)
+    
+    # 然后 API（内存低）
     if os.environ.get('SILICONFLOW_API_KEY'):
-        print("[Embedding] 自动选择: 硅基流动 API")
+        model = os.environ.get('SILICONFLOW_MODEL', 'BAAI/bge-large-zh-v1.5')
+        print(f"[Embedding] 自动选择: 硅基流动 API (模型: {model})")
         return EmbeddingConfig.hybrid_siliconflow(
-            os.environ['SILICONFLOW_API_KEY']
+            os.environ['SILICONFLOW_API_KEY'],
+            model=model
         )
     
     if os.environ.get('OPENAI_API_KEY'):
-        print("[Embedding] 自动选择: OpenAI API")
+        api_base = os.environ.get('OPENAI_API_BASE', '')
+        model = os.environ.get('OPENAI_MODEL', 'text-embedding-3-small')
+        print(f"[Embedding] 自动选择: OpenAI API (模型: {model})" + (f" ({api_base})" if api_base else ""))
         return EmbeddingConfig.hybrid_openai(
-            os.environ['OPENAI_API_KEY']
+            os.environ['OPENAI_API_KEY'],
+            api_base if api_base else None,
+            model=model
         )
     
     # 其次本地

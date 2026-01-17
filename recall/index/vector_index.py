@@ -126,7 +126,14 @@ class VectorIndex:
         if os.path.exists(self.index_file):
             self._index = faiss.read_index(self.index_file)
             
-            if os.path.exists(self.mapping_file):
+            # 检查维度是否匹配
+            if self._index.d != self.dimension:
+                print(f"[VectorIndex] 警告: 索引维度({self._index.d})与当前模型维度({self.dimension})不匹配")
+                print(f"[VectorIndex] 正在重建索引...")
+                self._index = faiss.IndexFlatIP(self.dimension)
+                self.turn_mapping = []
+                self._save_config()
+            elif os.path.exists(self.mapping_file):
                 with open(self.mapping_file, 'r') as f:
                     self.turn_mapping = json.load(f)
         else:

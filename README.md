@@ -114,6 +114,56 @@ context = engine.build_context("告诉我关于Alice的信息")
 
 删除项目文件夹即可完全卸载，不会在系统留下任何痕迹。
 
+---
+
+## ⚙️ 配置说明
+
+### 配置文件
+
+启动后自动生成配置文件: `recall_data/config/api_keys.env`
+
+```bash
+# 方式一：硅基流动（推荐国内用户）
+SILICONFLOW_API_KEY=sf-xxxxxx
+SILICONFLOW_MODEL=BAAI/bge-large-zh-v1.5
+
+# 方式二：OpenAI（支持中转站）
+OPENAI_API_KEY=sk-xxxxxx
+OPENAI_API_BASE=              # 留空用官方，或填中转站地址
+OPENAI_MODEL=text-embedding-3-small
+
+# 方式三：自定义 API（Azure/Ollama/其他）
+EMBEDDING_API_KEY=your-key
+EMBEDDING_API_BASE=https://your-api.com/v1
+EMBEDDING_MODEL=your-model
+EMBEDDING_DIMENSION=1536
+```
+
+### 热更新配置
+
+修改配置文件后，无需重启服务：
+
+```bash
+# 热更新
+curl -X POST http://localhost:18888/v1/config/reload
+
+# 测试连接
+curl http://localhost:18888/v1/config/test
+
+# 查看当前配置
+curl http://localhost:18888/v1/config
+```
+
+### 三种运行模式
+
+| 模式 | 内存占用 | 特点 |
+|------|---------|------|
+| 轻量模式 | ~100MB | 仅关键词搜索，无需配置 |
+| Hybrid模式 | ~150MB | 语义搜索，需要 API Key |
+| 完整模式 | ~1.5GB | 本地模型，完全离线 |
+
+---
+
 ## 📄 许可证
 
 MIT License

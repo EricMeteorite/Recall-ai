@@ -404,12 +404,14 @@ do_install() {
             echo -e "  ${YELLOW}⚠ 重要: 启动前需要配置 API Key!${NC}"
             echo ""
             echo -e "  支持的 API 提供商:"
-            echo -e "    - OpenAI (text-embedding-3-small)"
             echo -e "    - 硅基流动 (BAAI/bge-large-zh-v1.5) ${GREEN}推荐国内用户${NC}"
+            echo -e "    - OpenAI (text-embedding-3-small)"
+            echo -e "    - 自定义 API (Azure/Ollama 等)"
             echo ""
-            echo -e "  配置方式 (二选一):"
-            echo -e "    ${CYAN}export OPENAI_API_KEY=sk-xxx${NC}"
-            echo -e "    ${CYAN}export SILICONFLOW_API_KEY=sf-xxx${NC}"
+            echo -e "  配置方法:"
+            echo -e "    1. 启动服务后会自动生成配置文件"
+            echo -e "    2. 编辑: ${CYAN}recall_data/config/api_keys.env${NC}"
+            echo -e "    3. 热更新: ${CYAN}curl -X POST http://localhost:18888/v1/config/reload${NC}"
             ;;
         full)
             echo -e "  ${BOLD}安装模式:${NC} ${CYAN}完整模式${NC}"

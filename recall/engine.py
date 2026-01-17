@@ -145,6 +145,8 @@ class RecallEngine:
             return "Hybrid模式-OpenAI"
         elif backend == EmbeddingBackendType.SILICONFLOW:
             return "Hybrid模式-硅基流动"
+        elif backend == EmbeddingBackendType.CUSTOM:
+            return "Hybrid模式-自定义API"
         return "未知模式"
     
     def _init_components(
