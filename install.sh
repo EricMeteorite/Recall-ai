@@ -116,12 +116,12 @@ show_mode_selection() {
 show_menu() {
     echo -e "${BOLD}请选择操作：${NC}"
     echo ""
-    echo "  1) 全新安装"
-    echo "  2) 全新安装 (使用国内镜像加速) ${GREEN}推荐${NC}"
-    echo "  3) 修复/重装依赖"
-    echo "  4) 完全卸载"
-    echo "  5) 查看状态"
-    echo "  6) 退出"
+    echo -e "  1) 全新安装"
+    echo -e "  2) 全新安装 (使用国内镜像加速) ${GREEN}推荐${NC}"
+    echo -e "  3) 修复/重装依赖"
+    echo -e "  4) 完全卸载"
+    echo -e "  5) 查看状态"
+    echo -e "  6) 退出"
     echo ""
     read -p "请输入选项 [1-6]: " choice
     
