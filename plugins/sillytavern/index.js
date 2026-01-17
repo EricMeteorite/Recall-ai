@@ -116,93 +116,199 @@ function safeCreateUI() {
 }
 
 /**
- * 创建UI
+ * 创建UI - 使用 SillyTavern 标准折叠面板样式
  */
 function createUI() {
-    // 添加设置面板
-    const settingsHtml = `
-        <div id="recall-settings" class="recall-panel">
-            <h4>🧠 Recall 记忆设置</h4>
-            <div class="recall-setting-item">
-                <label>
-                    <input type="checkbox" id="recall-enabled" ${pluginSettings.enabled ? 'checked' : ''}>
-                    启用记忆功能
-                </label>
+    // 主扩展面板 HTML（折叠式）
+    const extensionHtml = `
+        <div id="recall-extension" class="inline-drawer">
+            <div class="inline-drawer-toggle inline-drawer-header">
+                <b>🧠 Recall 记忆系统</b>
+                <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
             </div>
-            <div class="recall-setting-item">
-                <label>API 地址:</label>
-                <input type="text" id="recall-api-url" value="${pluginSettings.apiUrl}" placeholder="http://127.0.0.1:8000">
-            </div>
-            <div class="recall-setting-item">
-                <label>
-                    <input type="checkbox" id="recall-auto-inject" ${pluginSettings.autoInject ? 'checked' : ''}>
-                    自动注入记忆到上下文
-                </label>
-            </div>
-            <div class="recall-setting-item">
-                <label>最大记忆数:</label>
-                <input type="number" id="recall-max-memories" value="${pluginSettings.maxMemories}" min="1" max="50">
-            </div>
-            <div class="recall-setting-item">
-                <button id="recall-test-connection" class="recall-btn">测试连接</button>
-                <span id="recall-connection-status" class="recall-status"></span>
-            </div>
-            <div class="recall-setting-item">
-                <button id="recall-save-settings" class="recall-btn recall-btn-primary">保存设置</button>
+            <div class="inline-drawer-content">
+                <!-- 连接状态栏 -->
+                <div id="recall-status-bar" class="recall-status-bar">
+                    <span id="recall-connection-indicator" class="recall-indicator recall-indicator-disconnected"></span>
+                    <span id="recall-connection-text">未连接</span>
+                    <span id="recall-character-badge" class="recall-character-badge" style="display:none"></span>
+                </div>
+                
+                <!-- 标签页导航 -->
+                <div class="recall-tabs">
+                    <button class="recall-tab active" data-tab="memories">📚 记忆</button>
+                    <button class="recall-tab" data-tab="foreshadowing">🎭 伏笔</button>
+                    <button class="recall-tab" data-tab="settings">⚙️ 设置</button>
+                </div>
+                
+                <!-- 记忆标签页 -->
+                <div id="recall-tab-memories" class="recall-tab-content active">
+                    <div class="recall-stats-row">
+                        <span>📊 记忆数: <strong id="recall-memory-count">0</strong></span>
+                        <div class="recall-stats-actions">
+                            <button id="recall-refresh-btn" class="recall-icon-btn" title="刷新">🔄</button>
+                        </div>
+                    </div>
+                    
+                    <div class="recall-search-bar">
+                        <input type="text" id="recall-search-input" placeholder="🔍 搜索记忆..." class="text_pole">
+                        <button id="recall-search-btn" class="menu_button" title="搜索">
+                            <i class="fa-solid fa-magnifying-glass"></i>
+                        </button>
+                    </div>
+                    
+                    <div id="recall-memory-list" class="recall-memory-list">
+                        <div class="recall-empty-state">
+                            <div class="recall-empty-icon">📭</div>
+                            <p>暂无记忆</p>
+                            <small>对话时会自动记录</small>
+                        </div>
+                    </div>
+                    
+                    <div id="recall-load-more-container" class="recall-load-more" style="display:none;">
+                        <button id="recall-load-more-btn" class="menu_button">加载更多...</button>
+                    </div>
+                    
+                    <div class="recall-add-bar">
+                        <input type="text" id="recall-add-input" placeholder="✏️ 手动添加记忆..." class="text_pole">
+                        <button id="recall-add-btn" class="menu_button menu_button_icon" title="添加">
+                            <i class="fa-solid fa-plus"></i>
+                        </button>
+                    </div>
+                    
+                    <div class="recall-danger-section">
+                        <button id="recall-clear-all-btn" class="menu_button menu_button_icon recall-danger-btn">
+                            <i class="fa-solid fa-trash"></i>
+                            <span>清空当前角色记忆</span>
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- 伏笔标签页 -->
+                <div id="recall-tab-foreshadowing" class="recall-tab-content">
+                    <div id="recall-foreshadowing-list" class="recall-foreshadowing-list">
+                        <div class="recall-empty-state">
+                            <div class="recall-empty-icon">🎭</div>
+                            <p>暂无伏笔</p>
+                            <small>埋下故事线索</small>
+                        </div>
+                    </div>
+                    
+                    <div class="recall-add-bar">
+                        <input type="text" id="recall-foreshadowing-input" placeholder="🎭 埋下新伏笔..." class="text_pole">
+                        <button id="recall-foreshadowing-btn" class="menu_button menu_button_icon" title="埋下">
+                            <i class="fa-solid fa-seedling"></i>
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- 设置标签页 -->
+                <div id="recall-tab-settings" class="recall-tab-content">
+                    <div class="recall-setting-group">
+                        <label class="recall-setting-label">
+                            <input type="checkbox" id="recall-enabled" ${pluginSettings.enabled ? 'checked' : ''}>
+                            <span>启用记忆功能</span>
+                        </label>
+                    </div>
+                    
+                    <div class="recall-setting-group">
+                        <label class="recall-setting-title">API 地址</label>
+                        <input type="text" id="recall-api-url" value="${pluginSettings.apiUrl}" 
+                               placeholder="http://127.0.0.1:18888" class="text_pole">
+                    </div>
+                    
+                    <div class="recall-setting-group">
+                        <label class="recall-setting-label">
+                            <input type="checkbox" id="recall-auto-inject" ${pluginSettings.autoInject ? 'checked' : ''}>
+                            <span>自动注入记忆到上下文</span>
+                        </label>
+                    </div>
+                    
+                    <div class="recall-setting-group">
+                        <label class="recall-setting-title">最大注入记忆数</label>
+                        <input type="number" id="recall-max-memories" value="${pluginSettings.maxMemories}" 
+                               min="1" max="50" class="text_pole">
+                    </div>
+                    
+                    <div class="recall-setting-actions">
+                        <button id="recall-test-connection" class="menu_button">
+                            <i class="fa-solid fa-plug"></i>
+                            <span>测试连接</span>
+                        </button>
+                        <button id="recall-save-settings" class="menu_button menu_button_icon">
+                            <i class="fa-solid fa-save"></i>
+                            <span>保存设置</span>
+                        </button>
+                    </div>
+                    
+                    <div class="recall-info-box">
+                        <div class="recall-info-title">💡 使用提示</div>
+                        <ul>
+                            <li>确保 Recall 服务已启动</li>
+                            <li>切换角色会自动加载对应记忆</li>
+                            <li>记忆会随对话自动积累</li>
+                        </ul>
+                    </div>
+                </div>
             </div>
         </div>
     `;
     
-    // 添加记忆面板
-    const memoryPanelHtml = `
-        <div id="recall-memory-panel" class="recall-panel" style="display: ${pluginSettings.showPanel ? 'block' : 'none'}">
-            <h4>📚 记忆</h4>
-            <div id="recall-memory-list" class="recall-memory-list">
-                <p class="recall-empty">暂无记忆</p>
-            </div>
-            <div class="recall-actions">
-                <input type="text" id="recall-search-input" placeholder="搜索记忆...">
-                <button id="recall-search-btn" class="recall-btn">搜索</button>
-            </div>
-            <div class="recall-actions">
-                <input type="text" id="recall-add-input" placeholder="添加新记忆...">
-                <button id="recall-add-btn" class="recall-btn recall-btn-primary">添加</button>
-            </div>
-        </div>
-    `;
-    
-    // 添加伏笔面板
-    const foreshadowingPanelHtml = `
-        <div id="recall-foreshadowing-panel" class="recall-panel">
-            <h4>🎭 伏笔</h4>
-            <div id="recall-foreshadowing-list" class="recall-foreshadowing-list">
-                <p class="recall-empty">暂无伏笔</p>
-            </div>
-            <div class="recall-actions">
-                <input type="text" id="recall-foreshadowing-input" placeholder="埋下新伏笔...">
-                <button id="recall-foreshadowing-btn" class="recall-btn">埋下</button>
-            </div>
-        </div>
-    `;
-    
-    // 插入到页面
+    // 插入到扩展设置区域
     const extensionContainer = document.getElementById('extensions_settings');
     if (extensionContainer) {
-        extensionContainer.insertAdjacentHTML('beforeend', settingsHtml);
+        extensionContainer.insertAdjacentHTML('beforeend', extensionHtml);
     }
     
-    // 插入侧边栏面板
-    const sidebar = document.getElementById('right-nav-panel');
-    if (sidebar) {
-        sidebar.insertAdjacentHTML('beforeend', memoryPanelHtml + foreshadowingPanelHtml);
+    // 绑定标签页切换
+    document.querySelectorAll('.recall-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            const tabName = tab.dataset.tab;
+            
+            // 切换标签按钮状态
+            document.querySelectorAll('.recall-tab').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            
+            // 切换内容面板
+            document.querySelectorAll('.recall-tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            document.getElementById(`recall-tab-${tabName}`)?.classList.add('active');
+        });
+    });
+    
+    // 绑定折叠面板点击
+    const drawerToggle = document.querySelector('#recall-extension .inline-drawer-toggle');
+    if (drawerToggle) {
+        drawerToggle.addEventListener('click', () => {
+            const drawer = document.getElementById('recall-extension');
+            const icon = drawer?.querySelector('.inline-drawer-icon');
+            drawer?.classList.toggle('open');
+            icon?.classList.toggle('down');
+            icon?.classList.toggle('up');
+        });
     }
     
-    // 绑定事件（使用安全包装）
+    // 绑定事件
     document.getElementById('recall-save-settings')?.addEventListener('click', safeExecute(onSaveSettings, '保存设置失败'));
     document.getElementById('recall-test-connection')?.addEventListener('click', safeExecute(onTestConnection, '测试连接失败'));
     document.getElementById('recall-search-btn')?.addEventListener('click', safeExecute(onSearch, '搜索失败'));
     document.getElementById('recall-add-btn')?.addEventListener('click', safeExecute(onAddMemory, '添加记忆失败'));
     document.getElementById('recall-foreshadowing-btn')?.addEventListener('click', safeExecute(onPlantForeshadowing, '埋下伏笔失败'));
+    document.getElementById('recall-clear-all-btn')?.addEventListener('click', safeExecute(onClearAllMemories, '清空记忆失败'));
+    document.getElementById('recall-refresh-btn')?.addEventListener('click', safeExecute(loadMemories, '刷新失败'));
+    document.getElementById('recall-load-more-btn')?.addEventListener('click', safeExecute(onLoadMoreMemories, '加载更多失败'));
+    
+    // 回车键快捷搜索
+    document.getElementById('recall-search-input')?.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') onSearch();
+    });
+    document.getElementById('recall-add-input')?.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') onAddMemory();
+    });
+    document.getElementById('recall-foreshadowing-input')?.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') onPlantForeshadowing();
+    });
 }
 
 /**
@@ -259,10 +365,14 @@ async function checkConnection() {
  * 更新连接状态显示
  */
 function updateConnectionStatus(connected) {
-    const statusEl = document.getElementById('recall-connection-status');
-    if (statusEl) {
-        statusEl.textContent = connected ? '✓ 已连接' : '✗ 未连接';
-        statusEl.className = `recall-status ${connected ? 'recall-status-ok' : 'recall-status-error'}`;
+    const indicator = document.getElementById('recall-connection-indicator');
+    const text = document.getElementById('recall-connection-text');
+    
+    if (indicator) {
+        indicator.className = `recall-indicator ${connected ? 'recall-indicator-connected' : 'recall-indicator-disconnected'}`;
+    }
+    if (text) {
+        text.textContent = connected ? '已连接' : '未连接';
     }
 }
 
@@ -491,14 +601,54 @@ async function onBeforeGeneration() {
 async function loadMemories() {
     if (!isConnected) return;
     
+    // 重置分页状态
+    currentMemoryOffset = 0;
+    
     try {
+        // 获取记忆列表
         const response = await fetch(
-            `${pluginSettings.apiUrl}/v1/memories?user_id=${encodeURIComponent(currentCharacterId || 'default')}&limit=${pluginSettings.maxMemories}`
+            `${pluginSettings.apiUrl}/v1/memories?user_id=${encodeURIComponent(currentCharacterId || 'default')}&limit=${MEMORIES_PER_PAGE}`
         );
         const data = await response.json();
+        
+        // 更新统计信息
+        updateStats(data.count || (data.memories ? data.memories.length : 0));
+        
+        // 更新角色名显示
+        updateCharacterBadge();
+        
+        // 显示记忆
         displayMemories(data.memories || []);
+        
+        // 检查是否有更多
+        hasMoreMemories = data.memories && data.memories.length >= MEMORIES_PER_PAGE;
+        updateLoadMoreButton();
+        
     } catch (e) {
         console.error('[Recall] 加载记忆失败:', e);
+    }
+}
+
+/**
+ * 更新统计信息
+ */
+function updateStats(count) {
+    const countEl = document.getElementById('recall-memory-count');
+    if (countEl) {
+        countEl.textContent = count;
+    }
+}
+
+/**
+ * 更新角色名徽章
+ */
+function updateCharacterBadge() {
+    const badgeEl = document.getElementById('recall-character-badge');
+    if (badgeEl && currentCharacterId && currentCharacterId !== 'default') {
+        badgeEl.textContent = `👤 ${currentCharacterId}`;
+        badgeEl.style.display = 'inline-block';
+    } else if (badgeEl) {
+        badgeEl.style.display = 'none';
     }
 }
 
@@ -510,25 +660,27 @@ function displayMemories(memories) {
     if (!listEl) return;
     
     if (!memories || memories.length === 0) {
-        listEl.innerHTML = '<p class="recall-empty">暂无记忆</p>';
+        listEl.innerHTML = `
+            <div class="recall-empty-state">
+                <div class="recall-empty-icon">📭</div>
+                <p>暂无记忆</p>
+                <small>对话时会自动记录</small>
+            </div>
+        `;
         return;
     }
     
-    listEl.innerHTML = memories.map(m => `
-        <div class="recall-memory-item" data-id="${m.id}">
-            <p class="recall-memory-content">${escapeHtml(m.content || m.memory || '')}</p>
-            <div class="recall-memory-meta">
-                ${m.score ? `<span class="recall-score">相关度: ${(m.score * 100).toFixed(0)}%</span>` : ''}
-                <button class="recall-btn-small recall-delete-memory" data-id="${m.id}">删除</button>
-            </div>
-        </div>
-    `).join('');
+    listEl.innerHTML = memories.map(m => createMemoryItemHtml(m)).join('');
     
     // 绑定删除事件
     listEl.querySelectorAll('.recall-delete-memory').forEach(btn => {
+        btn.setAttribute('data-bound', 'true');
         btn.addEventListener('click', async (e) => {
-            const id = e.target.dataset.id;
-            await deleteMemory(id);
+            const button = e.currentTarget;
+            const id = button.dataset.id;
+            if (id && confirm('确定删除这条记忆吗？')) {
+                await deleteMemory(id);
+            }
         });
     });
 }
@@ -544,6 +696,166 @@ async function deleteMemory(memoryId) {
         loadMemories();
     } catch (e) {
         console.error('[Recall] 删除记忆失败:', e);
+    }
+}
+
+/**
+ * 清空当前角色的所有记忆
+ */
+async function onClearAllMemories() {
+    if (!isConnected || !currentCharacterId) {
+        alert('未连接或未选择角色');
+        return;
+    }
+    
+    const characterName = currentCharacterId;
+    const memoryCount = document.getElementById('recall-memory-count')?.textContent || '?';
+    
+    // 确认对话框
+    const confirmed = confirm(
+        `⚠️ 危险操作！\n\n` +
+        `确定要删除角色 "${characterName}" 的所有记忆吗？\n` +
+        `当前记忆数: ${memoryCount}\n\n` +
+        `此操作无法撤销！`
+    );
+    
+    if (!confirmed) return;
+    
+    // 二次确认
+    const doubleConfirm = confirm(
+        `再次确认：删除 "${characterName}" 的全部记忆？`
+    );
+    
+    if (!doubleConfirm) return;
+    
+    try {
+        const response = await fetch(
+            `${pluginSettings.apiUrl}/v1/memories?user_id=${encodeURIComponent(characterName)}&confirm=true`,
+            { method: 'DELETE' }
+        );
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            alert(`✓ 已删除 ${result.deleted_count} 条记忆`);
+            loadMemories();
+        } else {
+            alert(`删除失败: ${result.detail || '未知错误'}`);
+        }
+    } catch (e) {
+        console.error('[Recall] 清空记忆失败:', e);
+        alert('清空记忆失败: ' + e.message);
+    }
+}
+
+// 用于分页加载的状态
+let currentMemoryOffset = 0;
+let hasMoreMemories = false;
+const MEMORIES_PER_PAGE = 20;
+
+/**
+ * 加载更多记忆
+ */
+async function onLoadMoreMemories() {
+    if (!isConnected) return;
+    
+    try {
+        currentMemoryOffset += MEMORIES_PER_PAGE;
+        const response = await fetch(
+            `${pluginSettings.apiUrl}/v1/memories?user_id=${encodeURIComponent(currentCharacterId || 'default')}&limit=${MEMORIES_PER_PAGE}&offset=${currentMemoryOffset}`
+        );
+        const data = await response.json();
+        
+        if (data.memories && data.memories.length > 0) {
+            appendMemories(data.memories);
+            hasMoreMemories = data.memories.length >= MEMORIES_PER_PAGE;
+        } else {
+            hasMoreMemories = false;
+        }
+        
+        updateLoadMoreButton();
+    } catch (e) {
+        console.error('[Recall] 加载更多记忆失败:', e);
+    }
+}
+
+/**
+ * 追加记忆到列表
+ */
+function appendMemories(memories) {
+    const listEl = document.getElementById('recall-memory-list');
+    if (!listEl || !memories || memories.length === 0) return;
+    
+    const html = memories.map(m => createMemoryItemHtml(m)).join('');
+    listEl.insertAdjacentHTML('beforeend', html);
+    
+    // 绑定新添加项的删除事件
+    listEl.querySelectorAll('.recall-delete-memory:not([data-bound])').forEach(btn => {
+        btn.setAttribute('data-bound', 'true');
+        btn.addEventListener('click', async (e) => {
+            const button = e.currentTarget;
+            const id = button.dataset.id;
+            if (id && confirm('确定删除这条记忆吗？')) {
+                await deleteMemory(id);
+            }
+        });
+    });
+}
+
+/**
+ * 创建单条记忆的 HTML
+ */
+function createMemoryItemHtml(m) {
+    const content = m.content || m.memory || '';
+    const preview = content.length > 150 ? content.substring(0, 150) + '...' : content;
+    const roleRaw = m.metadata?.role || '';
+    const roleIcon = roleRaw === 'user' ? '👤' : roleRaw === 'assistant' ? '🤖' : '📝';
+    const roleName = roleRaw === 'user' ? '用户' : roleRaw === 'assistant' ? 'AI' : '手动';
+    const roleClass = roleRaw === 'user' ? 'user' : roleRaw === 'assistant' ? 'assistant' : '';
+    const time = m.created_at ? formatTime(m.created_at) : '';
+    
+    return `
+        <div class="recall-memory-item" data-id="${m.id}">
+            <div class="recall-memory-header">
+                <span class="recall-memory-role ${roleClass}">${roleIcon} ${roleName}</span>
+                <span class="recall-memory-time">${time}</span>
+            </div>
+            <p class="recall-memory-content" title="${escapeHtml(content)}">${escapeHtml(preview)}</p>
+            <div class="recall-memory-footer">
+                ${m.score ? `<span class="recall-memory-score">📊 相关度: ${(m.score * 100).toFixed(0)}%</span>` : '<span></span>'}
+                <button class="recall-delete-btn recall-delete-memory" data-id="${m.id}">🗑️ 删除</button>
+            </div>
+        </div>
+    `;
+}
+
+/**
+ * 格式化时间
+ */
+function formatTime(timestamp) {
+    try {
+        const date = new Date(timestamp * 1000 || timestamp);
+        const now = new Date();
+        const diff = now - date;
+        
+        if (diff < 60000) return '刚刚';
+        if (diff < 3600000) return `${Math.floor(diff / 60000)}分钟前`;
+        if (diff < 86400000) return `${Math.floor(diff / 3600000)}小时前`;
+        if (diff < 604800000) return `${Math.floor(diff / 86400000)}天前`;
+        
+        return date.toLocaleDateString();
+    } catch {
+        return '';
+    }
+}
+
+/**
+ * 更新"加载更多"按钮状态
+ */
+function updateLoadMoreButton() {
+    const container = document.getElementById('recall-load-more-container');
+    if (container) {
+        container.style.display = hasMoreMemories ? 'block' : 'none';
     }
 }
 
@@ -570,20 +882,61 @@ function displayForeshadowings(foreshadowings) {
     if (!listEl) return;
     
     if (!foreshadowings || foreshadowings.length === 0) {
-        listEl.innerHTML = '<p class="recall-empty">暂无伏笔</p>';
+        listEl.innerHTML = `
+            <div class="recall-empty-state">
+                <div class="recall-empty-icon">🎭</div>
+                <p>暂无伏笔</p>
+                <small>埋下故事线索</small>
+            </div>
+        `;
         return;
     }
     
     listEl.innerHTML = foreshadowings.map(f => `
         <div class="recall-foreshadowing-item" data-id="${f.id}">
-            <span class="recall-foreshadowing-status">${f.status === 'planted' ? '🌱' : '🌿'}</span>
+            <div class="recall-memory-header">
+                <span class="recall-memory-role">${f.status === 'planted' ? '🌱 已埋下' : '🌿 已解决'}</span>
+                <span class="recall-memory-time">重要性: ${(f.importance * 100).toFixed(0)}%</span>
+            </div>
             <p class="recall-foreshadowing-content">${escapeHtml(f.content)}</p>
-            <div class="recall-foreshadowing-meta">
-                <span>重要性: ${(f.importance * 100).toFixed(0)}%</span>
-                <button class="recall-btn-small recall-resolve-foreshadowing" data-id="${f.id}">解决</button>
+            <div class="recall-memory-footer">
+                <span></span>
+                ${f.status === 'planted' ? `<button class="recall-delete-btn recall-resolve-foreshadowing" data-id="${f.id}">✓ 解决</button>` : '<span class="recall-memory-score">已完成</span>'}
             </div>
         </div>
     `).join('');
+    
+    // 绑定解决按钮事件
+    listEl.querySelectorAll('.recall-resolve-foreshadowing').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            const button = e.currentTarget;
+            const id = button.dataset.id;
+            if (id && confirm('确定将此伏笔标记为已解决吗？')) {
+                await resolveForeshadowing(id);
+            }
+        });
+    });
+}
+
+/**
+ * 解决伏笔
+ */
+async function resolveForeshadowing(foreshadowingId) {
+    try {
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing/${foreshadowingId}/resolve`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ resolution: '用户手动标记为已解决' })
+        });
+        
+        if (response.ok) {
+            loadForeshadowings();
+        } else {
+            console.error('[Recall] 解决伏笔失败');
+        }
+    } catch (e) {
+        console.error('[Recall] 解决伏笔失败:', e);
+    }
 }
 
 /**

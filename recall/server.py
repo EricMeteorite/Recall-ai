@@ -419,12 +419,32 @@ async def search_memories(request: SearchRequest):
 @app.get("/v1/memories", tags=["Memories"])
 async def list_memories(
     user_id: str = Query(default="default", description="用户ID"),
-    limit: int = Query(default=100, ge=1, le=1000, description="限制数量")
+    limit: int = Query(default=100, ge=1, le=1000, description="限制数量"),
+    offset: int = Query(default=0, ge=0, description="偏移量，用于分页")
 ):
-    """获取所有记忆"""
+    """获取所有记忆
+    
+    支持分页：
+    - limit: 每页数量
+    - offset: 跳过的记录数
+    
+    示例：
+    - 第一页: ?limit=20&offset=0
+    - 第二页: ?limit=20&offset=20
+    """
     engine = get_engine()
-    memories = engine.get_all(user_id=user_id, limit=limit)
-    return {"memories": memories, "count": len(memories)}
+    all_memories = engine.get_all(user_id=user_id, limit=limit + offset)
+    
+    # 应用 offset
+    memories = all_memories[offset:offset + limit] if offset > 0 else all_memories[:limit]
+    
+    return {
+        "memories": memories, 
+        "count": len(memories),
+        "total": len(all_memories),
+        "offset": offset,
+        "limit": limit
+    }
 
 
 @app.get("/v1/memories/{memory_id}", tags=["Memories"])
@@ -449,6 +469,56 @@ async def delete_memory(memory_id: str, user_id: str = Query(default="default"))
         raise HTTPException(status_code=404, detail="记忆不存在或删除失败")
     
     return {"success": True, "message": "删除成功"}
+
+
+@app.delete("/v1/memories", tags=["Memories"])
+async def clear_memories(
+    user_id: str = Query(..., description="用户ID（角色名），必填"),
+    confirm: bool = Query(default=False, description="确认删除，必须为 true")
+):
+    """清空指定角色的所有记忆
+    
+    ⚠️ 危险操作！这将删除该角色的全部记忆数据，无法恢复。
+    
+    使用场景：
+    - 删除角色卡后清理对应的记忆数据
+    - 重置某个角色的所有记忆
+    
+    示例:
+        DELETE /v1/memories?user_id=角色名&confirm=true
+    """
+    if not confirm:
+        raise HTTPException(
+            status_code=400, 
+            detail="请添加 confirm=true 参数确认删除操作"
+        )
+    
+    if user_id == "default":
+        raise HTTPException(
+            status_code=400,
+            detail="不能删除 default 用户的记忆，请指定具体的角色名"
+        )
+    
+    engine = get_engine()
+    
+    # 先获取数量
+    memories = engine.get_all(user_id=user_id, limit=10000)
+    count = len(memories)
+    
+    if count == 0:
+        return {"success": True, "message": "该角色没有记忆数据", "deleted_count": 0}
+    
+    # 清空
+    success = engine.clear(user_id=user_id)
+    
+    if success:
+        return {
+            "success": True, 
+            "message": f"已清空角色 '{user_id}' 的所有记忆",
+            "deleted_count": count
+        }
+    else:
+        raise HTTPException(status_code=500, detail="清空失败")
 
 
 @app.put("/v1/memories/{memory_id}", tags=["Memories"])
@@ -566,6 +636,30 @@ async def get_stats():
     """获取统计信息"""
     engine = get_engine()
     return engine.get_stats()
+
+
+@app.get("/v1/users", tags=["Admin"])
+async def list_users():
+    """列出所有用户（角色）
+    
+    返回所有有记忆数据的角色列表，以及每个角色的记忆数量。
+    用于管理和清理不再需要的角色数据。
+    """
+    engine = get_engine()
+    users = engine.storage.list_users()
+    
+    result = []
+    for user_id in users:
+        memories = engine.get_all(user_id=user_id, limit=10000)
+        result.append({
+            "user_id": user_id,
+            "memory_count": len(memories)
+        })
+    
+    return {
+        "users": result,
+        "total": len(result)
+    }
 
 
 @app.post("/v1/config/reload", tags=["Admin"])
