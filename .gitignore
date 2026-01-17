@@ -91,7 +91,8 @@ secrets.yaml
 secrets.json
 
 # ==================== 模型缓存（可能很大） ====================
-models/
+# 注意: 不要用 models/ 因为会忽略 recall/models/ 代码目录
+recall_data/models/
 *.bin
 *.pt
 *.onnx
