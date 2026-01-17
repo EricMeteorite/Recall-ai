@@ -84,8 +84,12 @@ class EntityExtractor:
         """提取实体"""
         entities = []
         
+        # 限制处理长度，避免性能问题
+        max_len = 10000
+        truncated_text = text[:max_len] if len(text) > max_len else text
+        
         # 1. 使用spaCy提取命名实体
-        doc = self.nlp(text[:10000])  # 限制长度避免OOM
+        doc = self.nlp(truncated_text)
         for ent in doc.ents:
             entity_type = self._map_spacy_label(ent.label_)
             if entity_type:
@@ -93,30 +97,31 @@ class EntityExtractor:
                     name=ent.text,
                     entity_type=entity_type,
                     confidence=0.8,
-                    source_text=ent.sent.text if ent.sent else text[:100]
+                    source_text=ent.sent.text if ent.sent else truncated_text[:100]
                 ))
         
         # 2. 中文专名提取（引号内容、书名号内容）
-        quoted = re.findall(r'[「『"\'](.*?)[」』"\']', text)
+        quoted = re.findall(r'[「『"\'](.*?)[」』"\']', truncated_text)
         for name in quoted:
             if 2 <= len(name) <= 20:
                 entities.append(ExtractedEntity(
                     name=name,
                     entity_type='ITEM' if len(name) <= 4 else 'MISC',
                     confidence=0.6,
-                    source_text=text[:100]
+                    source_text=truncated_text[:100]
                 ))
         
-        # 3. 代码符号提取
-        code_symbols = re.findall(r'\b([A-Z][a-zA-Z0-9_]+)\b', text)  # CamelCase
-        code_symbols += re.findall(r'\b([a-z_][a-zA-Z0-9_]{2,})\b', text)  # snake_case
+        # 3. 代码符号提取（限制长度避免匹配超长字符串）
+        # 只匹配 3-50 字符的符号
+        code_symbols = re.findall(r'\b([A-Z][a-zA-Z0-9_]{2,49})\b', truncated_text)  # CamelCase
+        code_symbols += re.findall(r'\b([a-z_][a-zA-Z0-9_]{2,49})\b', truncated_text)  # snake_case
         for symbol in set(code_symbols):
             if not symbol.lower() in self.stopwords:
                 entities.append(ExtractedEntity(
                     name=symbol,
                     entity_type='CODE_SYMBOL',
                     confidence=0.5,
-                    source_text=text[:100]
+                    source_text=truncated_text[:100]
                 ))
         
         # 去重
@@ -133,14 +138,19 @@ class EntityExtractor:
         """提取关键词"""
         keywords = []
         
+        # 限制处理长度
+        max_len = 10000
+        truncated_text = text[:max_len] if len(text) > max_len else text
+        
         # jieba分词提取
-        words = self.jieba.cut(text)
+        words = self.jieba.cut(truncated_text)
         for word in words:
-            if len(word) >= 2 and word not in self.stopwords:
+            # 限制关键词长度在 2-50 字符
+            if 2 <= len(word) <= 50 and word not in self.stopwords:
                 keywords.append(word)
         
-        # 英文关键词
-        english_words = re.findall(r'[a-zA-Z]{3,}', text)
+        # 英文关键词（限制长度 3-50 字符）
+        english_words = re.findall(r'[a-zA-Z]{3,50}', truncated_text)
         keywords.extend([w.lower() for w in english_words if w.lower() not in self.stopwords])
         
         return list(set(keywords))

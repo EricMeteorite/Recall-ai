@@ -13,7 +13,7 @@ class IndexedEntity:
     name: str
     aliases: List[str]
     entity_type: str
-    turn_references: List[int]  # 出现过的轮次
+    turn_references: List[str]  # 出现过的记忆ID (如 mem_xxx)
 
 
 class EntityIndex:

@@ -112,25 +112,27 @@ class EightLayerRetriever:
         candidates: Set[str] = set()  # 候选ID集合
         results: List[RetrievalResult] = []
         
-        # L1: 布隆过滤器
-        if self.config['l1_enabled'] and self.bloom_filter:
+        # L1: 布隆过滤器（预过滤关键词）
+        filtered_keywords = keywords or []
+        if self.config['l1_enabled'] and self.bloom_filter and keywords:
             start = time.time()
-            # 布隆过滤器用于快速判断某个key是否可能存在
-            # 这里我们用keywords来过滤
-            if keywords:
-                for kw in keywords:
-                    if self.bloom_filter.might_contain(kw):
-                        candidates.add(kw)
-            self._record_stats(RetrievalLayer.L1_BLOOM_FILTER, 0, len(candidates), start)
+            # 布隆过滤器用于快速排除不存在的关键词
+            filtered_keywords = [
+                kw for kw in keywords 
+                if self.bloom_filter.might_contain(kw)
+            ]
+            self._record_stats(RetrievalLayer.L1_BLOOM_FILTER, len(keywords), len(filtered_keywords), start)
         
         # L2: 倒排索引
         if self.config['l2_enabled'] and self.inverted_index:
             start = time.time()
             input_count = len(candidates)
             
-            if keywords:
+            # 使用过滤后的关键词（如果L1启用）或原始关键词
+            search_keywords = filtered_keywords if filtered_keywords else keywords
+            if search_keywords:
                 # 使用 search_any 来搜索任一关键词
-                inverted_results = self.inverted_index.search_any(keywords)
+                inverted_results = self.inverted_index.search_any(search_keywords)
                 candidates.update(inverted_results)
             
             self._record_stats(RetrievalLayer.L2_INVERTED_INDEX, input_count, len(candidates), start)
@@ -142,7 +144,9 @@ class EightLayerRetriever:
             
             for entity in entities:
                 entity_results = self.entity_index.get_related_turns(entity)
-                candidates.update(r.turn_id for r in entity_results)
+                # entity_results 是 IndexedEntity 列表，需要提取 turn_references
+                for indexed_entity in entity_results:
+                    candidates.update(indexed_entity.turn_references)
             
             self._record_stats(RetrievalLayer.L3_ENTITY_INDEX, input_count, len(candidates), start)
         

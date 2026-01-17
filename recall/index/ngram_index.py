@@ -9,7 +9,7 @@ class OptimizedNgramIndex:
     
     def __init__(self):
         # 只索引名词短语，不做全文n-gram
-        self.noun_phrases: Dict[str, List[int]] = {}   # 名词短语 → [turn_ids]
+        self.noun_phrases: Dict[str, List[str]] = {}   # 名词短语 → [memory_ids]
         self._bloom_filter = None  # 可选的布隆过滤器
     
     @property
@@ -24,8 +24,13 @@ class OptimizedNgramIndex:
                 self._bloom_filter = set()
         return self._bloom_filter
     
-    def add(self, turn: int, content: str):
-        """添加索引（只提取名词短语）"""
+    def add(self, turn: str, content: str):
+        """添加索引（只提取名词短语）
+        
+        Args:
+            turn: memory_id（如 mem_xxx）
+            content: 记忆内容
+        """
         # 提取名词短语而非所有n-gram
         phrases = self._extract_noun_phrases(content)
         
@@ -55,11 +60,15 @@ class OptimizedNgramIndex:
         
         return phrases
     
-    def search(self, query: str) -> List[int]:
-        """搜索"""
+    def search(self, query: str) -> List[str]:
+        """搜索
+        
+        Returns:
+            List[str]: 匹配的 memory_id 列表
+        """
         phrases = self._extract_noun_phrases(query)
         
-        candidate_turns: Set[int] = set()
+        candidate_turns: Set[str] = set()
         for phrase in phrases:
             # 先用布隆过滤器快速排除
             if isinstance(self.bloom_filter, set):
@@ -75,4 +84,4 @@ class OptimizedNgramIndex:
             if phrase in self.noun_phrases:
                 candidate_turns.update(self.noun_phrases[phrase])
         
-        return sorted(candidate_turns)
+        return list(candidate_turns)

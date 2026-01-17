@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from .version import __version__
 from .init import RecallInit
 from .config import LightweightConfig
-from .models import Entity, Turn, Foreshadowing, Event, EntityType, EventType
+from .models import Entity, Turn, Event, EntityType, EventType
 from .storage import (
     VolumeManager, CoreSettings, ConsolidatedMemory,
     WorkingMemory, MultiTenantStorage, MemoryScope
@@ -20,6 +20,7 @@ from .processor import (
     EntityExtractor, ForeshadowingTracker,
     ConsistencyChecker, MemorySummarizer, ScenarioDetector
 )
+from .processor.foreshadowing import Foreshadowing
 from .retrieval import EightLayerRetriever, ContextBuilder, ParallelRetriever
 from .utils import (
     LLMClient, WarmupManager, PerformanceMonitor,
@@ -594,14 +595,15 @@ class RecallEngine:
                     'name': indexed.name,
                     'type': indexed.entity_type,
                     'aliases': indexed.aliases,
-                    'mention_count': indexed.mention_count,
-                    'related_turns': [t.turn_id for t in indexed.turns[:10]]
+                    'mention_count': len(indexed.turn_references),
+                    'related_turns': indexed.turn_references[:10]
                 }
         return None
     
     def get_related_entities(self, name: str) -> List[str]:
         """获取相关实体"""
-        return self.knowledge_graph.get_neighbors(name)
+        neighbors = self.knowledge_graph.get_neighbors(name)
+        return [neighbor_id for neighbor_id, _ in neighbors]
     
     # ==================== 管理 API ====================
     

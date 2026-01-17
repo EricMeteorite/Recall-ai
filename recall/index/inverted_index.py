@@ -14,8 +14,8 @@ class InvertedIndex:
         self.index_dir = os.path.join(data_path, 'indexes')
         self.index_file = os.path.join(self.index_dir, 'inverted_index.json')
         
-        # keyword → set of turn_ids
-        self.index: Dict[str, Set[int]] = defaultdict(set)
+        # keyword → set of turn_ids (支持 str 类型的 memory_id)
+        self.index: Dict[str, Set[str]] = defaultdict(set)
         self._dirty_count = 0  # 脏计数，用于批量保存优化
         
         self._load()
@@ -34,7 +34,7 @@ class InvertedIndex:
         with open(self.index_file, 'w', encoding='utf-8') as f:
             json.dump({k: list(v) for k, v in self.index.items()}, f, ensure_ascii=False)
     
-    def add(self, keyword: str, turn_id: int):
+    def add(self, keyword: str, turn_id: str):
         """添加索引项"""
         keyword = keyword.lower()
         self.index[keyword].add(turn_id)
@@ -44,28 +44,28 @@ class InvertedIndex:
             self._save()
             self._dirty_count = 0
     
-    def add_batch(self, keywords: List[str], turn_id: int):
+    def add_batch(self, keywords: List[str], turn_id: str):
         """批量添加"""
         for kw in keywords:
             self.index[kw.lower()].add(turn_id)
         self._save()
     
-    def search(self, keyword: str) -> List[int]:
+    def search(self, keyword: str) -> List[str]:
         """搜索包含关键词的轮次"""
-        return sorted(self.index.get(keyword.lower(), set()))
+        return list(self.index.get(keyword.lower(), set()))
     
-    def search_all(self, keywords: List[str]) -> List[int]:
+    def search_all(self, keywords: List[str]) -> List[str]:
         """搜索包含所有关键词的轮次（AND逻辑）"""
         if not keywords:
             return []
         
         result_sets = [self.index.get(kw.lower(), set()) for kw in keywords]
         intersection = set.intersection(*result_sets) if result_sets else set()
-        return sorted(intersection)
+        return list(intersection)
     
-    def search_any(self, keywords: List[str]) -> List[int]:
+    def search_any(self, keywords: List[str]) -> List[str]:
         """搜索包含任一关键词的轮次（OR逻辑）"""
         result = set()
         for kw in keywords:
             result.update(self.index.get(kw.lower(), set()))
-        return sorted(result)
+        return list(result)
