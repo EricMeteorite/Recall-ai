@@ -112,7 +112,6 @@ class RecallEngine:
         
         # 2. 加载配置
         self.config = self.env_manager.load_config()
-        self.lightweight = lightweight
         
         # 3. 确定 Embedding 配置
         if lightweight:
@@ -123,6 +122,9 @@ class RecallEngine:
             # 自动选择
             from .embedding.factory import auto_select_backend
             self.embedding_config = auto_select_backend()
+        
+        # 根据最终的 embedding_config 确定是否为轻量模式
+        self.lightweight = (self.embedding_config.backend == EmbeddingBackendType.NONE)
         
         # 4. 初始化组件
         self._init_components(llm_model, llm_api_key)

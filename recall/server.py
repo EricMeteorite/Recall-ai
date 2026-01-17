@@ -52,17 +52,38 @@ def get_default_config_content() -> str:
 # 
 # 使用方法：
 # 1. 直接用文本编辑器打开此文件
-# 2. 填入你需要的配置（三种方式选一种）
-# 3. 保存文件
-# 4. 热更新: curl -X POST http://localhost:18888/v1/config/reload
-# 5. 测试连接: curl http://localhost:18888/v1/config/test
+# 2. 设置 RECALL_EMBEDDING_MODE（必须！）
+# 3. 根据选择的模式填写对应的 API 配置
+# 4. 保存文件
+# 5. 热更新: curl -X POST http://localhost:18888/v1/config/reload
+# 6. 测试连接: curl http://localhost:18888/v1/config/test
 #
 # ============================================
 
 
 # ============================================
+# 【必须】选择 Embedding 模式
+# ============================================
+# 可选值：
+#   none       - 轻量模式，无语义搜索，内存最低（~100MB）
+#   siliconflow - 硅基流动 API（推荐国内用户）
+#   openai     - OpenAI API（或中转站）
+#   custom     - 自定义 API（Azure/Ollama/Gemini等）
+#   local      - 本地模型，完全离线，内存最高（~1.5GB）
+#
+# 示例：使用硅基流动
+# RECALL_EMBEDDING_MODE=siliconflow
+#
+# 示例：使用自定义API（如Gemini中转站）
+# RECALL_EMBEDDING_MODE=custom
+#
+RECALL_EMBEDDING_MODE=none
+
+
+# ============================================
 # 方式一：硅基流动（推荐国内用户，便宜快速）
 # ============================================
+# 设置 RECALL_EMBEDDING_MODE=siliconflow 后填写以下配置
 # 获取地址：https://cloud.siliconflow.cn/
 SILICONFLOW_API_KEY=
 # 模型选择（默认 BAAI/bge-large-zh-v1.5）
@@ -73,9 +94,10 @@ SILICONFLOW_MODEL=BAAI/bge-large-zh-v1.5
 # ============================================
 # 方式二：OpenAI（支持官方和中转站）
 # ============================================
+# 设置 RECALL_EMBEDDING_MODE=openai 后填写以下配置
 # 获取地址：https://platform.openai.com/
 OPENAI_API_KEY=
-# API 地址（默认官方，可改为中转站地址）
+# API 地址（默认官方，可改为中转站地址，不要带尾部斜杠）
 OPENAI_API_BASE=
 # 模型选择（默认 text-embedding-3-small）
 # 可选: text-embedding-3-small, text-embedding-3-large, text-embedding-ada-002
@@ -83,10 +105,18 @@ OPENAI_MODEL=text-embedding-3-small
 
 
 # ============================================
-# 方式三：自定义 API（Azure/Ollama/其他兼容服务）
+# 方式三：自定义 API（Azure/Ollama/Gemini等）
 # ============================================
-# 适用于：Azure OpenAI、本地Ollama、其他OpenAI兼容服务
-# 注意：需要同时填写 KEY、BASE、MODEL、DIMENSION
+# 设置 RECALL_EMBEDDING_MODE=custom 后填写以下配置
+# 适用于：Azure OpenAI、本地Ollama、Gemini中转站、其他OpenAI兼容服务
+# 注意：必须同时填写 KEY、BASE、MODEL、DIMENSION 四项
+#
+# 示例（Gemini中转站）：
+# EMBEDDING_API_KEY=sk-your-key
+# EMBEDDING_API_BASE=https://your-proxy.com/v1
+# EMBEDDING_MODEL=gemini-embedding-exp-03-07
+# EMBEDDING_DIMENSION=768
+#
 EMBEDDING_API_KEY=
 EMBEDDING_API_BASE=
 EMBEDDING_MODEL=
@@ -111,21 +141,9 @@ EMBEDDING_DIMENSION=1536
 #   nomic-embed-text         维度:768
 #   mxbai-embed-large        维度:1024
 #
-# ============================================
-# 模式说明
-# ============================================
-# 
-# 【轻量模式】不需要填写任何配置
-#   - 仅使用关键词搜索，无语义搜索
-#   - 内存占用最低（~100MB）
-# 
-# 【Hybrid模式】需要 API 配置（上面三种方式选一种）
-#   - 支持语义搜索
-#   - 内存占用低（~150MB）
-# 
-# 【完整模式】不需要填写任何配置
-#   - 使用本地模型，完全离线
-#   - 内存占用高（~1.5GB）
+# Gemini (通过中转站):
+#   gemini-embedding-exp-03-07  维度:768
+#   text-embedding-004          维度:768
 #
 # ============================================
 '''
@@ -659,12 +677,11 @@ async def test_connection():
     - dimension: 向量维度
     - latency_ms: API 调用延迟（毫秒）
     """
-    import time
-    
     engine = get_engine()
     
     # 检查是否是轻量模式
-    if engine.lightweight or engine.embedding_config.backend.value == "none":
+    config = engine.embedding_config
+    if engine.lightweight or not config or config.backend.value == "none":
         return {
             "success": True,
             "message": "轻量模式无需测试 API 连接",
@@ -675,7 +692,6 @@ async def test_connection():
         }
     
     # 从引擎获取当前配置
-    config = engine.embedding_config
     backend_type = config.backend.value if config.backend else "unknown"
     model = config.api_model or config.local_model or "unknown"
     dimension = config.dimension
@@ -726,8 +742,9 @@ async def test_connection():
         
         # 尝试获取当前配置信息用于错误响应
         try:
-            current_backend = engine.embedding_config.backend.value if engine.embedding_config else 'unknown'
-            current_model = engine.embedding_config.api_model or engine.embedding_config.local_model if engine.embedding_config else None
+            cfg = engine.embedding_config
+            current_backend = cfg.backend.value if cfg and cfg.backend else 'unknown'
+            current_model = (cfg.api_model or cfg.local_model) if cfg else None
         except:
             current_backend = os.environ.get('RECALL_EMBEDDING_MODE', 'auto')
             current_model = None
