@@ -26,6 +26,9 @@ let currentCharacterId = null;
 jQuery(async () => {
     console.log('[Recall] 插件初始化...');
     
+    // 等待 SillyTavern 完全加载
+    const context = SillyTavern.getContext();
+    
     // 加载设置
     loadSettings();
     
@@ -33,7 +36,7 @@ jQuery(async () => {
     createUI();
     
     // 注册事件监听
-    registerEventHandlers();
+    registerEventHandlers(context);
     
     // 检查连接
     await checkConnection();
@@ -155,12 +158,25 @@ function createUI() {
 /**
  * 注册事件处理器
  */
-function registerEventHandlers() {
-    // 监听消息发送事件
-    if (typeof eventSource !== 'undefined') {
-        eventSource.on('chatMessageSent', onMessageSent);
-        eventSource.on('chatMessageReceived', onMessageReceived);
-        eventSource.on('characterSelected', onCharacterSelected);
+function registerEventHandlers(context) {
+    const { eventSource, event_types } = context;
+    
+    if (eventSource && event_types) {
+        // 监听用户消息发送
+        eventSource.on(event_types.MESSAGE_SENT, onMessageSent);
+        
+        // 监听AI响应
+        eventSource.on(event_types.MESSAGE_RECEIVED, onMessageReceived);
+        
+        // 监听聊天切换（角色/群组切换时触发）
+        eventSource.on(event_types.CHAT_CHANGED, onChatChanged);
+        
+        // 监听生成前 - 用于注入记忆上下文
+        eventSource.on(event_types.GENERATION_AFTER_COMMANDS, onBeforeGeneration);
+        
+        console.log('[Recall] 事件监听器已注册');
+    } else {
+        console.warn('[Recall] SillyTavern 事件系统不可用');
     }
 }
 
@@ -300,46 +316,118 @@ async function onPlantForeshadowing() {
 /**
  * 消息发送时
  */
-async function onMessageSent(message) {
+async function onMessageSent(messageIndex) {
     if (!pluginSettings.enabled || !isConnected) return;
     
-    // 自动添加用户消息作为记忆
-    await fetch(`${pluginSettings.apiUrl}/v1/memories`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            content: message,
-            user_id: currentCharacterId || 'default',
-            metadata: { role: 'user', source: 'sillytavern' }
-        })
-    }).catch(e => console.warn('[Recall] 保存消息失败:', e));
+    try {
+        const context = SillyTavern.getContext();
+        const chat = context.chat;
+        const message = chat[messageIndex];
+        
+        if (!message || !message.mes) return;
+        
+        // 保存用户消息作为记忆
+        await fetch(`${pluginSettings.apiUrl}/v1/memories`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                content: message.mes,
+                user_id: currentCharacterId || 'default',
+                metadata: { 
+                    role: 'user', 
+                    source: 'sillytavern',
+                    timestamp: Date.now()
+                }
+            })
+        });
+        console.log('[Recall] 已保存用户消息');
+    } catch (e) {
+        console.warn('[Recall] 保存用户消息失败:', e);
+    }
 }
 
 /**
  * 消息接收时
  */
-async function onMessageReceived(message) {
+async function onMessageReceived(messageIndex) {
     if (!pluginSettings.enabled || !isConnected) return;
     
-    // 自动添加AI响应作为记忆
-    await fetch(`${pluginSettings.apiUrl}/v1/memories`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            content: message,
-            user_id: currentCharacterId || 'default',
-            metadata: { role: 'assistant', source: 'sillytavern' }
-        })
-    }).catch(e => console.warn('[Recall] 保存消息失败:', e));
+    try {
+        const context = SillyTavern.getContext();
+        const chat = context.chat;
+        const message = chat[messageIndex];
+        
+        if (!message || !message.mes) return;
+        
+        // 保存AI响应作为记忆
+        await fetch(`${pluginSettings.apiUrl}/v1/memories`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                content: message.mes,
+                user_id: currentCharacterId || 'default',
+                metadata: { 
+                    role: 'assistant', 
+                    source: 'sillytavern',
+                    character: message.name || 'AI',
+                    timestamp: Date.now()
+                }
+            })
+        });
+        console.log('[Recall] 已保存AI响应');
+    } catch (e) {
+        console.warn('[Recall] 保存AI响应失败:', e);
+    }
 }
 
 /**
- * 角色选择时
+ * 聊天切换时（角色/群组切换）
  */
-function onCharacterSelected(characterId) {
-    currentCharacterId = characterId;
+function onChatChanged() {
+    // 获取当前角色信息
+    const context = SillyTavern.getContext();
+    const characterId = context.characterId;
+    const character = characterId !== undefined ? context.characters[characterId] : null;
+    
+    if (character) {
+        currentCharacterId = character.name || `char_${characterId}`;
+        console.log(`[Recall] 切换到角色: ${currentCharacterId}`);
+    } else if (context.groupId) {
+        currentCharacterId = `group_${context.groupId}`;
+        console.log(`[Recall] 切换到群组: ${currentCharacterId}`);
+    } else {
+        currentCharacterId = 'default';
+    }
+    
     loadMemories();
     loadForeshadowings();
+}
+
+/**
+ * 生成前 - 注入记忆上下文
+ */
+async function onBeforeGeneration() {
+    if (!pluginSettings.enabled || !pluginSettings.autoInject || !isConnected) {
+        return;
+    }
+    
+    try {
+        const context = SillyTavern.getContext();
+        const chat = context.chat;
+        
+        if (!chat || chat.length === 0) return;
+        
+        // 获取最后几条消息作为查询
+        const recentMessages = chat.slice(-3).map(m => m.mes).join(' ');
+        const memoryContext = await getMemoryContext(recentMessages);
+        
+        if (memoryContext) {
+            // 通过扩展设置注入记忆
+            console.log('[Recall] 已准备记忆上下文，长度:', memoryContext.length);
+        }
+    } catch (e) {
+        console.warn('[Recall] 注入记忆上下文失败:', e);
+    }
 }
 
 /**

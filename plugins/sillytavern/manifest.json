@@ -9,8 +9,9 @@
     "version": "3.0.0",
     "description": "Recall - 智能记忆管理系统插件。为 SillyTavern 提供持久化记忆、实体追踪、伏笔管理等功能。",
     "homePage": "https://github.com/your-repo/recall-ai",
+    "auto_update": false,
     "i18n": {
-        "zh-CN": "i18n/zh-CN.json",
+        "zh-cn": "i18n/zh-CN.json",
         "en": "i18n/en.json"
     }
 }
