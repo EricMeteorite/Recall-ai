@@ -43,16 +43,16 @@ def init(data_root, lightweight):
     ) as progress:
         task = progress.add_task("创建目录结构...", total=None)
         
-        initializer = RecallInit(data_root)
-        initializer.ensure_directories()
+        # RecallInit 使用类方法，不需要实例化
+        actual_root = RecallInit.ensure_directories(data_root)
         
         progress.update(task, description="设置环境变量...")
-        initializer.setup_environment()
+        RecallInit.setup_environment(data_root)
         
         progress.update(task, description="完成!")
     
     console.print("\n[green]✓[/green] 初始化完成!")
-    console.print(f"  数据目录: {initializer.data_root}")
+    console.print(f"  数据目录: {actual_root}")
     
     if not lightweight:
         console.print("\n[yellow]提示:[/yellow] 首次运行可能需要下载模型，请确保网络连接。")

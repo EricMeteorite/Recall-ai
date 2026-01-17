@@ -286,6 +286,7 @@ install_deps() {
     echo ""
     
     # 直接显示 pip 输出，让用户看到进度
+    # 使用临时文件保存退出码
     pip install -e "$SCRIPT_DIR$EXTRAS" $PIP_MIRROR 2>&1 | while IFS= read -r line; do
         # 过滤并美化输出
         if [[ $line == *"Collecting"* ]]; then
@@ -304,13 +305,22 @@ install_deps() {
     
     echo ""
     
-    # 验证安装
-    if "$VENV_PATH/bin/recall" --version &> /dev/null; then
-        local ver=$("$VENV_PATH/bin/recall" --version 2>&1)
+    # 验证安装 - 检查 recall 命令是否存在
+    if [ -f "$VENV_PATH/bin/recall" ]; then
+        # 尝试获取版本，但不因为失败而退出
+        local ver=$("$VENV_PATH/bin/recall" --version 2>&1 || echo "已安装")
         print_success "依赖安装完成 ($ver)"
     else
-        print_error "依赖安装可能不完整，请检查错误信息"
-        exit 1
+        print_error "依赖安装可能不完整"
+        print_info "尝试手动检查: $VENV_PATH/bin/pip list | grep recall"
+        
+        # 额外检查是否 recall-ai 包存在
+        if "$VENV_PATH/bin/pip" show recall-ai &> /dev/null; then
+            print_warning "recall-ai 包已安装，但 CLI 可能有问题"
+            print_info "继续安装流程..."
+        else
+            exit 1
+        fi
     fi
 }
 
@@ -323,10 +333,12 @@ download_models() {
     
     print_info "下载 spaCy 中文模型 (约 50MB)..."
     
-    if python -m spacy download zh_core_web_sm $PIP_MIRROR 2>&1 | grep -q "✔"; then
+    # spacy download 不支持 pip 镜像参数
+    if python -m spacy download zh_core_web_sm 2>&1 | tee /dev/stderr | grep -qE "(✔|successfully|already)"; then
         print_success "spaCy 中文模型下载完成"
     else
         print_warning "模型下载可能不完整，但不影响基本功能"
+        print_info "可稍后手动下载: python -m spacy download zh_core_web_sm"
     fi
 }
 
@@ -449,7 +461,7 @@ do_repair() {
         2)
             print_info "完整重装中..."
             pip install -e "$SCRIPT_DIR" $PIP_MIRROR --force-reinstall
-            python -m spacy download zh_core_web_sm $PIP_MIRROR 2>&1 || true
+            python -m spacy download zh_core_web_sm 2>&1 || true
             ;;
         *)
             print_error "无效选项"
