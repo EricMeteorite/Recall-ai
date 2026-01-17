@@ -39,9 +39,14 @@ class EntityExtractor:
     
     @property
     def jieba(self):
-        """懒加载 jieba"""
+        """懒加载 jieba（缓存到项目目录）"""
         if self._jieba is None:
             import jieba
+            # 设置 jieba 缓存到项目目录，不污染系统
+            from ..init import RecallInit
+            cache_dir = os.path.join(RecallInit.get_data_root(), 'cache')
+            os.makedirs(cache_dir, exist_ok=True)
+            jieba.dt.tmp_dir = cache_dir  # 设置临时目录
             self._jieba = jieba
         return self._jieba
     
