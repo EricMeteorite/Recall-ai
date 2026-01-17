@@ -417,8 +417,59 @@ function registerEventHandlers(context) {
         eventSource.on(event_types.GENERATION_AFTER_COMMANDS, safeExecute(onBeforeGeneration, '准备记忆上下文失败'));
         
         console.log('[Recall] 事件监听器已注册');
+        
+        // 初始化时立即检测当前角色并加载记忆
+        setTimeout(() => {
+            initializeCurrentCharacter();
+        }, 500);
     } else {
         console.warn('[Recall] SillyTavern 事件系统不可用，自动记忆功能将不可用');
+    }
+}
+
+/**
+ * 初始化当前角色 - 页面加载/刷新时调用
+ */
+function initializeCurrentCharacter() {
+    try {
+        const context = SillyTavern.getContext();
+        const characterId = context.characterId;
+        const character = characterId !== undefined ? context.characters[characterId] : null;
+        
+        if (character) {
+            currentCharacterId = character.name || `char_${characterId}`;
+            console.log(`[Recall] 初始化角色: ${currentCharacterId}`);
+        } else if (context.groupId) {
+            currentCharacterId = `group_${context.groupId}`;
+            console.log(`[Recall] 初始化群组: ${currentCharacterId}`);
+        } else {
+            // 尝试从 chat 中获取
+            const chat = context.chat;
+            if (chat && chat.length > 0) {
+                const firstNonUserMsg = chat.find(m => !m.is_user && !m.is_system);
+                if (firstNonUserMsg && firstNonUserMsg.name) {
+                    currentCharacterId = firstNonUserMsg.name;
+                    console.log(`[Recall] 从聊天记录识别角色: ${currentCharacterId}`);
+                }
+            }
+            
+            if (!currentCharacterId) {
+                currentCharacterId = 'default';
+                console.log('[Recall] 未检测到角色，使用 default');
+            }
+        }
+        
+        // 更新UI显示
+        updateCharacterBadge();
+        
+        // 加载该角色的记忆
+        if (isConnected) {
+            loadMemories();
+            loadForeshadowings();
+        }
+    } catch (e) {
+        console.warn('[Recall] 初始化角色失败:', e);
+        currentCharacterId = 'default';
     }
 }
 
@@ -429,9 +480,16 @@ async function checkConnection() {
     try {
         const response = await fetch(`${pluginSettings.apiUrl}/health`);
         if (response.ok) {
+            const wasConnected = isConnected;
             isConnected = true;
             updateConnectionStatus(true);
             console.log('[Recall] API 连接成功');
+            
+            // 如果是首次连接成功，加载记忆
+            if (!wasConnected && currentCharacterId) {
+                loadMemories();
+                loadForeshadowings();
+            }
         } else {
             throw new Error('API 响应异常');
         }
@@ -866,8 +924,8 @@ function displayMemories(memories) {
     listEl.querySelectorAll('.recall-expand-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
-            const id = btn.dataset.id;
-            const item = listEl.querySelector(`.recall-memory-item[data-id="${id}"]`);
+            // 直接从按钮向上查找父元素，而不是用 data-id 选择器
+            const item = btn.closest('.recall-memory-item');
             if (!item) return;
             
             const isExpanded = item.dataset.expanded === 'true';
