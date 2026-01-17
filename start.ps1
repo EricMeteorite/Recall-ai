@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Recall AI - Windows 服务管理脚本 v2.0
 
@@ -119,6 +119,33 @@ function Test-ApiHealth {
     }
 }
 
+# ==================== Embedding 模式检测 ====================
+
+function Get-EmbeddingMode {
+    $modeFile = Join-Path $ScriptDir "recall_data\config\install_mode"
+    
+    if (Test-Path $modeFile) {
+        $installMode = Get-Content $modeFile -ErrorAction SilentlyContinue
+        switch ($installMode) {
+            "lightweight" { return "none" }
+            "hybrid" {
+                # Hybrid 模式需要检查 API Key
+                if ($env:OPENAI_API_KEY) {
+                    return "openai"
+                } elseif ($env:SILICONFLOW_API_KEY) {
+                    return "siliconflow"
+                } else {
+                    return "api_required"
+                }
+            }
+            "full" { return "local" }
+            default { return "local" }
+        }
+    } else {
+        return "local"
+    }
+}
+
 # ==================== 启动服务 ====================
 
 function Start-RecallService {
@@ -139,14 +166,46 @@ function Start-RecallService {
         return
     }
     
+    # 获取 Embedding 模式
+    $embeddingMode = Get-EmbeddingMode
+    
+    # 检查 Hybrid 模式是否配置了 API Key
+    if ($embeddingMode -eq "api_required") {
+        Write-Error2 "Hybrid 模式需要配置 API Key"
+        Write-Host ""
+        Write-Host "  请设置以下环境变量之一：" -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "  OpenAI:" -ForegroundColor White
+        Write-Host "    " -NoNewline; Write-Host '$env:OPENAI_API_KEY = "sk-xxx"' -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "  硅基流动 (推荐国内用户):" -ForegroundColor White
+        Write-Host "    " -NoNewline; Write-Host '$env:SILICONFLOW_API_KEY = "sf-xxx"' -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "  然后重新运行: " -NoNewline; Write-Host ".\start.ps1" -ForegroundColor Cyan
+        Write-Host ""
+        return
+    }
+    
     # 确保日志目录存在
     if (-not (Test-Path $LogDir)) {
         New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
     }
     
+    # 显示启动配置
     Write-Success "API 地址: http://${BindHost}:${Port}"
     Write-Success "API 文档: http://localhost:${Port}/docs"
+    
+    # 显示 Embedding 模式
+    switch ($embeddingMode) {
+        "none" { Write-Info "Embedding: 轻量模式 (仅关键词搜索)" }
+        "openai" { Write-Success "Embedding: Hybrid-OpenAI (API 语义搜索)" }
+        "siliconflow" { Write-Success "Embedding: Hybrid-硅基流动 (API 语义搜索)" }
+        "local" { Write-Success "Embedding: 完整模式 (本地模型)" }
+    }
     Write-Host ""
+    
+    # 设置环境变量
+    $env:RECALL_EMBEDDING_MODE = $embeddingMode
     
     if ($IsDaemon) {
         Write-Info "后台启动中..."

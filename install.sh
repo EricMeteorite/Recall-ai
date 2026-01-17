@@ -26,6 +26,7 @@ VENV_PATH="$SCRIPT_DIR/recall-env"
 DATA_PATH="$SCRIPT_DIR/recall_data"
 PIP_MIRROR=""
 INSTALL_SUCCESS=false
+INSTALL_MODE="full"  # lightweight, hybrid, full
 
 # ==================== 工具函数 ====================
 
@@ -85,6 +86,33 @@ trap cleanup EXIT
 
 # ==================== 菜单函数 ====================
 
+show_mode_selection() {
+    echo ""
+    echo -e "${BOLD}请选择安装模式：${NC}"
+    echo ""
+    echo -e "  1) ${GREEN}轻量模式${NC}     ~100MB 内存，仅关键词搜索"
+    echo -e "     ${CYAN}适合: 内存 < 1GB 的服务器${NC}"
+    echo ""
+    echo -e "  2) ${GREEN}Hybrid模式${NC}   ~150MB 内存，使用云端API进行向量搜索 ${YELLOW}★推荐★${NC}"
+    echo -e "     ${CYAN}适合: 任何服务器，全功能，需要API Key${NC}"
+    echo ""
+    echo -e "  3) ${GREEN}完整模式${NC}     ~1.5GB 内存，本地向量模型"
+    echo -e "     ${CYAN}适合: 高配服务器，完全离线${NC}"
+    echo ""
+    read -p "请选择 [1-3，默认2]: " mode_choice
+    
+    case "${mode_choice:-2}" in
+        1) INSTALL_MODE="lightweight" ;;
+        2) INSTALL_MODE="hybrid" ;;
+        3) INSTALL_MODE="full" ;;
+        *) echo -e "${YELLOW}使用默认 Hybrid 模式${NC}"; INSTALL_MODE="hybrid" ;;
+    esac
+    
+    echo ""
+    echo -e "已选择: ${GREEN}$INSTALL_MODE${NC} 模式"
+    echo ""
+}
+
 show_menu() {
     echo -e "${BOLD}请选择操作：${NC}"
     echo ""
@@ -98,8 +126,8 @@ show_menu() {
     read -p "请输入选项 [1-6]: " choice
     
     case $choice in
-        1) CLEANUP_ON_FAIL=true; do_install ;;
-        2) PIP_MIRROR="-i https://pypi.tuna.tsinghua.edu.cn/simple"; CLEANUP_ON_FAIL=true; do_install ;;
+        1) show_mode_selection; CLEANUP_ON_FAIL=true; do_install ;;
+        2) show_mode_selection; PIP_MIRROR="-i https://pypi.tuna.tsinghua.edu.cn/simple"; CLEANUP_ON_FAIL=true; do_install ;;
         3) do_repair ;;
         4) do_uninstall ;;
         5) show_install_status ;;
@@ -215,8 +243,22 @@ install_deps() {
     else
         echo -e "    ${YELLOW}! 使用默认源，如果较慢可用 --mirror 参数${NC}"
     fi
-    echo -e "    ${YELLOW}! 首次安装需要下载约 1GB 依赖${NC}"
-    echo -e "    ${YELLOW}! 预计需要 5-15 分钟，请耐心等待${NC}"
+    
+    # 根据模式显示预计大小
+    case $INSTALL_MODE in
+        lightweight)
+            echo -e "    ${CYAN}ℹ 轻量模式：下载约 300MB 依赖${NC}"
+            echo -e "    ${CYAN}ℹ 预计需要 3-5 分钟${NC}"
+            ;;
+        hybrid)
+            echo -e "    ${CYAN}ℹ Hybrid模式：下载约 400MB 依赖${NC}"
+            echo -e "    ${CYAN}ℹ 预计需要 5-8 分钟${NC}"
+            ;;
+        full)
+            echo -e "    ${CYAN}ℹ 完整模式：下载约 1.5GB 依赖 (包含 PyTorch)${NC}"
+            echo -e "    ${CYAN}ℹ 预计需要 10-20 分钟${NC}"
+            ;;
+    esac
     echo ""
     
     # 升级 pip
@@ -224,12 +266,27 @@ install_deps() {
     pip install --upgrade pip $PIP_MIRROR -q 2>&1
     print_success "pip 升级完成"
     
-    # 安装项目依赖
-    print_info "安装项目依赖..."
+    # 根据模式安装不同依赖
+    local EXTRAS=""
+    case $INSTALL_MODE in
+        lightweight)
+            EXTRAS=""
+            print_info "安装轻量依赖..."
+            ;;
+        hybrid)
+            EXTRAS="[hybrid]"
+            print_info "安装 Hybrid 依赖 (FAISS)..."
+            ;;
+        full)
+            EXTRAS="[full]"
+            print_info "安装完整依赖 (sentence-transformers + FAISS)..."
+            ;;
+    esac
+    
     echo ""
     
     # 直接显示 pip 输出，让用户看到进度
-    pip install -e "$SCRIPT_DIR" $PIP_MIRROR 2>&1 | while IFS= read -r line; do
+    pip install -e "$SCRIPT_DIR$EXTRAS" $PIP_MIRROR 2>&1 | while IFS= read -r line; do
         # 过滤并美化输出
         if [[ $line == *"Collecting"* ]]; then
             pkg=$(echo "$line" | sed 's/Collecting //' | cut -d' ' -f1)
@@ -281,10 +338,22 @@ initialize() {
     source "$VENV_PATH/bin/activate"
     
     print_info "运行初始化..."
-    recall init --lightweight 2>&1 || true
+    
+    # 根据模式初始化
+    case $INSTALL_MODE in
+        lightweight)
+            recall init --lightweight 2>&1 || true
+            ;;
+        *)
+            recall init 2>&1 || true
+            ;;
+    esac
     
     # 创建数据目录
     mkdir -p "$DATA_PATH"/{data,logs,cache,models,config,temp}
+    
+    # 保存安装模式
+    echo "$INSTALL_MODE" > "$DATA_PATH/config/install_mode"
     
     print_success "初始化完成"
 }
@@ -309,6 +378,33 @@ do_install() {
     echo -e "${GREEN}╔════════════════════════════════════════════╗${NC}"
     echo -e "${GREEN}║${NC}           ${BOLD}🎉 安装成功！${NC}                     ${GREEN}║${NC}"
     echo -e "${GREEN}╚════════════════════════════════════════════╝${NC}"
+    echo ""
+    
+    # 根据模式显示不同提示
+    case $INSTALL_MODE in
+        lightweight)
+            echo -e "  ${BOLD}安装模式:${NC} ${CYAN}轻量模式${NC}"
+            echo -e "  ${YELLOW}注意: 轻量模式仅支持关键词搜索，无语义搜索${NC}"
+            ;;
+        hybrid)
+            echo -e "  ${BOLD}安装模式:${NC} ${CYAN}Hybrid模式${NC}"
+            echo ""
+            echo -e "  ${YELLOW}⚠ 重要: 启动前需要配置 API Key!${NC}"
+            echo ""
+            echo -e "  支持的 API 提供商:"
+            echo -e "    - OpenAI (text-embedding-3-small)"
+            echo -e "    - 硅基流动 (BAAI/bge-large-zh-v1.5) ${GREEN}推荐国内用户${NC}"
+            echo ""
+            echo -e "  配置方式 (二选一):"
+            echo -e "    ${CYAN}export OPENAI_API_KEY=sk-xxx${NC}"
+            echo -e "    ${CYAN}export SILICONFLOW_API_KEY=sf-xxx${NC}"
+            ;;
+        full)
+            echo -e "  ${BOLD}安装模式:${NC} ${CYAN}完整模式${NC}"
+            echo -e "  ${GREEN}✓ 本地模型，无需API Key，完全离线运行${NC}"
+            ;;
+    esac
+    
     echo ""
     echo -e "  ${BOLD}启动服务:${NC}"
     echo -e "    前台运行: ${CYAN}./start.sh${NC}"

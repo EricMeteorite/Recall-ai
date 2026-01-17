@@ -26,6 +26,8 @@ from .utils import (
     EnvironmentManager, AutoMaintainer
 )
 from .utils.perf_monitor import MetricType
+from .embedding import EmbeddingConfig
+from .embedding.base import EmbeddingBackendType
 
 
 @dataclass
@@ -84,6 +86,7 @@ class RecallEngine:
         llm_model: Optional[str] = None,
         llm_api_key: Optional[str] = None,
         lightweight: bool = False,
+        embedding_config: Optional[EmbeddingConfig] = None,
         auto_warmup: bool = True
     ):
         """初始化 Recall 引擎
@@ -92,7 +95,13 @@ class RecallEngine:
             data_root: 数据存储根目录，默认为 ./recall_data
             llm_model: LLM 模型名称，默认为 gpt-3.5-turbo
             llm_api_key: LLM API Key
-            lightweight: 是否使用轻量模式（约80MB内存）
+            lightweight: 是否使用轻量模式（约80MB内存，无语义搜索）
+            embedding_config: Embedding 配置，支持三种模式：
+                - None/自动: 根据环境自动选择
+                - EmbeddingConfig.lightweight(): 轻量模式，~100MB内存
+                - EmbeddingConfig.hybrid_openai(key): Hybrid模式，~150MB内存
+                - EmbeddingConfig.hybrid_siliconflow(key): Hybrid模式（国内）
+                - EmbeddingConfig.full(): 完整模式，~1.5GB内存
             auto_warmup: 是否自动预热模型
         """
         # 1. 初始化环境
@@ -104,14 +113,39 @@ class RecallEngine:
         self.config = self.env_manager.load_config()
         self.lightweight = lightweight
         
-        # 3. 初始化组件
+        # 3. 确定 Embedding 配置
+        if lightweight:
+            self.embedding_config = EmbeddingConfig.lightweight()
+        elif embedding_config:
+            self.embedding_config = embedding_config
+        else:
+            # 自动选择
+            from .embedding.factory import auto_select_backend
+            self.embedding_config = auto_select_backend()
+        
+        # 4. 初始化组件
         self._init_components(llm_model, llm_api_key)
         
-        # 4. 预热
-        if auto_warmup and not lightweight:
+        # 5. 预热
+        if auto_warmup and not lightweight and self.embedding_config.backend == EmbeddingBackendType.LOCAL:
             self._warmup()
         
-        print(f"[Recall v{__version__}] 引擎初始化完成")
+        # 打印模式信息
+        mode = self._get_mode_name()
+        print(f"[Recall v{__version__}] 引擎初始化完成 ({mode})")
+    
+    def _get_mode_name(self) -> str:
+        """获取当前模式名称"""
+        backend = self.embedding_config.backend
+        if backend == EmbeddingBackendType.NONE:
+            return "轻量模式"
+        elif backend == EmbeddingBackendType.LOCAL:
+            return "完整模式"
+        elif backend == EmbeddingBackendType.OPENAI:
+            return "Hybrid模式-OpenAI"
+        elif backend == EmbeddingBackendType.SILICONFLOW:
+            return "Hybrid模式-硅基流动"
+        return "未知模式"
     
     def _init_components(
         self,
@@ -175,11 +209,14 @@ class RecallEngine:
         
         self._entity_index = EntityIndex(data_path=self.data_root)
         self._inverted_index = InvertedIndex(data_path=self.data_root)
-        self._vector_index = VectorIndex(data_path=self.data_root)
+        self._vector_index = VectorIndex(
+            data_path=self.data_root,
+            embedding_config=self.embedding_config
+        )
         self._ngram_index = OptimizedNgramIndex()
     
     def _warmup(self):
-        """预热模型"""
+        """预热模型（仅完整模式）"""
         warmup_manager = WarmupManager()
         
         # 注册预热任务
@@ -189,12 +226,14 @@ class RecallEngine:
             priority=10
         )
         
-        if self._vector_index:
-            warmup_manager.register(
-                'vector_model',
-                lambda: self._vector_index.model,
-                priority=5
-            )
+        # 只有本地模式才预热向量模型
+        if self._vector_index and self._vector_index.enabled:
+            if self.embedding_config.backend == EmbeddingBackendType.LOCAL:
+                warmup_manager.register(
+                    'vector_model',
+                    lambda: self._vector_index.embedding_backend.model,
+                    priority=5
+                )
         
         # 后台预热
         warmup_manager.warmup_async()
@@ -627,9 +666,9 @@ class RecallEngine:
     
     def close(self):
         """关闭引擎"""
-        # 保存索引
+        # 保存并关闭索引
         if self._vector_index:
-            self._vector_index.save()
+            self._vector_index.close()
         
         print("[Recall] 引擎已关闭")
 

@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Recall AI - Windows 安装脚本 v2.0
 
@@ -35,6 +35,7 @@ $DataPath = Join-Path $ScriptDir "recall_data"
 $PipMirror = ""
 $InstallSuccess = $false
 $VenvCreated = $false
+$InstallMode = "full"  # lightweight, hybrid, full
 
 # ==================== 工具函数 ====================
 
@@ -103,6 +104,35 @@ function Invoke-Cleanup {
 
 # ==================== 菜单函数 ====================
 
+function Show-ModeSelection {
+    Write-Host ""
+    Write-Host "请选择安装模式：" -ForegroundColor White
+    Write-Host ""
+    Write-Host "  1) " -NoNewline; Write-Host "轻量模式" -ForegroundColor Green -NoNewline; Write-Host "     ~100MB 内存，仅关键词搜索"
+    Write-Host "     适合: 内存 < 1GB 的服务器" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  2) " -NoNewline; Write-Host "Hybrid模式" -ForegroundColor Green -NoNewline; Write-Host "   ~150MB 内存，使用云端API进行向量搜索 " -NoNewline; Write-Host "★推荐★" -ForegroundColor Yellow
+    Write-Host "     适合: 任何服务器，全功能，需要API Key" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  3) " -NoNewline; Write-Host "完整模式" -ForegroundColor Green -NoNewline; Write-Host "     ~1.5GB 内存，本地向量模型"
+    Write-Host "     适合: 高配服务器，完全离线" -ForegroundColor Cyan
+    Write-Host ""
+    
+    $modeChoice = Read-Host "请选择 [1-3，默认2]"
+    
+    switch ($modeChoice) {
+        "1" { $script:InstallMode = "lightweight" }
+        "3" { $script:InstallMode = "full" }
+        default { $script:InstallMode = "hybrid" }
+    }
+    
+    Write-Host ""
+    Write-Host "已选择: " -NoNewline
+    Write-Host "$($script:InstallMode)" -ForegroundColor Green -NoNewline
+    Write-Host " 模式"
+    Write-Host ""
+}
+
 function Show-Menu {
     Write-Host "请选择操作：" -ForegroundColor White
     Write-Host ""
@@ -118,8 +148,8 @@ function Show-Menu {
     $choice = Read-Host "请输入选项 [1-6]"
     
     switch ($choice) {
-        "1" { Invoke-Install }
-        "2" { $script:PipMirror = "-i https://pypi.tuna.tsinghua.edu.cn/simple"; Invoke-Install }
+        "1" { Show-ModeSelection; Invoke-Install }
+        "2" { Show-ModeSelection; $script:PipMirror = "-i https://pypi.tuna.tsinghua.edu.cn/simple"; Invoke-Install }
         "3" { Invoke-Repair }
         "4" { Invoke-Uninstall }
         "5" { Show-Status }
@@ -239,8 +269,22 @@ function Install-Dependencies {
     } else {
         Write-Host "    ! 使用默认源，如果较慢可用 -Mirror 参数" -ForegroundColor Yellow
     }
-    Write-Host "    ! 首次安装需要下载约 1GB 依赖" -ForegroundColor Yellow
-    Write-Host "    ! 预计需要 5-15 分钟，请耐心等待" -ForegroundColor Yellow
+    
+    # 根据模式显示预计大小
+    switch ($InstallMode) {
+        "lightweight" {
+            Write-Host "    ℹ 轻量模式：下载约 300MB 依赖" -ForegroundColor Cyan
+            Write-Host "    ℹ 预计需要 3-5 分钟" -ForegroundColor Cyan
+        }
+        "hybrid" {
+            Write-Host "    ℹ Hybrid模式：下载约 400MB 依赖" -ForegroundColor Cyan
+            Write-Host "    ℹ 预计需要 5-8 分钟" -ForegroundColor Cyan
+        }
+        "full" {
+            Write-Host "    ℹ 完整模式：下载约 1.5GB 依赖 (包含 PyTorch)" -ForegroundColor Cyan
+            Write-Host "    ℹ 预计需要 10-20 分钟" -ForegroundColor Cyan
+        }
+    }
     Write-Host ""
     
     # 升级 pip
@@ -254,7 +298,24 @@ function Install-Dependencies {
     Write-Info "安装项目依赖..."
     Write-Host ""
     
-    $pipArgs = @("install", "-e", $ScriptDir)
+    # 根据模式安装不同依赖
+    $extras = ""
+    switch ($InstallMode) {
+        "lightweight" { 
+            $extras = ""
+            Write-Info "安装轻量依赖..."
+        }
+        "hybrid" { 
+            $extras = "[hybrid]"
+            Write-Info "安装 Hybrid 依赖 (FAISS)..."
+        }
+        "full" { 
+            $extras = "[full]"
+            Write-Info "安装完整依赖 (sentence-transformers + FAISS)..."
+        }
+    }
+    
+    $pipArgs = @("install", "-e", "$ScriptDir$extras")
     if ($PipMirror) { $pipArgs += $PipMirror.Split(" ") }
     
     # 实时显示进度
@@ -326,7 +387,16 @@ function Initialize-Recall {
     $recallPath = Join-Path $VenvPath "Scripts\recall.exe"
     
     Write-Info "运行初始化..."
-    & $recallPath init --lightweight 2>&1 | Out-Null
+    
+    # 根据模式初始化
+    switch ($InstallMode) {
+        "lightweight" {
+            & $recallPath init --lightweight 2>&1 | Out-Null
+        }
+        default {
+            & $recallPath init 2>&1 | Out-Null
+        }
+    }
     
     # 创建数据目录
     $dirs = @("data", "logs", "cache", "models", "config", "temp")
@@ -336,6 +406,10 @@ function Initialize-Recall {
             New-Item -ItemType Directory -Path $path -Force | Out-Null
         }
     }
+    
+    # 保存安装模式
+    $modePath = Join-Path $DataPath "config\install_mode"
+    Set-Content -Path $modePath -Value $InstallMode
     
     Write-Success "初始化完成"
 }
@@ -361,6 +435,33 @@ function Invoke-Install {
         Write-Host "╔════════════════════════════════════════════╗" -ForegroundColor Green
         Write-Host "║           🎉 安装成功！                     ║" -ForegroundColor Green
         Write-Host "╚════════════════════════════════════════════╝" -ForegroundColor Green
+        Write-Host ""
+        
+        # 根据模式显示不同提示
+        switch ($InstallMode) {
+            "lightweight" {
+                Write-Host "  安装模式: " -NoNewline; Write-Host "轻量模式" -ForegroundColor Cyan
+                Write-Host "  " -NoNewline; Write-Host "注意: 轻量模式仅支持关键词搜索，无语义搜索" -ForegroundColor Yellow
+            }
+            "hybrid" {
+                Write-Host "  安装模式: " -NoNewline; Write-Host "Hybrid模式" -ForegroundColor Cyan
+                Write-Host ""
+                Write-Host "  ⚠ 重要: 启动前需要配置 API Key!" -ForegroundColor Yellow
+                Write-Host ""
+                Write-Host "  支持的 API 提供商:"
+                Write-Host "    - OpenAI (text-embedding-3-small)"
+                Write-Host "    - 硅基流动 (BAAI/bge-large-zh-v1.5) " -NoNewline; Write-Host "推荐国内用户" -ForegroundColor Green
+                Write-Host ""
+                Write-Host "  配置方式 (二选一):"
+                Write-Host "    " -NoNewline; Write-Host '$env:OPENAI_API_KEY = "sk-xxx"' -ForegroundColor Cyan
+                Write-Host "    " -NoNewline; Write-Host '$env:SILICONFLOW_API_KEY = "sf-xxx"' -ForegroundColor Cyan
+            }
+            "full" {
+                Write-Host "  安装模式: " -NoNewline; Write-Host "完整模式" -ForegroundColor Cyan
+                Write-Host "  " -NoNewline; Write-Host "✓ 本地模型，无需API Key，完全离线运行" -ForegroundColor Green
+            }
+        }
+        
         Write-Host ""
         Write-Host "  启动服务:" -ForegroundColor White
         Write-Host "    前台运行: " -NoNewline; Write-Host ".\start.ps1" -ForegroundColor Cyan

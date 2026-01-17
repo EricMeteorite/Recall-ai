@@ -78,10 +78,26 @@ _engine: Optional[RecallEngine] = None
 
 
 def get_engine() -> RecallEngine:
-    """获取全局引擎实例"""
+    """获取全局引擎实例
+    
+    根据环境变量 RECALL_EMBEDDING_MODE 自动选择模式：
+    - none: 轻量模式
+    - local: 完整模式
+    - openai: Hybrid-OpenAI
+    - siliconflow: Hybrid-硅基流动
+    """
     global _engine
     if _engine is None:
-        _engine = RecallEngine(lightweight=True)
+        import os
+        embedding_mode = os.environ.get('RECALL_EMBEDDING_MODE', '').lower()
+        
+        if embedding_mode == 'none':
+            # 轻量模式
+            _engine = RecallEngine(lightweight=True)
+        else:
+            # 其他模式：让 engine 自动选择
+            # embedding_config 会根据环境变量自动检测
+            _engine = RecallEngine(lightweight=False)
     return _engine
 
 

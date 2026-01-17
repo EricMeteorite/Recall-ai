@@ -159,7 +159,9 @@ class EightLayerRetriever:
             self._record_stats(RetrievalLayer.L4_NGRAM_INDEX, input_count, len(candidates), start)
         
         # L5: 向量粗筛
-        if self.config['l5_enabled'] and self.vector_index:
+        # 检查向量索引是否存在且启用（支持轻量模式）
+        vector_enabled = self.vector_index and getattr(self.vector_index, 'enabled', True)
+        if self.config['l5_enabled'] and vector_enabled:
             start = time.time()
             input_count = len(candidates)
             
@@ -181,7 +183,7 @@ class EightLayerRetriever:
             self._record_stats(RetrievalLayer.L5_VECTOR_COARSE, input_count, len(results), start)
         
         # L6: 向量精排
-        if self.config['l6_enabled'] and self.vector_index and results:
+        if self.config['l6_enabled'] and vector_enabled and results:
             start = time.time()
             input_count = len(results)
             

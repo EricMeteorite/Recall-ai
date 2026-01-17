@@ -221,6 +221,35 @@ do_logs() {
     tail -n 50 -f "$LOG_FILE"
 }
 
+# ==================== 检查 Embedding 模式 ====================
+
+get_embedding_mode() {
+    # 检查安装模式文件
+    local mode_file="$DATA_PATH/config/install_mode"
+    
+    if [ -f "$mode_file" ]; then
+        local install_mode=$(cat "$mode_file")
+        case $install_mode in
+            lightweight) echo "none" ;;
+            hybrid)
+                # Hybrid 模式需要检查 API Key
+                if [ -n "$OPENAI_API_KEY" ]; then
+                    echo "openai"
+                elif [ -n "$SILICONFLOW_API_KEY" ]; then
+                    echo "siliconflow"
+                else
+                    echo "api_required"
+                fi
+                ;;
+            full) echo "local" ;;
+            *) echo "local" ;;
+        esac
+    else
+        # 默认完整模式
+        echo "local"
+    fi
+}
+
 # ==================== 启动服务 ====================
 
 do_start() {
@@ -244,17 +273,56 @@ do_start() {
         exit 1
     fi
     
+    # 获取 Embedding 模式
+    local embedding_mode=$(get_embedding_mode)
+    
+    # 检查 Hybrid 模式是否配置了 API Key
+    if [ "$embedding_mode" = "api_required" ]; then
+        print_error "Hybrid 模式需要配置 API Key"
+        echo ""
+        echo -e "  ${YELLOW}请设置以下环境变量之一：${NC}"
+        echo ""
+        echo -e "  OpenAI:"
+        echo -e "    ${CYAN}export OPENAI_API_KEY=sk-xxx${NC}"
+        echo ""
+        echo -e "  硅基流动 (推荐国内用户):"
+        echo -e "    ${CYAN}export SILICONFLOW_API_KEY=sf-xxx${NC}"
+        echo ""
+        echo -e "  然后重新运行: ${CYAN}./start.sh${NC}"
+        exit 1
+    fi
+    
     # 激活虚拟环境
     source "$VENV_PATH/bin/activate"
     
     # 确保日志目录存在
     mkdir -p "$(dirname "$LOG_FILE")"
     
+    # 显示启动配置
     echo -e "${BOLD}启动配置${NC}"
     echo ""
     print_info "监听地址: $HOST:$PORT"
     print_info "API 文档: http://localhost:$PORT/docs"
+    
+    # 显示 Embedding 模式
+    case $embedding_mode in
+        none)
+            print_info "Embedding: ${YELLOW}轻量模式${NC} (仅关键词搜索)"
+            ;;
+        openai)
+            print_info "Embedding: ${GREEN}Hybrid-OpenAI${NC} (API 语义搜索)"
+            ;;
+        siliconflow)
+            print_info "Embedding: ${GREEN}Hybrid-硅基流动${NC} (API 语义搜索)"
+            ;;
+        local)
+            print_info "Embedding: ${GREEN}完整模式${NC} (本地模型)"
+            ;;
+    esac
     echo ""
+    
+    # 设置 Embedding 环境变量
+    export RECALL_EMBEDDING_MODE="$embedding_mode"
     
     if [ "$daemon_mode" = true ]; then
         # 后台运行
