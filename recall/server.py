@@ -413,13 +413,12 @@ async def list_memories(
 async def get_memory(memory_id: str, user_id: str = Query(default="default")):
     """获取单条记忆"""
     engine = get_engine()
-    memories = engine.get_all(user_id=user_id)
+    memory = engine.get(memory_id, user_id=user_id)
     
-    for m in memories:
-        if m.get('id') == memory_id:
-            return m
+    if memory is None:
+        raise HTTPException(status_code=404, detail="记忆不存在")
     
-    raise HTTPException(status_code=404, detail="记忆不存在")
+    return memory
 
 
 @app.delete("/v1/memories/{memory_id}", tags=["Memories"])

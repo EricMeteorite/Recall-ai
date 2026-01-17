@@ -314,7 +314,7 @@ class RecallEngine:
                     )
             
             if self._inverted_index:
-                self._inverted_index.add(memory_id, keywords)
+                self._inverted_index.add_batch(keywords, memory_id)
             
             if self._ngram_index:
                 # NgamIndex.add 接受 (turn_id, content)
