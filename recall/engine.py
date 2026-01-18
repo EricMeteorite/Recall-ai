@@ -660,6 +660,23 @@ class RecallEngine:
             auto_resolve=auto_resolve
         )
     
+    def enable_foreshadowing_llm_mode(
+        self,
+        api_key: str,
+        model: str = "gpt-4o-mini",
+        base_url: Optional[str] = None
+    ):
+        """启用伏笔分析器的 LLM 模式（动态切换，无需重启）"""
+        self.foreshadowing_analyzer.enable_llm_mode(
+            api_key=api_key,
+            model=model,
+            base_url=base_url
+        )
+    
+    def disable_foreshadowing_llm_mode(self):
+        """禁用伏笔分析器的 LLM 模式，切换回手动模式"""
+        self.foreshadowing_analyzer.disable_llm_mode()
+    
     # ==================== 实体 API ====================
     
     def get_entity(self, name: str) -> Optional[Dict[str, Any]]:

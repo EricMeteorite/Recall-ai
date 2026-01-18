@@ -446,6 +446,14 @@ function createUI() {
                         <div class="recall-setting-hint" style="margin-top:-5px;margin-bottom:10px;">控制 LLM 自动分析伏笔的行为（需要配置 LLM API）</div>
                         
                         <div class="recall-setting-group">
+                            <label class="recall-checkbox-label">
+                                <input type="checkbox" id="recall-llm-enabled">
+                                <span>启用 LLM 分析</span>
+                            </label>
+                            <div class="recall-setting-hint">开启后，对话时会自动使用 LLM 分析伏笔</div>
+                        </div>
+                        
+                        <div class="recall-setting-group">
                             <label class="recall-setting-title">分析触发间隔</label>
                             <input type="number" id="recall-trigger-interval" class="text_pole" 
                                    min="1" max="100" value="10" placeholder="10">
@@ -1065,22 +1073,35 @@ async function loadForeshadowingAnalyzerConfig() {
         }
         
         const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing/analyzer/config`);
-        const config = await response.json();
+        const result = await response.json();
         
-        // GET 请求直接返回配置对象
-        if (config && typeof config === 'object') {
+        // 新的 API 返回 {success: true, config: {...}}
+        if (result.success && result.config) {
+            const config = result.config;
+            
             // 填充表单
+            const llmEnabledEl = document.getElementById('recall-llm-enabled');
             const triggerIntervalEl = document.getElementById('recall-trigger-interval');
             const autoPlantEl = document.getElementById('recall-auto-plant');
             const autoResolveEl = document.getElementById('recall-auto-resolve');
             
+            if (llmEnabledEl) llmEnabledEl.checked = config.llm_enabled === true;
             if (triggerIntervalEl) triggerIntervalEl.value = config.trigger_interval || 10;
             if (autoPlantEl) autoPlantEl.checked = config.auto_plant !== false;
             if (autoResolveEl) autoResolveEl.checked = config.auto_resolve !== false;
             
+            // 更新状态显示
             if (statusEl) {
-                statusEl.textContent = '已加载';
-                statusEl.className = 'recall-api-status recall-status-ok';
+                if (config.llm_enabled) {
+                    statusEl.textContent = 'LLM 模式';
+                    statusEl.className = 'recall-api-status recall-status-ok';
+                } else if (config.llm_configured) {
+                    statusEl.textContent = '已就绪';
+                    statusEl.className = 'recall-api-status recall-status-warning';
+                } else {
+                    statusEl.textContent = '未配置 LLM';
+                    statusEl.className = 'recall-api-status recall-status-error';
+                }
             }
             
             console.log('[Recall] 伏笔分析器配置已加载:', config);
@@ -1103,6 +1124,7 @@ async function loadForeshadowingAnalyzerConfig() {
  * 保存伏笔分析器配置
  */
 async function onSaveForeshadowingAnalyzerConfig() {
+    const llmEnabled = document.getElementById('recall-llm-enabled').checked;
     const triggerInterval = parseInt(document.getElementById('recall-trigger-interval').value) || 10;
     const autoPlant = document.getElementById('recall-auto-plant').checked;
     const autoResolve = document.getElementById('recall-auto-resolve').checked;
@@ -1114,6 +1136,7 @@ async function onSaveForeshadowingAnalyzerConfig() {
     }
     
     const configData = {
+        llm_enabled: llmEnabled,
         trigger_interval: triggerInterval,
         auto_plant: autoPlant,
         auto_resolve: autoResolve
@@ -1129,14 +1152,11 @@ async function onSaveForeshadowingAnalyzerConfig() {
         const result = await response.json();
         
         if (result.success) {
-            alert(`✅ 伏笔分析器配置已保存\n\n触发间隔: 每 ${triggerInterval} 轮\n自动埋伏笔: ${autoPlant ? '是' : '否'}\n自动解决: ${autoResolve ? '是' : '否'}`);
+            const modeText = llmEnabled ? 'LLM 自动分析' : '手动模式';
+            alert(`✅ 伏笔分析器配置已保存\n\n模式: ${modeText}\n触发间隔: 每 ${triggerInterval} 轮\n自动埋伏笔: ${autoPlant ? '是' : '否'}\n自动解决: ${autoResolve ? '是' : '否'}`);
             
-            // 更新状态
-            const statusEl = document.getElementById('recall-analyzer-status');
-            if (statusEl) {
-                statusEl.textContent = '已保存';
-                statusEl.className = 'recall-api-status recall-status-ok';
-            }
+            // 刷新配置显示
+            loadForeshadowingAnalyzerConfig();
         } else {
             alert(`❌ 保存失败: ${result.message}`);
         }
@@ -1383,6 +1403,51 @@ async function onPlantForeshadowing() {
 }
 
 /**
+ * 通知伏笔分析器处理新的一轮对话
+ * @param {string} content 消息内容
+ * @param {string} role 角色 ('user' 或 'assistant')
+ */
+async function notifyForeshadowingAnalyzer(content, role) {
+    try {
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing/analyze/turn`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                content: content,
+                role: role,
+                user_id: currentCharacterId || 'default'
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.triggered) {
+            console.log('[Recall] 伏笔分析已触发');
+            
+            // 如果有新伏笔被自动埋下
+            if (result.new_foreshadowings && result.new_foreshadowings.length > 0) {
+                console.log(`[Recall] 自动检测到 ${result.new_foreshadowings.length} 个新伏笔`);
+                loadForeshadowings(); // 刷新伏笔列表
+            }
+            
+            // 如果有伏笔可能被解决
+            if (result.potentially_resolved && result.potentially_resolved.length > 0) {
+                console.log(`[Recall] 检测到 ${result.potentially_resolved.length} 个伏笔可能已被回收`);
+                loadForeshadowings(); // 刷新伏笔列表
+            }
+            
+            // 如果有错误
+            if (result.error) {
+                console.warn('[Recall] 伏笔分析警告:', result.error);
+            }
+        }
+    } catch (e) {
+        // 静默失败，不影响主流程
+        console.debug('[Recall] 伏笔分析器通知失败:', e.message);
+    }
+}
+
+/**
  * 消息发送时
  */
 async function onMessageSent(messageIndex) {
@@ -1410,6 +1475,9 @@ async function onMessageSent(messageIndex) {
             })
         });
         console.log('[Recall] 已保存用户消息');
+        
+        // 发送到伏笔分析器进行分析
+        await notifyForeshadowingAnalyzer(message.mes, 'user');
     } catch (e) {
         console.warn('[Recall] 保存用户消息失败:', e);
     }
@@ -1536,6 +1604,9 @@ async function onMessageReceived(messageIndex) {
         }
         
         console.log(`[Recall] 已保存AI响应 (${chunks.length}段, 共${contentToSave.length}字)`);
+        
+        // 发送到伏笔分析器进行分析
+        await notifyForeshadowingAnalyzer(contentToSave, 'assistant');
     } catch (e) {
         console.warn('[Recall] 保存AI响应失败:', e);
     }
@@ -1607,8 +1678,8 @@ async function loadMemories() {
         );
         const data = await response.json();
         
-        // 更新统计信息
-        updateStats(data.count || (data.memories ? data.memories.length : 0));
+        // 更新统计信息（使用 total 总数，而不是当前页的 count）
+        updateStats(data.total || data.count || (data.memories ? data.memories.length : 0));
         
         // 更新角色名显示
         updateCharacterBadge();

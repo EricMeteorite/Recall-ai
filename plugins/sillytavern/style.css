@@ -508,14 +508,21 @@
     border-radius: 10px;
 }
 
-.recall-status-configured {
+.recall-status-configured,
+.recall-status-ok {
     background: rgba(76, 175, 80, 0.2);
     color: #4caf50;
 }
 
-.recall-status-unconfigured {
+.recall-status-unconfigured,
+.recall-status-error {
     background: rgba(158, 158, 158, 0.2);
     color: #9e9e9e;
+}
+
+.recall-status-warning {
+    background: rgba(255, 193, 7, 0.2);
+    color: #ffc107;
 }
 
 .recall-provider-config {

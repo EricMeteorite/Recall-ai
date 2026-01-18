@@ -565,3 +565,36 @@ Important:
             self.config.auto_resolve = auto_resolve
         if max_context_turns is not None:
             self.config.max_context_turns = max(1, max_context_turns)
+    
+    def enable_llm_mode(
+        self,
+        api_key: str,
+        model: str = "gpt-4o-mini",
+        base_url: Optional[str] = None
+    ):
+        """动态启用 LLM 模式（无需重启服务）
+        
+        Args:
+            api_key: LLM API Key
+            model: 模型名称
+            base_url: API Base URL（可选）
+        """
+        # 更新配置
+        self.config.backend = AnalyzerBackend.LLM
+        self.config.llm_api_key = api_key
+        self.config.llm_model = model
+        self.config.llm_base_url = base_url
+        
+        # 重新初始化 LLM 客户端
+        self._init_llm_client()
+        
+        if self._llm_client:
+            print(f"[Recall] 伏笔分析器已切换到 LLM 模式 (model={model})")
+        else:
+            print("[Recall] 警告：LLM 客户端初始化失败")
+    
+    def disable_llm_mode(self):
+        """动态禁用 LLM 模式，切换回手动模式（无需重启服务）"""
+        self.config.backend = AnalyzerBackend.MANUAL
+        self._llm_client = None
+        print("[Recall] 伏笔分析器已切换到手动模式")
