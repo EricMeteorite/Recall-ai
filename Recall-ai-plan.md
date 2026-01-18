@@ -25,7 +25,8 @@
 > **已实现的功能**：
 > - ✅ 完整的本地存储层（4层架构）
 > - ✅ 8层检索系统（100%不遗忘）
-> - ✅ 伏笔追踪系统（独有）
+> - ✅ 伏笔追踪系统（手动管理）
+> - 🔧 伏笔自动检测（LLM 辅助，待实现）
 > - ✅ 知识图谱（轻量本地版，无需Neo4j）
 > - ✅ 记忆智能总结（对标 mem0）
 > - ✅ 多用户/多角色支持
@@ -33,6 +34,7 @@
 > - ✅ 命令行工具
 > - ✅ HTTP API 接口
 > - ✅ mem0 兼容层（无缝迁移）
+> - ❌ CodeIndexer（代码索引，可选，v3.1）
 
 ## 〇、3步安装，开箱即用
 
@@ -2154,13 +2156,13 @@ class ContextBuilder:
             parts.append(f"【核心设定】\n{l0_text}")
             token_count += self._estimate_tokens(l0_text)
         
-        # 2. 相关伏笔
-        relevant_fs = self.engine.foreshadowing_tracker.inject_foreshadowing_context(
-            user_input, retrieved.results
+        # 2. 活跃伏笔上下文
+        fsh_context = self.engine.foreshadowing_tracker.get_context_for_prompt(
+            user_id=context.get('user_id')
         )
-        if relevant_fs:
-            parts.append(relevant_fs)
-            token_count += self._estimate_tokens(relevant_fs)
+        if fsh_context:
+            parts.append(fsh_context)
+            token_count += self._estimate_tokens(fsh_context)
         
         # 3. 检索到的相关记忆（按重要性排序）
         remaining_budget = max_tokens - token_count - 500  # 留500给用户输入
@@ -2507,18 +2509,31 @@ class Memory:
 
 ---
 
-## 四、伏笔追踪系统（100%不遗漏）
+## 四、伏笔追踪系统（MANUAL + LLM 辅助）
+
+> **设计理念**：手动操作始终可用，LLM 只是辅助检测。用户随时可以手动添加/编辑/删除伏笔。
+> 
+> | 模式 | 手动操作 | 自动检测 | 说明 |
+> |------|:--------:|:--------:|------|
+> | **MANUAL**（默认） | ✅ | ❌ | 用户自己管理伏笔 |
+> | **LLM** | ✅ | ✅ | 手动 + LLM 辅助检测 |
 
 ### 4.1 伏笔数据结构
 
 ```python
 # recall/processor/foreshadowing.py
-"""伏笔追踪 - 完整实现"""
+"""伏笔追踪 - MANUAL + LLM 辅助设计"""
 
-import re
 from dataclasses import dataclass, field
-from typing import List, Optional
-import numpy as np
+from typing import List, Optional, Dict, Any
+from datetime import datetime
+from enum import Enum
+
+class ForeshadowingStatus(Enum):
+    """伏笔状态"""
+    ACTIVE = "active"           # 活跃（未解决）
+    RESOLVED = "resolved"       # 已解决
+    ARCHIVED = "archived"       # 已归档（不再追踪）
 
 @dataclass
 class Foreshadowing:
@@ -2526,293 +2541,543 @@ class Foreshadowing:
     id: str
     
     # 基本信息
+    content: str                # 伏笔内容描述
+    created_at: datetime        # 创建时间
     created_turn: int           # 创建轮次
-    content: str                # 伏笔内容原文
-    summary: str                # 一句话摘要
-    
-    # 触发条件
-    trigger_keywords: List[str] = field(default_factory=list)
-    trigger_combinations: List[List[str]] = field(default_factory=list)
-    trigger_entities: List[str] = field(default_factory=list)
-    
-    # 语义向量（用于语义匹配）
-    content_embedding: Optional[List[float]] = None
+    user_id: str = "default"    # 所属用户
     
     # 状态
-    status: str = 'UNRESOLVED'  # UNRESOLVED, PARTIALLY_RESOLVED, RESOLVED
-    resolution_turn: Optional[int] = None
-    resolution_content: Optional[str] = None
-    
-    # 提醒机制
-    remind_after_turns: int = 100
-    last_reminded: Optional[int] = None
+    status: ForeshadowingStatus = ForeshadowingStatus.ACTIVE
+    resolved_at: Optional[datetime] = None
+    resolved_turn: Optional[int] = None
+    resolution_note: Optional[str] = None  # 解决说明
     
     # 元数据
-    importance: str = 'MEDIUM'  # HIGH, MEDIUM, LOW
-    category: str = 'PLOT'      # PLOT, CHARACTER, ITEM, MYSTERY
+    importance: float = 0.5     # 重要性 0-1
+    related_entities: List[str] = field(default_factory=list)  # 相关角色/物品
+    tags: List[str] = field(default_factory=list)              # 标签
+    
+    # 提醒机制
+    remind_after_turns: int = 100  # 多少轮后提醒
+    last_reminded_turn: Optional[int] = None
+    
+    # LLM 检测来源（如果是 LLM 自动检测的）
+    detected_by: str = "manual"  # "manual" | "llm"
+    detection_evidence: Optional[str] = None  # LLM 检测的原文依据
 ```
 
-### 4.2 伏笔检测与追踪（语义增强版）
+### 4.2 伏笔追踪器（手动管理核心）
 
 ```python
 class ForeshadowingTracker:
-    """伏笔追踪器 - 确保最开始的伏笔不被遗忘"""
+    """伏笔追踪器 - 手动管理为主，LLM 辅助为辅"""
     
-    def __init__(self, embedding_model):
-        self.active_foreshadowing = []    # 未解决伏笔
-        self.resolved_foreshadowing = []  # 已解决伏笔
-        self.embedding_model = embedding_model  # 语义匹配用
-        
-    def detect_new_foreshadowing(self, turn: int, content: str) -> List[Foreshadowing]:
-        """检测新伏笔"""
-        indicators = [
-            # 明确预言类
-            r'(预言|预示|将会|终有一天|迟早)',
-            # 悬念类
-            r'(谜|秘密|隐藏|真相|背后)',
-            # 物品伏笔
-            r'(给了?[^，。]+(?:钥匙|信|物品|东西))',
-            # 人物伏笔
-            r'(神秘|陌生|不知名)的?(人|老人|女子|男子)',
-            # 条件触发类
-            r'(当|等到|如果).{2,20}(时|的时候)',
-        ]
-        
-        detected = []
-        for pattern in indicators:
-            matches = re.findall(pattern, content)
-            if matches:
-                foreshadowing = self._create_foreshadowing(turn, content, matches, pattern)
-                detected.append(foreshadowing)
-        
-        self.active_foreshadowing.extend(detected)
-        return detected
+    def __init__(self, storage_path: str = None):
+        self.storage_path = storage_path
+        self._foreshadowings: Dict[str, Foreshadowing] = {}
+        self._load()
     
-    def _create_foreshadowing(self, turn: int, content: str, matches, pattern: str) -> Foreshadowing:
-        """创建伏笔记录，自动生成触发条件"""
-        # 提取关键词
-        trigger_keywords = list(set([m if isinstance(m, str) else m[0] for m in matches]))
+    # ==================== 手动操作 API（始终可用） ====================
+    
+    def plant(
+        self,
+        content: str,
+        user_id: str = "default",
+        importance: float = 0.5,
+        related_entities: List[str] = None,
+        tags: List[str] = None,
+        current_turn: int = 0
+    ) -> Foreshadowing:
+        """
+        手动埋下伏笔
         
-        # 提取相关实体（简单的名词提取）
-        entities = re.findall(r'[\u4e00-\u9fa5]{2,4}(?:老人|女子|男子|钥匙|物品)', content)
+        Args:
+            content: 伏笔内容描述
+            user_id: 用户ID
+            importance: 重要性 0-1
+            related_entities: 相关角色/物品
+            tags: 标签
+            current_turn: 当前轮次
+            
+        Returns:
+            创建的伏笔对象
+        """
+        fsh_id = f"fsh_{user_id}_{datetime.now().strftime('%Y%m%d%H%M%S')}_{len(self._foreshadowings)}"
         
-        # 生成语义向量用于后续匹配
-        content_embedding = self.embedding_model.encode(content)
-        
-        return Foreshadowing(
-            id=f"fs_{turn}_{hash(content) % 10000}",
-            created_turn=turn,
+        foreshadowing = Foreshadowing(
+            id=fsh_id,
             content=content,
-            summary=content[:50] + "..." if len(content) > 50 else content,
-            trigger_keywords=trigger_keywords,
-            trigger_combinations=self._generate_trigger_combinations(trigger_keywords),
-            trigger_entities=entities,
-            content_embedding=content_embedding,  # 新增：语义向量
-            status='UNRESOLVED',
-            remind_after_turns=100,
-            importance=self._assess_importance(pattern),
+            created_at=datetime.now(),
+            created_turn=current_turn,
+            user_id=user_id,
+            importance=importance,
+            related_entities=related_entities or [],
+            tags=tags or [],
+            detected_by="manual"
         )
-    
-    def _generate_trigger_combinations(self, keywords: List[str]) -> List[List[str]]:
-        """生成触发词组合"""
-        combinations = []
-        # 单词触发
-        combinations.extend([[kw] for kw in keywords])
-        # 双词组合
-        if len(keywords) >= 2:
-            from itertools import combinations as comb
-            combinations.extend([list(c) for c in comb(keywords, 2)])
-        return combinations
-    
-    def check_resolution(self, turn: int, content: str) -> List[Foreshadowing]:
-        """检查是否有伏笔被解决（三重检测）"""
-        resolved = []
-        content_embedding = self.embedding_model.encode(content)
         
-        for fs in self.active_foreshadowing:
-            score = 0
-            
-            # 检测1：关键词匹配（权重0.3）
-            keyword_hits = sum(1 for kw in fs.trigger_keywords if kw in content)
-            if keyword_hits > 0:
-                score += 0.3 * min(keyword_hits / len(fs.trigger_keywords), 1.0)
-            
-            # 检测2：组合匹配（权重0.3）
-            combo_match = any(
-                all(word in content for word in combo)
-                for combo in fs.trigger_combinations
-            )
-            if combo_match:
-                score += 0.3
-            
-            # 检测3：语义相似度（权重0.4）- 这是关键！
-            similarity = self._cosine_similarity(content_embedding, fs.content_embedding)
-            if similarity > 0.6:  # 语义相似度阈值
-                score += 0.4 * similarity
-            
-            # 综合得分超过阈值，认为可能触发
-            if score > 0.5:
-                if self._verify_resolution(fs, content, score):
-                    fs.status = 'RESOLVED'
-                    fs.resolution_turn = turn
-                    fs.resolution_content = content
-                    resolved.append(fs)
-                elif score > 0.3:
-                    fs.status = 'POSSIBLY_TRIGGERED'  # 可能触发但未解决
-        
-        # 移动已解决的伏笔
-        for fs in resolved:
-            self.active_foreshadowing.remove(fs)
-            self.resolved_foreshadowing.append(fs)
-        
-        return resolved
+        self._foreshadowings[fsh_id] = foreshadowing
+        self._save()
+        return foreshadowing
     
-    def _verify_resolution(self, fs: Foreshadowing, content: str, score: float) -> bool:
-        """验证伏笔是否真正被解决"""
-        # 高置信度直接通过
-        if score > 0.8:
+    def resolve(
+        self,
+        fsh_id: str,
+        resolution_note: str = None,
+        current_turn: int = 0
+    ) -> Optional[Foreshadowing]:
+        """
+        手动标记伏笔已解决
+        
+        Args:
+            fsh_id: 伏笔ID
+            resolution_note: 解决说明
+            current_turn: 当前轮次
+            
+        Returns:
+            更新后的伏笔对象，如果不存在返回 None
+        """
+        if fsh_id not in self._foreshadowings:
+            return None
+        
+        fsh = self._foreshadowings[fsh_id]
+        fsh.status = ForeshadowingStatus.RESOLVED
+        fsh.resolved_at = datetime.now()
+        fsh.resolved_turn = current_turn
+        fsh.resolution_note = resolution_note
+        
+        self._save()
+        return fsh
+    
+    def update(
+        self,
+        fsh_id: str,
+        content: str = None,
+        importance: float = None,
+        related_entities: List[str] = None,
+        tags: List[str] = None
+    ) -> Optional[Foreshadowing]:
+        """手动更新伏笔信息"""
+        if fsh_id not in self._foreshadowings:
+            return None
+        
+        fsh = self._foreshadowings[fsh_id]
+        if content is not None:
+            fsh.content = content
+        if importance is not None:
+            fsh.importance = importance
+        if related_entities is not None:
+            fsh.related_entities = related_entities
+        if tags is not None:
+            fsh.tags = tags
+        
+        self._save()
+        return fsh
+    
+    def delete(self, fsh_id: str) -> bool:
+        """手动删除伏笔"""
+        if fsh_id in self._foreshadowings:
+            del self._foreshadowings[fsh_id]
+            self._save()
             return True
-        
-        # 检查是否包含解决性词汇
-        resolution_indicators = ['原来', '终于', '揭晓', '真相是', '答案是', '明白了', '发现了']
-        has_resolution_word = any(ind in content for ind in resolution_indicators)
-        
-        # 中等置信度 + 解决性词汇
-        if score > 0.5 and has_resolution_word:
-            return True
-        
         return False
     
-    def _cosine_similarity(self, vec1, vec2) -> float:
-        """计算余弦相似度"""
-        import numpy as np
-        return float(np.dot(vec1, vec2) / (np.linalg.norm(vec1) * np.linalg.norm(vec2)))
+    def archive(self, fsh_id: str) -> Optional[Foreshadowing]:
+        """归档伏笔（不再追踪但保留记录）"""
+        if fsh_id not in self._foreshadowings:
+            return None
+        
+        fsh = self._foreshadowings[fsh_id]
+        fsh.status = ForeshadowingStatus.ARCHIVED
+        self._save()
+        return fsh
     
-    def _assess_importance(self, pattern: str) -> str:
-        """评估伏笔重要性"""
-        high_patterns = ['预言', '预示', '秘密', '真相']
-        if any(p in pattern for p in high_patterns):
-            return 'HIGH'
-        return 'MEDIUM'
+    # ==================== 查询 API ====================
     
-    def get_reminder_foreshadowing(self, current_turn: int) -> List[Foreshadowing]:
-        """获取需要提醒的伏笔"""
+    def get(self, fsh_id: str) -> Optional[Foreshadowing]:
+        """获取单个伏笔"""
+        return self._foreshadowings.get(fsh_id)
+    
+    def get_active(self, user_id: str = None) -> List[Foreshadowing]:
+        """获取所有活跃伏笔"""
+        result = [
+            fsh for fsh in self._foreshadowings.values()
+            if fsh.status == ForeshadowingStatus.ACTIVE
+        ]
+        if user_id:
+            result = [fsh for fsh in result if fsh.user_id == user_id]
+        return sorted(result, key=lambda x: x.importance, reverse=True)
+    
+    def get_resolved(self, user_id: str = None) -> List[Foreshadowing]:
+        """获取所有已解决伏笔"""
+        result = [
+            fsh for fsh in self._foreshadowings.values()
+            if fsh.status == ForeshadowingStatus.RESOLVED
+        ]
+        if user_id:
+            result = [fsh for fsh in result if fsh.user_id == user_id]
+        return result
+    
+    def get_all(self, user_id: str = None) -> List[Foreshadowing]:
+        """获取所有伏笔"""
+        result = list(self._foreshadowings.values())
+        if user_id:
+            result = [fsh for fsh in result if fsh.user_id == user_id]
+        return result
+    
+    # ==================== 提醒机制 ====================
+    
+    def get_reminders(self, current_turn: int, user_id: str = None) -> List[Foreshadowing]:
+        """获取需要提醒的伏笔（长期未解决）"""
         reminders = []
         
-        for fs in self.active_foreshadowing:
-            turns_since_creation = current_turn - fs.created_turn
-            turns_since_remind = current_turn - (fs.last_reminded or fs.created_turn)
+        for fsh in self.get_active(user_id):
+            turns_since_creation = current_turn - fsh.created_turn
+            turns_since_remind = current_turn - (fsh.last_reminded_turn or fsh.created_turn)
             
             # 超过提醒阈值，且距离上次提醒足够久
-            if turns_since_creation > fs.remind_after_turns and turns_since_remind > 50:
-                reminders.append(fs)
-                fs.last_reminded = current_turn
+            if turns_since_creation > fsh.remind_after_turns and turns_since_remind > 50:
+                reminders.append(fsh)
+                fsh.last_reminded_turn = current_turn
+        
+        if reminders:
+            self._save()
         
         return reminders
     
-    def inject_foreshadowing_context(self, query: str, retrieved_results: List) -> str:
-        """注入伏笔上下文"""
-        relevant_fs = []
+    def get_context_for_prompt(self, user_id: str = None, max_count: int = 5) -> str:
+        """生成用于注入 prompt 的伏笔上下文"""
+        active = self.get_active(user_id)[:max_count]
         
-        # 找到与当前查询相关的未解决伏笔
-        for fs in self.active_foreshadowing:
-            if any(kw in query for kw in fs.trigger_keywords):
-                relevant_fs.append(fs)
-            if any(entity in query for entity in fs.trigger_entities):
-                relevant_fs.append(fs)
-        
-        if not relevant_fs:
+        if not active:
             return ""
         
-        context = "【未解决的相关伏笔】\n"
-        for fs in relevant_fs:
-            context += f"- 第{fs.created_turn}轮：{fs.summary}\n"
-            context += f"  原文：{fs.content[:100]}...\n"
+        lines = ["【当前活跃的伏笔】"]
+        for fsh in active:
+            importance_str = "⭐" * int(fsh.importance * 3 + 1)
+            lines.append(f"- {importance_str} {fsh.content}")
+            if fsh.related_entities:
+                lines.append(f"  相关：{', '.join(fsh.related_entities)}")
         
-        return context
+        return "\n".join(lines)
+    
+    # ==================== 持久化 ====================
+    
+    def _load(self):
+        """从存储加载"""
+        if not self.storage_path:
+            return
+        # 实际实现：从 JSON 文件加载
+        pass
+    
+    def _save(self):
+        """保存到存储"""
+        if not self.storage_path:
+            return
+        # 实际实现：保存到 JSON 文件
+        pass
+```
+
+### 4.3 LLM 伏笔分析器（可选辅助功能）
+
+```python
+from enum import Enum
+from dataclasses import dataclass
+from typing import Optional, List, Dict, Any
+
+class AnalyzerBackend(Enum):
+    """分析器后端类型"""
+    MANUAL = "manual"  # 手动模式（默认）
+    LLM = "llm"        # LLM 智能分析（需配置 API）
+
+@dataclass
+class ForeshadowingAnalyzerConfig:
+    """伏笔分析器配置"""
+    # 后端选择（默认 MANUAL = 手动模式，需配置 API 才能启用 LLM 分析）
+    backend: AnalyzerBackend = AnalyzerBackend.MANUAL
+    
+    # 触发条件（LLM 模式）
+    trigger_interval: int = 10      # 每N轮触发一次分析（最小1=每轮都触发）
+    
+    # LLM 配置
+    llm_model: str = "gpt-4o-mini"  # 默认用便宜的模型
+    llm_api_key: Optional[str] = None
+    llm_base_url: Optional[str] = None  # 支持自定义 API 地址
+    
+    # 行为配置
+    auto_plant: bool = True         # 自动埋下检测到的伏笔
+    auto_resolve: bool = False      # 自动标记解决（建议 False，让用户确认）
+    
+    # 高级配置
+    max_context_turns: int = 20     # 发送给 LLM 的最大轮次数
+    
+    @classmethod
+    def manual(cls) -> 'ForeshadowingAnalyzerConfig':
+        """手动模式（默认）- 用户自己管理伏笔"""
+        return cls(backend=AnalyzerBackend.MANUAL)
+    
+    @classmethod
+    def llm_based(
+        cls, 
+        api_key: str, 
+        model: str = "gpt-4o-mini",
+        trigger_interval: int = 10
+    ) -> 'ForeshadowingAnalyzerConfig':
+        """使用 LLM API（智能辅助）"""
+        return cls(
+            backend=AnalyzerBackend.LLM,
+            llm_api_key=api_key,
+            llm_model=model,
+            trigger_interval=trigger_interval
+        )
 
 
-class ForeshadowingTrackerLite:
-    """伏笔追踪器轻量版 - 不依赖向量模型"""
+class ForeshadowingAnalyzer:
+    """伏笔分析器 - 手动模式 / LLM 智能辅助"""
     
-    def __init__(self):
-        self.active_foreshadowing = []
-        self.resolved_foreshadowing = []
+    # LLM 提示词模板
+    ANALYSIS_PROMPT = '''你是一个专业的叙事分析师。请分析以下对话内容，识别其中的伏笔（foreshadowing）。
+
+## 什么是伏笔？
+伏笔是故事中埋下的线索，暗示未来会发生的事情，包括：
+- 神秘的暗示或预言
+- 未解释的事件或现象
+- 角色提到的"有一天会..."
+- 隐藏的秘密或谜团
+- 不祥的征兆
+
+## 当前活跃的伏笔（如果有）：
+{active_foreshadowings}
+
+## 最近的对话内容：
+{conversation}
+
+## 请输出 JSON 格式：
+```json
+{
+  "new_foreshadowings": [
+    {
+      "content": "伏笔内容描述",
+      "importance": 0.8,
+      "evidence": "原文依据（引用对话中的句子）",
+      "related_entities": ["角色A", "物品B"]
+    }
+  ],
+  "potentially_resolved": [
+    {
+      "foreshadowing_id": "fsh_xxx",
+      "evidence": "解决的依据",
+      "confidence": 0.9
+    }
+  ]
+}
+```
+
+只输出 JSON，不要其他内容。如果没有检测到伏笔，返回空数组。'''
+
+    def __init__(
+        self, 
+        config: ForeshadowingAnalyzerConfig,
+        tracker: ForeshadowingTracker
+    ):
+        self.config = config
+        self.tracker = tracker
+        self.llm_client = None
+        
+        # 对话缓冲区（按用户分隔）
+        self._buffers: Dict[str, List[Dict]] = {}
+        self._turn_counters: Dict[str, int] = {}
+        
+        if config.backend == AnalyzerBackend.LLM:
+            self._init_llm_client()
     
-    def detect_new_foreshadowing(self, turn: int, content: str) -> List[Foreshadowing]:
-        """检测新伏笔（仅用关键词模式）"""
-        indicators = [
-            r'(预言|预示|将会|终有一天|迟早)',
-            r'(谜|秘密|隐藏|真相|背后)',
-            r'(给了?[^，。]+(?:钥匙|信|物品|东西))',
-            r'(神秘|陌生|不知名)的?(人|老人|女子|男子)',
-            r'(当|等到|如果).{2,20}(时|的时候)',
-        ]
-        
-        detected = []
-        for pattern in indicators:
-            matches = re.findall(pattern, content)
-            if matches:
-                trigger_keywords = list(set([m if isinstance(m, str) else m[0] for m in matches]))
-                fs = Foreshadowing(
-                    id=f"fs_{turn}_{hash(content) % 10000}",
-                    created_turn=turn,
-                    content=content,
-                    summary=content[:50] + "..." if len(content) > 50 else content,
-                    trigger_keywords=trigger_keywords,
-                    status='UNRESOLVED',
-                    remind_after_turns=100,
-                )
-                detected.append(fs)
-        
-        self.active_foreshadowing.extend(detected)
-        return detected
+    def _init_llm_client(self):
+        """初始化 LLM 客户端"""
+        # 实际实现：创建 OpenAI/其他 API 客户端
+        pass
     
-    def check_resolution(self, turn: int, content: str) -> List[Foreshadowing]:
-        """检查伏笔解决（仅用关键词匹配，无语义）"""
-        resolved = []
+    def on_new_turn(
+        self, 
+        content: str, 
+        role: str,
+        user_id: str = "default"
+    ) -> Optional[Dict[str, Any]]:
+        """
+        每轮对话后调用，返回分析结果（如果触发了分析）
         
-        for fs in self.active_foreshadowing:
-            keyword_hits = sum(1 for kw in fs.trigger_keywords if kw in content)
-            resolution_words = ['原来', '终于', '揭晓', '真相是', '答案是']
-            has_resolution = any(w in content for w in resolution_words)
+        ⚠️ 手动模式下直接返回 None，不做任何自动检测
+        """
+        if self.config.backend == AnalyzerBackend.MANUAL:
+            return None
+        
+        # LLM 模式：累积对话到缓冲区
+        if user_id not in self._buffers:
+            self._buffers[user_id] = []
+            self._turn_counters[user_id] = 0
+        
+        self._buffers[user_id].append({
+            'role': role,
+            'content': content,
+            'turn': self._turn_counters[user_id]
+        })
+        self._turn_counters[user_id] += 1
+        
+        # 检查是否触发分析
+        if self._should_trigger_analysis(user_id):
+            return self._analyze_with_llm(user_id)
+        
+        return None
+    
+    def _should_trigger_analysis(self, user_id: str) -> bool:
+        """检查是否应该触发分析"""
+        turn_count = self._turn_counters.get(user_id, 0)
+        # trigger_interval=1 表示每轮都触发，=10 表示每10轮触发一次
+        return turn_count > 0 and turn_count % self.config.trigger_interval == 0
+    
+    def trigger_manual_analysis(self, user_id: str = "default") -> Dict[str, Any]:
+        """手动触发 LLM 分析（即使是 MANUAL 模式也可以临时调用）"""
+        if not self.llm_client and self.config.llm_api_key:
+            self._init_llm_client()
+        
+        if not self.llm_client:
+            return {'error': 'LLM API 未配置'}
+        
+        return self._analyze_with_llm(user_id)
+    
+    def _analyze_with_llm(self, user_id: str) -> Dict[str, Any]:
+        """使用 LLM 分析"""
+        buffer = self._buffers.get(user_id, [])
+        if not buffer:
+            return {'new_foreshadowings': [], 'potentially_resolved': []}
+        
+        # 构建对话文本
+        conversation = self._format_conversation(buffer[-self.config.max_context_turns:])
+        
+        # 获取当前活跃的伏笔
+        active = self.tracker.get_active(user_id)
+        active_text = self._format_active_foreshadowings(active)
+        
+        # 构建提示词并调用 LLM
+        prompt = self.ANALYSIS_PROMPT.format(
+            active_foreshadowings=active_text or "（暂无）",
+            conversation=conversation
+        )
+        
+        try:
+            # 调用 LLM API（实际实现）
+            response = self._call_llm(prompt)
+            result = self._parse_llm_response(response)
             
-            if keyword_hits >= 2 or (keyword_hits >= 1 and has_resolution):
-                fs.status = 'RESOLVED'
-                fs.resolution_turn = turn
-                resolved.append(fs)
-        
-        for fs in resolved:
-            self.active_foreshadowing.remove(fs)
-            self.resolved_foreshadowing.append(fs)
-        
-        return resolved
+            # 处理结果
+            if self.config.auto_plant:
+                for fsh in result.get('new_foreshadowings', []):
+                    self.tracker.plant(
+                        content=fsh['content'],
+                        user_id=user_id,
+                        importance=fsh.get('importance', 0.5),
+                        related_entities=fsh.get('related_entities', [])
+                    )
+                    # 标记为 LLM 检测
+                    # fsh.detected_by = "llm"
+                    # fsh.detection_evidence = fsh.get('evidence')
+            
+            # 清空已分析的缓冲区
+            self._buffers[user_id] = []
+            
+            return result
+            
+        except Exception as e:
+            print(f"[Recall] LLM 伏笔分析失败: {e}")
+            return {'new_foreshadowings': [], 'potentially_resolved': [], 'error': str(e)}
     
-    def get_reminder_foreshadowing(self, current_turn: int) -> List[Foreshadowing]:
-        """获取需要提醒的伏笔"""
-        return [fs for fs in self.active_foreshadowing 
-                if current_turn - fs.created_turn > fs.remind_after_turns]
+    def _call_llm(self, prompt: str) -> str:
+        """调用 LLM API"""
+        # 实际实现：使用 OpenAI/其他 API
+        pass
     
-    def inject_foreshadowing_context(self, query: str, retrieved_results: List) -> str:
-        """注入伏笔上下文（轻量版 - 仅用关键词匹配）"""
-        relevant_fs = []
-        
-        # 基于关键词匹配查找相关伏笔
-        for fs in self.active_foreshadowing:
-            for kw in fs.trigger_keywords:
-                if kw in query:
-                    relevant_fs.append(fs)
-                    break
-        
-        if not relevant_fs:
+    def _format_conversation(self, turns: List[Dict]) -> str:
+        """格式化对话内容"""
+        lines = []
+        for t in turns:
+            role = "用户" if t['role'] == 'user' else "AI"
+            lines.append(f"[{role}]: {t['content']}")
+        return "\n\n".join(lines)
+    
+    def _format_active_foreshadowings(self, foreshadowings: List[Foreshadowing]) -> str:
+        """格式化活跃伏笔列表"""
+        if not foreshadowings:
             return ""
-        
-        context = "【未解决的相关伏笔】\n"
-        for fs in relevant_fs:
-            context += f"- 第{fs.created_turn}轮：{fs.summary}\n"
-            context += f"  原文：{fs.content[:100]}...\n"
-        
-        return context
+        lines = []
+        for f in foreshadowings:
+            lines.append(f"- [{f.id}] {f.content} (重要性: {f.importance})")
+        return "\n".join(lines)
+    
+    def _parse_llm_response(self, response: str) -> Dict[str, Any]:
+        """解析 LLM 返回的 JSON"""
+        import json
+        try:
+            if "```json" in response:
+                response = response.split("```json")[1].split("```")[0]
+            elif "```" in response:
+                response = response.split("```")[1].split("```")[0]
+            return json.loads(response.strip())
+        except:
+            return {'new_foreshadowings': [], 'potentially_resolved': []}
+```
+
+### 4.4 使用示例
+
+```python
+# 方式1：纯手动模式（默认）
+from recall.processor.foreshadowing import ForeshadowingTracker
+
+tracker = ForeshadowingTracker(storage_path="./recall_data/foreshadowing.json")
+
+# 手动埋伏笔
+tracker.plant(
+    content="老者交给主角一把神秘钥匙，说'时机到了你就会知道它的用途'",
+    importance=0.9,
+    related_entities=["老者", "神秘钥匙", "主角"],
+    tags=["物品", "悬念"]
+)
+
+# 手动标记解决
+tracker.resolve(
+    fsh_id="fsh_xxx",
+    resolution_note="主角用钥匙打开了地下室的门"
+)
+
+# 获取活跃伏笔用于 prompt 注入
+context = tracker.get_context_for_prompt()
+
+
+# 方式2：启用 LLM 辅助检测
+from recall.processor.foreshadowing import (
+    ForeshadowingTracker, 
+    ForeshadowingAnalyzer,
+    ForeshadowingAnalyzerConfig
+)
+
+tracker = ForeshadowingTracker(storage_path="./recall_data/foreshadowing.json")
+analyzer = ForeshadowingAnalyzer(
+    config=ForeshadowingAnalyzerConfig.llm_based(
+        api_key="sk-xxx",
+        model="gpt-4o-mini",
+        trigger_interval=10  # 每10轮自动分析一次
+    ),
+    tracker=tracker
+)
+
+# 每轮对话后调用（LLM 模式会自动分析）
+result = analyzer.on_new_turn(
+    content="黑衣人低声说：'三年之约将至，届时天下将大变。'",
+    role="assistant",
+    user_id="user123"
+)
+
+# 手动操作仍然可用！
+tracker.plant(content="手动添加的伏笔", importance=0.8)
+tracker.resolve(fsh_id="fsh_xxx")
 ```
 
 ---
@@ -3428,6 +3693,21 @@ class ConsistencyChecker:
                 suggestions.append(f"角色 {v.entity} 的 {v.attribute} 应该是 {v.stored_value}，请修正")
         return suggestions
 ```
+
+### 6.1 规则编译器（待实现）
+
+> 🔧 **待实现**：完整的规则编译器，将自然语言规则转换为可执行的检查逻辑。
+> 
+> 详细实现计划请参见 [CHECKLIST-REPORT.md](./CHECKLIST-REPORT.md) 第四节 "阶段一点五：规则编译器"。
+
+**待添加功能**：
+- `RuleCompiler` - 规则编译器类
+- `CompiledRule` - 结构化规则类型
+- 支持规则类型：禁止(PROHIBITION)、必须(REQUIREMENT)、关系(RELATIONSHIP)、属性(ATTRIBUTE)
+- 集成到 `ConsistencyChecker._check_rule()` 方法
+- 规则管理 API (`/v1/rules`)
+
+**当前状态**：L0 注入 + 基础属性检查已实现，对 RP 场景足够使用。
 
 ---
 
@@ -4619,17 +4899,25 @@ class RecallEngine:
         self.retrieval = EightLayerRetrieval(self, lightweight=self.lightweight)
         self.context_builder = ContextBuilder(self)
         
-        # 处理器（轻量模式使用简化版）
+        # 处理器
         if not self.lightweight:
             from .processor.entity_extractor import EntityExtractor
-            from .processor.foreshadowing import ForeshadowingTracker
             self.entity_extractor = EntityExtractor()
-            self.foreshadowing_tracker = ForeshadowingTracker(self.vector_index.model)
         else:
             from .config import LightweightEntityExtractor
-            from .processor.foreshadowing import ForeshadowingTrackerLite
             self.entity_extractor = LightweightEntityExtractor()
-            self.foreshadowing_tracker = ForeshadowingTrackerLite()  # 无向量版
+        
+        # 伏笔追踪器（统一使用新设计，不区分轻量/标准）
+        from .processor.foreshadowing import ForeshadowingTracker, ForeshadowingAnalyzer, ForeshadowingAnalyzerConfig
+        fsh_storage = os.path.join(self.data_path, "foreshadowing.json")
+        self.foreshadowing_tracker = ForeshadowingTracker(storage_path=fsh_storage)
+        
+        # 伏笔分析器（可选 LLM 辅助）
+        fsh_config = ForeshadowingAnalyzerConfig.manual()  # 默认手动模式
+        self.foreshadowing_analyzer = ForeshadowingAnalyzer(
+            config=fsh_config,
+            tracker=self.foreshadowing_tracker
+        )
         
         from .processor.consistency import ConsistencyChecker
         self.consistency_checker = ConsistencyChecker(self.core_settings, self.consolidated)
@@ -4680,12 +4968,17 @@ class RecallEngine:
         # 4. 更新索引（异步执行不阻塞）
         self._update_indexes_async(turn_number, user_input, assistant_output, entities)
         
-        # 5. 伏笔检测
-        new_foreshadowing = self.foreshadowing_tracker.detect_new_foreshadowing(
-            turn_number, assistant_output
+        # 5. 伏笔处理（LLM 模式会自动分析，MANUAL 模式返回 None）
+        fsh_analysis = self.foreshadowing_analyzer.on_new_turn(
+            content=assistant_output,
+            role="assistant",
+            user_id=metadata.get('user_id', 'default')
         )
-        resolved = self.foreshadowing_tracker.check_resolution(
-            turn_number, assistant_output
+        
+        # 获取需要提醒的伏笔
+        fsh_reminders = self.foreshadowing_tracker.get_reminders(
+            current_turn=turn_number,
+            user_id=metadata.get('user_id')
         )
         
         # 6. 一致性校验
@@ -4700,8 +4993,8 @@ class RecallEngine:
         return ProcessResult(
             turn_number=turn_number,
             entities_detected=entities,
-            new_foreshadowing=new_foreshadowing,
-            foreshadowing_resolved=resolved,
+            foreshadowing_analysis=fsh_analysis,  # LLM 分析结果（MANUAL 模式为 None）
+            foreshadowing_reminders=fsh_reminders,  # 需要提醒的伏笔
             consistency_result=consistency,
         )
     
@@ -5091,46 +5384,126 @@ class TestRecallEngine:
 
 
 # tests/test_foreshadowing.py
-"""伏笔追踪测试"""
+"""伏笔追踪测试 - MANUAL + LLM 设计"""
 
-from recall.processor.foreshadowing import ForeshadowingTracker
-from unittest.mock import MagicMock
+from recall.processor.foreshadowing import (
+    ForeshadowingTracker, 
+    ForeshadowingAnalyzer,
+    ForeshadowingAnalyzerConfig,
+    ForeshadowingStatus
+)
 
-class TestForeshadowing:
+class TestForeshadowingTracker:
+    """测试手动伏笔管理"""
     
     @pytest.fixture
-    def tracker(self):
-        mock_model = MagicMock()
-        mock_model.encode = lambda x: [0.1] * 384  # 模拟embedding
-        return ForeshadowingTracker(mock_model)
+    def tracker(self, tmp_path):
+        storage_path = str(tmp_path / "foreshadowing.json")
+        return ForeshadowingTracker(storage_path=storage_path)
     
-    def test_detect_prediction(self, tracker):
-        """测试：检测预言类伏笔"""
-        result = tracker.detect_new_foreshadowing(
-            1, "老人说：'终有一天你会明白真相。'"
-        )
-        assert len(result) > 0
-        assert 'UNRESOLVED' in str(result[0].status)
-    
-    def test_detect_mystery(self, tracker):
-        """测试：检测悬念类伏笔"""
-        result = tracker.detect_new_foreshadowing(
-            1, "他隐藏着一个巨大的秘密"
-        )
-        assert len(result) > 0
-    
-    def test_semantic_resolution(self, tracker):
-        """测试：语义匹配解决伏笔"""
-        # 先埋下伏笔
-        tracker.detect_new_foreshadowing(1, "当血月升起时，一切将揭晓")
-        
-        # 用不同表达触发
-        resolved = tracker.check_resolution(
-            100, "天空的月亮变成了血红色，原来这就是答案"
+    def test_plant_foreshadowing(self, tracker):
+        """测试：手动埋伏笔"""
+        fsh = tracker.plant(
+            content="老人交给主角一把神秘钥匙",
+            importance=0.9,
+            related_entities=["老人", "主角", "神秘钥匙"],
+            tags=["物品", "悬念"]
         )
         
-        # 语义相似应该能匹配
-        # 注意：由于mock了embedding，这里主要测试流程
+        assert fsh.id is not None
+        assert fsh.content == "老人交给主角一把神秘钥匙"
+        assert fsh.importance == 0.9
+        assert fsh.status == ForeshadowingStatus.ACTIVE
+        assert fsh.detected_by == "manual"
+    
+    def test_resolve_foreshadowing(self, tracker):
+        """测试：手动标记解决"""
+        # 先埋伏笔
+        fsh = tracker.plant(content="测试伏笔")
+        fsh_id = fsh.id
+        
+        # 标记解决
+        resolved = tracker.resolve(
+            fsh_id=fsh_id,
+            resolution_note="主角用钥匙打开了门"
+        )
+        
+        assert resolved.status == ForeshadowingStatus.RESOLVED
+        assert resolved.resolution_note == "主角用钥匙打开了门"
+    
+    def test_get_active(self, tracker):
+        """测试：获取活跃伏笔"""
+        tracker.plant(content="伏笔1", importance=0.5)
+        tracker.plant(content="伏笔2", importance=0.9)
+        tracker.plant(content="伏笔3", importance=0.7)
+        
+        active = tracker.get_active()
+        
+        assert len(active) == 3
+        # 按重要性排序
+        assert active[0].importance == 0.9
+    
+    def test_update_foreshadowing(self, tracker):
+        """测试：更新伏笔"""
+        fsh = tracker.plant(content="原内容", importance=0.5)
+        
+        updated = tracker.update(
+            fsh_id=fsh.id,
+            content="更新后的内容",
+            importance=0.8
+        )
+        
+        assert updated.content == "更新后的内容"
+        assert updated.importance == 0.8
+    
+    def test_delete_foreshadowing(self, tracker):
+        """测试：删除伏笔"""
+        fsh = tracker.plant(content="要删除的伏笔")
+        fsh_id = fsh.id
+        
+        result = tracker.delete(fsh_id)
+        
+        assert result is True
+        assert tracker.get(fsh_id) is None
+    
+    def test_get_context_for_prompt(self, tracker):
+        """测试：生成 prompt 上下文"""
+        tracker.plant(content="伏笔1", importance=0.9, related_entities=["角色A"])
+        tracker.plant(content="伏笔2", importance=0.5)
+        
+        context = tracker.get_context_for_prompt()
+        
+        assert "【当前活跃的伏笔】" in context
+        assert "伏笔1" in context
+        assert "角色A" in context
+
+
+class TestForeshadowingAnalyzer:
+    """测试 LLM 辅助分析（模拟）"""
+    
+    @pytest.fixture
+    def analyzer_manual(self, tmp_path):
+        tracker = ForeshadowingTracker(storage_path=str(tmp_path / "fsh.json"))
+        config = ForeshadowingAnalyzerConfig.manual()
+        return ForeshadowingAnalyzer(config=config, tracker=tracker)
+    
+    def test_manual_mode_no_auto_detect(self, analyzer_manual):
+        """测试：手动模式不自动检测"""
+        result = analyzer_manual.on_new_turn(
+            content="老人说：'终有一天你会明白真相。'",
+            role="assistant"
+        )
+        
+        # 手动模式返回 None
+        assert result is None
+    
+    def test_manual_operations_always_work(self, analyzer_manual):
+        """测试：手动操作始终可用"""
+        # 即使是手动模式，tracker 的手动操作也能用
+        fsh = analyzer_manual.tracker.plant(content="手动添加的伏笔")
+        
+        assert fsh is not None
+        assert len(analyzer_manual.tracker.get_active()) == 1
 
 
 # tests/test_storage.py
@@ -5496,10 +5869,10 @@ EnvironmentIsolation.setup()
 | 需求 | 实现方案 | 状态 | 位置 |
 |------|---------|------|------|
 | **上万轮 RP** | 分卷存储 + O(1)定位 + 预加载 + 并发锁 | ✅ | 第二节 VolumeManager |
-| **伏笔不遗忘** | 三重检测（关键词+组合+语义）+ 主动提醒 | ✅ | 第四节 ForeshadowingTracker |
+| **伏笔不遗忘** | 手动管理 + 主动提醒（LLM 自动检测待实现） | 🔧 | 第四节 ForeshadowingTracker |
 | **几百万字规模** | 分卷架构 + 懒加载 + 增量索引 | ✅ | 第二节分卷设计 |
-| **上千文件代码** | 多语言解析器 + 符号表 + 依赖图 | ✅ | 第五节 CodeIndexer |
-| **规范100%遵守** | L0注入 + 规则编译 + 属性检查 | ✅ | 第六节 ConsistencyChecker |
+| **上千文件代码** | 多语言解析器 + 符号表 + 依赖图 | ❌ | 第五节 CodeIndexer（可选，v3.1） |
+| **规范100%遵守** | L0注入 + 规则编译 + 属性检查 | 🔧 | L0注入✅ 规则编译简化（RP场景足够） |
 | **零配置即插即用** | pip install + API key 即可使用 | ✅ | 第七节初始化 |
 | **100%不遗忘** | Archive原文保存 + 8层检索 + N-gram兜底 | ✅ | 第三节8层检索 |
 | **面向大众友好** | ST插件市场安装 + 3步完成 + 全中文 | ✅ | 第十三节ST插件 |
@@ -5538,7 +5911,7 @@ EnvironmentIsolation.setup()
 | 用户/会话级记忆 | ✅ user_id | ✅ user_id + character_id | **Recall** (RP场景) |
 | 向量检索 | ✅ 有 | ✅ 有 | 平手 |
 | **100%不遗忘** | ❌ 会压缩丢失 | ✅ L3原文存档+8层检索 | **Recall** |
-| **伏笔追踪** | ❌ 无 | ✅ 三重检测+主动提醒 | **Recall** |
+| **伏笔追踪** | ❌ 无 | ✅ 手动管理+LLM辅助检测 | **Recall** |
 | **规范遵守检查** | ❌ 无 | ✅ L0注入+一致性校验 | **Recall** |
 | **RP/小说场景优化** | ❌ 通用 | ✅ 专门优化 | **Recall** |
 | 云端托管 | ✅ 可选 | ❌ 纯本地 | mem0 (便捷) |
@@ -5570,7 +5943,7 @@ EnvironmentIsolation.setup()
 │     - Recall 保留原文 + 8层检索防护                          │
 │                                                             │
 │  2. 【伏笔追踪】（独有）                                      │
-│     - 自动检测叙事中的伏笔                                    │
+│     - 手动埋伏笔 + LLM 辅助检测（可选）                       │
 │     - 主动提醒未解决的伏笔                                    │
 │     - 确保故事连贯性                                         │
 │                                                             │
