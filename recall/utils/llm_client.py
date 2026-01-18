@@ -19,12 +19,11 @@ class LLMResponse:
 class LLMClient:
     """统一LLM客户端
     
-    支持通过 litellm 调用多种模型：
+    支持 OpenAI 兼容接口：
     - OpenAI (gpt-4, gpt-3.5-turbo)
-    - Anthropic (claude-3)
-    - 本地模型 (ollama, llama.cpp)
-    - Azure OpenAI
-    - 其他 litellm 支持的模型
+    - 硅基流动 (DeepSeek, Qwen 等)
+    - Ollama 本地
+    - 其他 OpenAI 兼容 API
     """
     
     def __init__(
@@ -41,28 +40,33 @@ class LLMClient:
         self.timeout = timeout
         self.max_retries = max_retries
         
-        # 懒加载litellm
-        self._litellm = None
+        # 初始化 OpenAI 客户端
+        self._client = None
     
     @property
-    def litellm(self):
-        """懒加载litellm"""
-        if self._litellm is None:
+    def client(self):
+        """获取 OpenAI 客户端"""
+        if self._client is None:
             try:
-                import litellm
-                self._litellm = litellm
+                from openai import OpenAI
                 
-                # 配置
-                if self.api_key:
-                    litellm.api_key = self.api_key
+                # 创建客户端
+                client_kwargs = {
+                    "api_key": self.api_key,
+                    "timeout": self.timeout,
+                }
+                
+                # 设置自定义 API 地址
                 if self.api_base:
-                    litellm.api_base = self.api_base
+                    client_kwargs["base_url"] = self.api_base
+                
+                self._client = OpenAI(**client_kwargs)
                     
             except ImportError:
                 raise ImportError(
-                    "litellm 未安装。请运行: pip install litellm"
+                    "openai 未安装。请运行: pip install openai"
                 )
-        return self._litellm
+        return self._client
     
     def complete(
         self,
@@ -88,18 +92,17 @@ class LLMClient:
         stop: Optional[List[str]] = None,
         **kwargs
     ) -> LLMResponse:
-        """聊天补全"""
+        """聊天补全 - 使用 OpenAI SDK"""
         start_time = time.time()
         
         for attempt in range(self.max_retries):
             try:
-                response = self.litellm.completion(
+                response = self.client.chat.completions.create(
                     model=self.model,
                     messages=messages,
                     max_tokens=max_tokens,
                     temperature=temperature,
                     stop=stop,
-                    timeout=self.timeout,
                     **kwargs
                 )
                 
@@ -132,14 +135,25 @@ class LLMClient:
         **kwargs
     ) -> LLMResponse:
         """异步聊天补全"""
+        from openai import AsyncOpenAI
+        
         start_time = time.time()
         
-        response = await self.litellm.acompletion(
+        # 创建异步客户端
+        client_kwargs = {
+            "api_key": self.api_key,
+            "timeout": self.timeout,
+        }
+        if self.api_base:
+            client_kwargs["base_url"] = self.api_base
+        
+        async_client = AsyncOpenAI(**client_kwargs)
+        
+        response = await async_client.chat.completions.create(
             model=self.model,
             messages=messages,
             max_tokens=max_tokens,
             temperature=temperature,
-            timeout=self.timeout,
             **kwargs
         )
         
@@ -168,12 +182,12 @@ class LLMClient:
         
         embed_model = model or "text-embedding-ada-002"
         
-        response = self.litellm.embedding(
+        response = self.client.embeddings.create(
             model=embed_model,
             input=texts
         )
         
-        return [item['embedding'] for item in response.data]
+        return [item.embedding for item in response.data]
     
     def extract_entities(self, text: str) -> List[Dict[str, str]]:
         """使用LLM提取实体"""

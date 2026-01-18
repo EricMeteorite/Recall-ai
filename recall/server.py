@@ -949,6 +949,129 @@ async def test_llm_connection():
         }
 
 
+@app.get("/v1/config/models/embedding", tags=["Admin"])
+async def get_embedding_models(api_key: Optional[str] = None, api_base: Optional[str] = None):
+    """获取可用的 Embedding 模型列表
+    
+    从指定的 API 获取可用的模型列表。
+    如果未提供参数，则使用当前配置的 API。
+    
+    Args:
+        api_key: 可选，临时使用的 API Key
+        api_base: 可选，临时使用的 API Base URL
+    """
+    # 优先使用参数，否则使用配置
+    embedding_key = api_key or os.environ.get('EMBEDDING_API_KEY', '')
+    embedding_base = api_base or os.environ.get('EMBEDDING_API_BASE', '')
+    
+    if not embedding_key:
+        return {
+            "success": False,
+            "message": "请先填写 Embedding API Key",
+            "models": []
+        }
+    
+    try:
+        from openai import OpenAI
+        
+        client_kwargs = {"api_key": embedding_key, "timeout": 30}
+        if embedding_base:
+            client_kwargs["base_url"] = embedding_base
+        
+        client = OpenAI(**client_kwargs)
+        models_response = client.models.list()
+        
+        # 过滤出 embedding 相关的模型
+        embedding_models = []
+        for model in models_response.data:
+            model_id = model.id.lower()
+            # 匹配 embedding 模型的常见命名
+            if any(kw in model_id for kw in ['embed', 'bge', 'bce', 'e5', 'minilm', 'nomic']):
+                embedding_models.append({
+                    "id": model.id,
+                    "owned_by": getattr(model, 'owned_by', 'unknown')
+                })
+        
+        # 如果没有找到明确的 embedding 模型，返回所有模型让用户选择
+        if not embedding_models:
+            embedding_models = [
+                {"id": model.id, "owned_by": getattr(model, 'owned_by', 'unknown')}
+                for model in models_response.data
+            ]
+        
+        return {
+            "success": True,
+            "message": f"获取到 {len(embedding_models)} 个模型",
+            "models": embedding_models,
+            "api_base": embedding_base or "默认"
+        }
+        
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"获取模型列表失败: {str(e)}",
+            "models": []
+        }
+
+
+@app.get("/v1/config/models/llm", tags=["Admin"])
+async def get_llm_models(api_key: Optional[str] = None, api_base: Optional[str] = None):
+    """获取可用的 LLM 模型列表
+    
+    从指定的 API 获取可用的模型列表。
+    如果未提供参数，则使用当前配置的 API。
+    
+    Args:
+        api_key: 可选，临时使用的 API Key
+        api_base: 可选，临时使用的 API Base URL
+    """
+    # 优先使用参数，否则使用配置
+    llm_key = api_key or os.environ.get('LLM_API_KEY', '')
+    llm_base = api_base or os.environ.get('LLM_API_BASE', '')
+    
+    if not llm_key:
+        return {
+            "success": False,
+            "message": "请先填写 LLM API Key",
+            "models": []
+        }
+    
+    try:
+        from openai import OpenAI
+        
+        client_kwargs = {"api_key": llm_key, "timeout": 30}
+        if llm_base:
+            client_kwargs["base_url"] = llm_base
+        
+        client = OpenAI(**client_kwargs)
+        models_response = client.models.list()
+        
+        # 过滤出 LLM/Chat 相关的模型（排除 embedding 模型）
+        llm_models = []
+        for model in models_response.data:
+            model_id = model.id.lower()
+            # 排除 embedding 模型
+            if not any(kw in model_id for kw in ['embed', 'bge', 'bce', 'e5-', 'minilm']):
+                llm_models.append({
+                    "id": model.id,
+                    "owned_by": getattr(model, 'owned_by', 'unknown')
+                })
+        
+        return {
+            "success": True,
+            "message": f"获取到 {len(llm_models)} 个模型",
+            "models": llm_models,
+            "api_base": llm_base or "默认"
+        }
+        
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"获取模型列表失败: {str(e)}",
+            "models": []
+        }
+
+
 class ConfigUpdateRequest(BaseModel):
     """配置更新请求（统一使用 OpenAI 兼容格式）"""
     # Embedding 配置

@@ -573,3 +573,29 @@
     background: var(--SmartThemeQuoteColor, rgba(100,100,200,0.3));
 }
 
+/* ========== 模型选择器带刷新按钮 ========== */
+.recall-model-select-wrapper {
+    display: flex;
+    gap: 6px;
+    align-items: stretch;
+}
+
+.recall-model-select-wrapper select.text_pole {
+    flex: 1;
+    min-width: 0;
+}
+
+.recall-model-select-wrapper .menu_button_icon {
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.recall-model-select-wrapper .menu_button_icon i {
+    margin: 0;
+}
+

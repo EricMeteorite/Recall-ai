@@ -351,28 +351,18 @@ function createUI() {
                         
                         <div class="recall-setting-group">
                             <label class="recall-setting-title">模型名称</label>
-                            <select id="recall-embedding-model" class="text_pole">
-                                <option value="">-- 选择模型 --</option>
-                                <optgroup label="硅基流动 (SiliconFlow)">
-                                    <option value="BAAI/bge-m3">BAAI/bge-m3 (推荐, 1024维)</option>
-                                    <option value="BAAI/bge-large-zh-v1.5">BAAI/bge-large-zh-v1.5 (1024维)</option>
-                                    <option value="BAAI/bge-large-en-v1.5">BAAI/bge-large-en-v1.5 (1024维)</option>
-                                    <option value="netease-youdao/bce-embedding-base_v1">netease-youdao/bce-embedding-base_v1 (768维)</option>
-                                </optgroup>
-                                <optgroup label="OpenAI">
-                                    <option value="text-embedding-3-small">text-embedding-3-small (1536维)</option>
-                                    <option value="text-embedding-3-large">text-embedding-3-large (3072维)</option>
-                                    <option value="text-embedding-ada-002">text-embedding-ada-002 (1536维)</option>
-                                </optgroup>
-                                <optgroup label="Ollama 本地">
-                                    <option value="nomic-embed-text">nomic-embed-text (768维)</option>
-                                    <option value="mxbai-embed-large">mxbai-embed-large (1024维)</option>
-                                    <option value="all-minilm">all-minilm (384维)</option>
-                                </optgroup>
-                                <option value="__custom__">✏️ 自定义模型...</option>
-                            </select>
+                            <div class="recall-model-select-wrapper">
+                                <select id="recall-embedding-model" class="text_pole">
+                                    <option value="">-- 点击获取模型列表 --</option>
+                                    <option value="__custom__">✏️ 自定义模型...</option>
+                                </select>
+                                <button id="recall-refresh-embedding-models" class="menu_button menu_button_icon" title="获取模型列表">
+                                    <i class="fa-solid fa-refresh"></i>
+                                </button>
+                            </div>
                             <input type="text" id="recall-embedding-model-custom" class="text_pole" 
                                    placeholder="输入自定义模型名称" style="display:none;margin-top:5px;">
+                            <div class="recall-setting-hint">填写 API Key 和地址后点击刷新按钮获取可用模型</div>
                         </div>
                         
                         <div class="recall-setting-group">
@@ -421,35 +411,18 @@ function createUI() {
                         
                         <div class="recall-setting-group">
                             <label class="recall-setting-title">模型名称</label>
-                            <select id="recall-llm-model" class="text_pole">
-                                <option value="">-- 选择模型 --</option>
-                                <optgroup label="OpenAI">
-                                    <option value="gpt-4o">gpt-4o (推荐)</option>
-                                    <option value="gpt-4o-mini">gpt-4o-mini</option>
-                                    <option value="gpt-4-turbo">gpt-4-turbo</option>
-                                    <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
-                                </optgroup>
-                                <optgroup label="Claude">
-                                    <option value="claude-3-5-sonnet-20241022">claude-3.5-sonnet</option>
-                                    <option value="claude-3-opus-20240229">claude-3-opus</option>
-                                    <option value="claude-3-haiku-20240307">claude-3-haiku</option>
-                                </optgroup>
-                                <optgroup label="硅基流动 (SiliconFlow)">
-                                    <option value="deepseek-ai/DeepSeek-V3">DeepSeek-V3 (推荐)</option>
-                                    <option value="deepseek-ai/DeepSeek-R1">DeepSeek-R1</option>
-                                    <option value="Qwen/Qwen2.5-72B-Instruct">Qwen2.5-72B</option>
-                                    <option value="Qwen/Qwen2.5-32B-Instruct">Qwen2.5-32B</option>
-                                    <option value="THUDM/glm-4-9b-chat">GLM-4-9B</option>
-                                </optgroup>
-                                <optgroup label="Ollama 本地">
-                                    <option value="llama3.2">llama3.2</option>
-                                    <option value="qwen2.5">qwen2.5</option>
-                                    <option value="mistral">mistral</option>
-                                </optgroup>
-                                <option value="__custom__">✏️ 自定义模型...</option>
-                            </select>
+                            <div class="recall-model-select-wrapper">
+                                <select id="recall-llm-model" class="text_pole">
+                                    <option value="">-- 点击获取模型列表 --</option>
+                                    <option value="__custom__">✏️ 自定义模型...</option>
+                                </select>
+                                <button id="recall-refresh-llm-models" class="menu_button menu_button_icon" title="获取模型列表">
+                                    <i class="fa-solid fa-refresh"></i>
+                                </button>
+                            </div>
                             <input type="text" id="recall-llm-model-custom" class="text_pole" 
                                    placeholder="输入自定义模型名称" style="display:none;margin-top:5px;">
+                            <div class="recall-setting-hint">填写 API Key 和地址后点击刷新按钮获取可用模型</div>
                         </div>
                         
                         <div class="recall-setting-actions">
@@ -519,6 +492,10 @@ function createUI() {
     document.getElementById('recall-save-embedding')?.addEventListener('click', safeExecute(onSaveEmbeddingConfig, '保存 Embedding 配置失败'));
     document.getElementById('recall-test-llm')?.addEventListener('click', safeExecute(onTestLLM, '测试 LLM 失败'));
     document.getElementById('recall-save-llm')?.addEventListener('click', safeExecute(onSaveLLMConfig, '保存 LLM 配置失败'));
+    
+    // 刷新模型列表按钮事件绑定
+    document.getElementById('recall-refresh-embedding-models')?.addEventListener('click', safeExecute(loadEmbeddingModels, '获取 Embedding 模型列表失败'));
+    document.getElementById('recall-refresh-llm-models')?.addEventListener('click', safeExecute(loadLLMModels, '获取 LLM 模型列表失败'));
     
     // API Key 显示/隐藏切换
     document.querySelectorAll('.recall-toggle-key-btn').forEach(btn => {
@@ -685,6 +662,142 @@ function bindModelSelectEvents(selectId, customInputId, dimensionInputId) {
             }
         }
     });
+}
+
+/**
+ * 动态获取 Embedding 模型列表
+ */
+async function loadEmbeddingModels() {
+    const select = document.getElementById('recall-embedding-model');
+    const refreshBtn = document.getElementById('recall-refresh-embedding-models');
+    if (!select) return;
+    
+    // 显示加载状态
+    if (refreshBtn) {
+        refreshBtn.disabled = true;
+        refreshBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+    }
+    
+    // 保存当前值
+    const currentValue = getModelSelectValue('recall-embedding-model', 'recall-embedding-model-custom');
+    
+    try {
+        // 先尝试从临时配置获取，然后从输入框获取
+        const apiKey = document.getElementById('recall-embedding-api-key')?.value?.trim();
+        const apiBase = document.getElementById('recall-embedding-api-base')?.value?.trim();
+        
+        // 构建请求参数
+        const params = new URLSearchParams();
+        if (apiKey) params.append('api_key', apiKey);
+        if (apiBase) params.append('api_base', apiBase);
+        
+        const url = `${window.recallSettings?.serverUrl || 'http://localhost:18888'}/v1/config/models/embedding?${params.toString()}`;
+        const response = await fetch(url);
+        const data = await response.json();
+        
+        if (data.success && data.models && data.models.length > 0) {
+            // 清空并重新填充选项
+            select.innerHTML = '<option value="">-- 选择模型 --</option>';
+            
+            data.models.forEach(model => {
+                const option = document.createElement('option');
+                option.value = model.id;
+                option.textContent = model.id;
+                select.appendChild(option);
+            });
+            
+            // 添加自定义选项
+            const customOption = document.createElement('option');
+            customOption.value = '__custom__';
+            customOption.textContent = '✏️ 自定义模型...';
+            select.appendChild(customOption);
+            
+            // 恢复之前选择的值
+            if (currentValue) {
+                setModelSelectValue('recall-embedding-model', 'recall-embedding-model-custom', currentValue);
+            }
+            
+            toastr.success(`成功获取 ${data.models.length} 个 Embedding 模型`, 'Recall');
+        } else {
+            toastr.warning(data.message || '未获取到模型列表，请检查 API 配置', 'Recall');
+        }
+    } catch (error) {
+        console.error('Failed to load embedding models:', error);
+        toastr.error(`获取模型列表失败: ${error.message}`, 'Recall');
+    } finally {
+        if (refreshBtn) {
+            refreshBtn.disabled = false;
+            refreshBtn.innerHTML = '<i class="fa-solid fa-refresh"></i>';
+        }
+    }
+}
+
+/**
+ * 动态获取 LLM 模型列表
+ */
+async function loadLLMModels() {
+    const select = document.getElementById('recall-llm-model');
+    const refreshBtn = document.getElementById('recall-refresh-llm-models');
+    if (!select) return;
+    
+    // 显示加载状态
+    if (refreshBtn) {
+        refreshBtn.disabled = true;
+        refreshBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+    }
+    
+    // 保存当前值
+    const currentValue = getModelSelectValue('recall-llm-model', 'recall-llm-model-custom');
+    
+    try {
+        // 从输入框获取配置
+        const apiKey = document.getElementById('recall-llm-api-key')?.value?.trim();
+        const apiBase = document.getElementById('recall-llm-api-base')?.value?.trim();
+        
+        // 构建请求参数
+        const params = new URLSearchParams();
+        if (apiKey) params.append('api_key', apiKey);
+        if (apiBase) params.append('api_base', apiBase);
+        
+        const url = `${window.recallSettings?.serverUrl || 'http://localhost:18888'}/v1/config/models/llm?${params.toString()}`;
+        const response = await fetch(url);
+        const data = await response.json();
+        
+        if (data.success && data.models && data.models.length > 0) {
+            // 清空并重新填充选项
+            select.innerHTML = '<option value="">-- 选择模型 --</option>';
+            
+            data.models.forEach(model => {
+                const option = document.createElement('option');
+                option.value = model.id;
+                option.textContent = model.id;
+                select.appendChild(option);
+            });
+            
+            // 添加自定义选项
+            const customOption = document.createElement('option');
+            customOption.value = '__custom__';
+            customOption.textContent = '✏️ 自定义模型...';
+            select.appendChild(customOption);
+            
+            // 恢复之前选择的值
+            if (currentValue) {
+                setModelSelectValue('recall-llm-model', 'recall-llm-model-custom', currentValue);
+            }
+            
+            toastr.success(`成功获取 ${data.models.length} 个 LLM 模型`, 'Recall');
+        } else {
+            toastr.warning(data.message || '未获取到模型列表，请检查 API 配置', 'Recall');
+        }
+    } catch (error) {
+        console.error('Failed to load LLM models:', error);
+        toastr.error(`获取模型列表失败: ${error.message}`, 'Recall');
+    } finally {
+        if (refreshBtn) {
+            refreshBtn.disabled = false;
+            refreshBtn.innerHTML = '<i class="fa-solid fa-refresh"></i>';
+        }
+    }
 }
 
 /**
