@@ -175,7 +175,7 @@ function createUI() {
         <div id="recall-extension" class="inline-drawer">
             <div class="inline-drawer-toggle inline-drawer-header">
                 <b>🧠 Recall 记忆系统</b>
-                <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+                <div class="inline-drawer-icon fa-solid fa-circle-chevron-down"></div>
             </div>
             <div class="inline-drawer-content">
                 <!-- 连接状态栏 -->
@@ -358,15 +358,12 @@ function createUI() {
         });
     });
     
-    // 绑定折叠面板点击
+    // 绑定折叠面板点击 - 只切换 open 类，图标旋转由 CSS 控制
     const drawerToggle = document.querySelector('#recall-extension .inline-drawer-toggle');
     if (drawerToggle) {
         drawerToggle.addEventListener('click', () => {
             const drawer = document.getElementById('recall-extension');
-            const icon = drawer?.querySelector('.inline-drawer-icon');
             drawer?.classList.toggle('open');
-            icon?.classList.toggle('down');
-            icon?.classList.toggle('up');
         });
     }
     

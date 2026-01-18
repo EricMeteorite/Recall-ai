@@ -18,7 +18,8 @@
     user-select: none;
 }
 
-#recall-extension .inline-drawer-icon.up {
+/* 展开时图标旋转180度（向上） */
+#recall-extension.inline-drawer.open .inline-drawer-icon {
     transform: rotate(180deg);
 }
 
