@@ -684,9 +684,8 @@ async function loadEmbeddingModels() {
     const currentValue = getModelSelectValue('recall-embedding-model', 'recall-embedding-model-custom');
     
     try {
-        // 从输入框获取配置（不发送 api_key 和 api_base 参数，让服务器使用已配置的值）
-        const serverUrl = window.recallSettings?.serverUrl || 'http://localhost:18888';
-        const url = `${serverUrl}/v1/config/models/embedding`;
+        // 使用插件设置的 API URL
+        const url = `${pluginSettings.apiUrl}/v1/config/models/embedding`;
         
         console.log('[Recall] 获取 Embedding 模型列表:', url);
         
@@ -754,9 +753,8 @@ async function loadLLMModels() {
     const currentValue = getModelSelectValue('recall-llm-model', 'recall-llm-model-custom');
     
     try {
-        // 从服务器获取已配置的模型列表（不发送参数，使用服务器配置）
-        const serverUrl = window.recallSettings?.serverUrl || 'http://localhost:18888';
-        const url = `${serverUrl}/v1/config/models/llm`;
+        // 使用插件设置的 API URL
+        const url = `${pluginSettings.apiUrl}/v1/config/models/llm`;
         
         console.log('[Recall] 获取 LLM 模型列表:', url);
         
