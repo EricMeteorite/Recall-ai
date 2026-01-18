@@ -260,11 +260,16 @@ do_start() {
     fi
     
     local start_script="$SCRIPT_DIR/start.sh"
+    local start_log="$SCRIPT_DIR/recall_data/logs/start.log"
+    
     if [[ -f "$start_script" ]]; then
         print_info "正在启动服务..."
         
-        # 在后台启动
-        nohup bash "$start_script" > /dev/null 2>&1 &
+        # 确保日志目录存在
+        mkdir -p "$(dirname "$start_log")"
+        
+        # 在后台启动，保存日志
+        nohup bash "$start_script" > "$start_log" 2>&1 &
         
         # 等待服务启动
         echo -n "  等待服务启动"
@@ -279,7 +284,20 @@ do_start() {
             fi
         done
         echo ""
-        print_info "服务正在后台启动，请稍后检查状态"
+        
+        # 检查是否启动失败
+        if ! test_service_running; then
+            print_error "服务启动失败"
+            echo ""
+            print_info "启动日志:"
+            if [[ -f "$start_log" ]]; then
+                tail -20 "$start_log" | while read line; do
+                    print_dim "  $line"
+                done
+            fi
+            echo ""
+            print_dim "完整日志: $start_log"
+        fi
     else
         print_error "找不到启动脚本: $start_script"
     fi

@@ -247,9 +247,19 @@ function Do-Start {
     }
     
     $startScript = Join-Path $SCRIPT_DIR "start.ps1"
+    $startLog = Join-Path $SCRIPT_DIR "recall_data\logs\start.log"
+    
     if (Test-Path $startScript) {
         Write-Info "Starting service..."
-        Start-Process powershell -ArgumentList "-NoExit", "-File", $startScript -WorkingDirectory $SCRIPT_DIR
+        
+        # Ensure log directory exists
+        $logDir = Split-Path $startLog -Parent
+        if (-not (Test-Path $logDir)) {
+            New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+        }
+        
+        # Start in background with log
+        Start-Process powershell -ArgumentList "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $startScript -WorkingDirectory $SCRIPT_DIR -RedirectStandardOutput $startLog -RedirectStandardError $startLog -WindowStyle Hidden
         
         # Wait for service to start
         Write-Host "  Waiting for service to start" -NoNewline
@@ -264,7 +274,18 @@ function Do-Start {
             }
         }
         Write-Host ""
-        Write-Info "Service is starting in background, please check status later"
+        
+        # Check if start failed
+        if (-not (Test-ServiceRunning)) {
+            Write-Error2 "Service failed to start"
+            Write-Host ""
+            Write-Info "Start log:"
+            if (Test-Path $startLog) {
+                Get-Content $startLog -Tail 20 | ForEach-Object { Write-Dim "  $_" }
+            }
+            Write-Host ""
+            Write-Dim "Full log: $startLog"
+        }
     } else {
         Write-Error2 "Start script not found: $startScript"
     }

@@ -206,7 +206,12 @@ function Get-EmbeddingMode {
             "lightweight" { return "none" }
             "hybrid" {
                 # Hybrid 模式需要检查 API Key
-                if ($env:EMBEDDING_API_KEY) {
+                # 排除占位符值
+                $key = $env:EMBEDDING_API_KEY
+                if ($key -and 
+                    $key -ne "your_embedding_api_key_here" -and 
+                    $key -ne "your_api_key_here" -and 
+                    -not $key.StartsWith("your_")) {
                     return "api"
                 } else {
                     return "api_required"

@@ -303,7 +303,11 @@ get_embedding_mode() {
             lightweight) echo "none" ;;
             hybrid)
                 # Hybrid 模式需要检查 Embedding API Key
-                if [ -n "$EMBEDDING_API_KEY" ]; then
+                # 排除占位符值
+                if [ -n "$EMBEDDING_API_KEY" ] && \
+                   [ "$EMBEDDING_API_KEY" != "your_embedding_api_key_here" ] && \
+                   [ "$EMBEDDING_API_KEY" != "your_api_key_here" ] && \
+                   [[ "$EMBEDDING_API_KEY" != your_* ]]; then
                     echo "api"
                 else
                     echo "api_required"
