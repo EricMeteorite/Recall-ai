@@ -368,8 +368,8 @@ function createUI() {
                         <div class="recall-setting-group">
                             <label class="recall-setting-title">向量维度</label>
                             <input type="number" id="recall-embedding-dimension" class="text_pole" 
-                                   placeholder="1024" value="1024">
-                            <div class="recall-setting-hint">选择模型后会自动设置推荐维度</div>
+                                   placeholder="点击测试连接自动检测">
+                            <div class="recall-setting-hint">💡 可手动填写，或点击"测试连接"自动检测</div>
                         </div>
                         
                         <div class="recall-setting-actions">
@@ -550,7 +550,9 @@ async function loadApiConfig() {
             // 处理模型选择：先尝试选中已有选项，否则显示自定义输入
             setModelSelectValue('recall-embedding-model', 'recall-embedding-model-custom', emb.model || '');
             
-            document.getElementById('recall-embedding-dimension').value = emb.dimension || '1024';
+            // 维度：如果已配置则显示，否则留空让用户通过测试连接自动检测
+            const dimValue = emb.dimension && emb.dimension !== '未配置' ? emb.dimension : '';
+            document.getElementById('recall-embedding-dimension').value = dimValue;
             
             // 更新状态指示器
             updateEmbeddingStatus(emb.api_key_status);
@@ -682,18 +684,20 @@ async function loadEmbeddingModels() {
     const currentValue = getModelSelectValue('recall-embedding-model', 'recall-embedding-model-custom');
     
     try {
-        // 先尝试从临时配置获取，然后从输入框获取
-        const apiKey = document.getElementById('recall-embedding-api-key')?.value?.trim();
-        const apiBase = document.getElementById('recall-embedding-api-base')?.value?.trim();
+        // 从输入框获取配置（不发送 api_key 和 api_base 参数，让服务器使用已配置的值）
+        const serverUrl = window.recallSettings?.serverUrl || 'http://localhost:18888';
+        const url = `${serverUrl}/v1/config/models/embedding`;
         
-        // 构建请求参数
-        const params = new URLSearchParams();
-        if (apiKey) params.append('api_key', apiKey);
-        if (apiBase) params.append('api_base', apiBase);
+        console.log('[Recall] 获取 Embedding 模型列表:', url);
         
-        const url = `${window.recallSettings?.serverUrl || 'http://localhost:18888'}/v1/config/models/embedding?${params.toString()}`;
         const response = await fetch(url);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
         const data = await response.json();
+        console.log('[Recall] Embedding 模型列表响应:', data);
         
         if (data.success && data.models && data.models.length > 0) {
             // 清空并重新填充选项
@@ -750,18 +754,20 @@ async function loadLLMModels() {
     const currentValue = getModelSelectValue('recall-llm-model', 'recall-llm-model-custom');
     
     try {
-        // 从输入框获取配置
-        const apiKey = document.getElementById('recall-llm-api-key')?.value?.trim();
-        const apiBase = document.getElementById('recall-llm-api-base')?.value?.trim();
+        // 从服务器获取已配置的模型列表（不发送参数，使用服务器配置）
+        const serverUrl = window.recallSettings?.serverUrl || 'http://localhost:18888';
+        const url = `${serverUrl}/v1/config/models/llm`;
         
-        // 构建请求参数
-        const params = new URLSearchParams();
-        if (apiKey) params.append('api_key', apiKey);
-        if (apiBase) params.append('api_base', apiBase);
+        console.log('[Recall] 获取 LLM 模型列表:', url);
         
-        const url = `${window.recallSettings?.serverUrl || 'http://localhost:18888'}/v1/config/models/llm?${params.toString()}`;
         const response = await fetch(url);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
         const data = await response.json();
+        console.log('[Recall] LLM 模型列表响应:', data);
         
         if (data.success && data.models && data.models.length > 0) {
             // 清空并重新填充选项
@@ -846,7 +852,15 @@ async function onTestEmbedding() {
         const result = await response.json();
         
         if (result.success) {
-            alert(`✅ Embedding 连接成功！\n\n模型: ${result.model}\n维度: ${result.dimension}\n延迟: ${result.latency_ms}ms`);
+            // 自动填充检测到的维度到输入框（不自动保存，由用户手动保存）
+            if (result.dimension) {
+                const dimInput = document.getElementById('recall-embedding-dimension');
+                if (dimInput) {
+                    dimInput.value = result.dimension;
+                }
+            }
+            
+            alert(`✅ Embedding 连接成功！\n\n模型: ${result.model}\n维度: ${result.dimension} (已填充，请保存配置)\n延迟: ${result.latency_ms}ms`);
             updateEmbeddingStatusDirect(true);
         } else {
             alert(`❌ Embedding 连接失败\n\n${result.message}`);

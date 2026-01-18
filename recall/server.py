@@ -949,6 +949,77 @@ async def test_llm_connection():
         }
 
 
+@app.get("/v1/config/detect-dimension", tags=["Admin"])
+async def detect_embedding_dimension(api_key: Optional[str] = None, api_base: Optional[str] = None, model: Optional[str] = None):
+    """自动检测 Embedding 模型的向量维度
+    
+    调用 Embedding API 生成一个测试向量，返回其实际维度。
+    如果未提供参数，则使用当前配置的 API。
+    
+    Args:
+        api_key: 可选，临时使用的 API Key
+        api_base: 可选，临时使用的 API Base URL
+        model: 可选，临时使用的模型名称
+        
+    Returns:
+        dimension: 检测到的向量维度
+        model: 使用的模型
+    """
+    # 优先使用参数，否则使用配置
+    embedding_key = api_key or os.environ.get('EMBEDDING_API_KEY', '')
+    embedding_base = api_base or os.environ.get('EMBEDDING_API_BASE', '')
+    embedding_model = model or os.environ.get('EMBEDDING_MODEL', 'text-embedding-3-small')
+    
+    if not embedding_key:
+        return {
+            "success": False,
+            "message": "请先配置 Embedding API Key",
+            "dimension": None
+        }
+    
+    try:
+        from openai import OpenAI
+        
+        client_kwargs = {"api_key": embedding_key, "timeout": 30}
+        if embedding_base:
+            client_kwargs["base_url"] = embedding_base
+        
+        client = OpenAI(**client_kwargs)
+        
+        # 生成测试向量
+        start_time = time.time()
+        response = client.embeddings.create(
+            model=embedding_model,
+            input="Hello, this is a test for dimension detection."
+        )
+        elapsed_ms = (time.time() - start_time) * 1000
+        
+        # 获取实际维度
+        if response.data and len(response.data) > 0:
+            actual_dimension = len(response.data[0].embedding)
+            return {
+                "success": True,
+                "message": f"检测到向量维度: {actual_dimension}",
+                "dimension": actual_dimension,
+                "model": embedding_model,
+                "api_base": embedding_base or "默认",
+                "latency_ms": round(elapsed_ms, 2)
+            }
+        else:
+            return {
+                "success": False,
+                "message": "API 返回空结果",
+                "dimension": None
+            }
+            
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"检测失败: {str(e)}",
+            "dimension": None
+        }
+
+
 @app.get("/v1/config/models/embedding", tags=["Admin"])
 async def get_embedding_models(api_key: Optional[str] = None, api_base: Optional[str] = None):
     """获取可用的 Embedding 模型列表
@@ -973,13 +1044,65 @@ async def get_embedding_models(api_key: Optional[str] = None, api_base: Optional
     
     try:
         from openai import OpenAI
+        import httpx
         
         client_kwargs = {"api_key": embedding_key, "timeout": 30}
         if embedding_base:
             client_kwargs["base_url"] = embedding_base
         
         client = OpenAI(**client_kwargs)
-        models_response = client.models.list()
+        
+        try:
+            models_response = client.models.list()
+        except Exception as list_err:
+            # 如果 /models 端点不支持，尝试直接请求
+            base_url = embedding_base or "https://api.openai.com/v1"
+            models_url = f"{base_url.rstrip('/')}/models"
+            
+            try:
+                async with httpx.AsyncClient(timeout=30) as http_client:
+                    resp = await http_client.get(
+                        models_url,
+                        headers={"Authorization": f"Bearer {embedding_key}"}
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        models_data = data.get('data', [])
+                        if models_data:
+                            embedding_models = []
+                            for model in models_data:
+                                model_id = model.get('id', '').lower()
+                                if any(kw in model_id for kw in ['embed', 'bge', 'bce', 'e5', 'minilm', 'nomic']):
+                                    embedding_models.append({
+                                        "id": model.get('id'),
+                                        "owned_by": model.get('owned_by', 'unknown')
+                                    })
+                            if not embedding_models:
+                                embedding_models = [
+                                    {"id": m.get('id'), "owned_by": m.get('owned_by', 'unknown')}
+                                    for m in models_data
+                                ]
+                            return {
+                                "success": True,
+                                "message": f"获取到 {len(embedding_models)} 个模型",
+                                "models": embedding_models,
+                                "api_base": embedding_base or "默认"
+                            }
+                    # 如果请求失败，返回详细错误
+                    return {
+                        "success": False,
+                        "message": f"该 API 不支持获取模型列表 (HTTP {resp.status_code})，请手动输入模型名称",
+                        "models": [],
+                        "hint": "选择'自定义模型'并手动输入模型名称"
+                    }
+            except Exception as http_err:
+                return {
+                    "success": False,
+                    "message": f"该 API 不支持 /models 端点，请手动输入模型名称",
+                    "models": [],
+                    "hint": "选择'自定义模型'并手动输入模型名称",
+                    "error_detail": str(http_err)
+                }
         
         # 过滤出 embedding 相关的模型
         embedding_models = []
@@ -1007,10 +1130,12 @@ async def get_embedding_models(api_key: Optional[str] = None, api_base: Optional
         }
         
     except Exception as e:
+        import traceback
         return {
             "success": False,
             "message": f"获取模型列表失败: {str(e)}",
-            "models": []
+            "models": [],
+            "error_detail": traceback.format_exc()
         }
 
 
@@ -1038,13 +1163,61 @@ async def get_llm_models(api_key: Optional[str] = None, api_base: Optional[str] 
     
     try:
         from openai import OpenAI
+        import httpx
         
         client_kwargs = {"api_key": llm_key, "timeout": 30}
         if llm_base:
             client_kwargs["base_url"] = llm_base
         
         client = OpenAI(**client_kwargs)
-        models_response = client.models.list()
+        
+        try:
+            models_response = client.models.list()
+        except Exception as list_err:
+            # 如果 /models 端点不支持，尝试直接请求
+            base_url = llm_base or "https://api.openai.com/v1"
+            models_url = f"{base_url.rstrip('/')}/models"
+            
+            try:
+                async with httpx.AsyncClient(timeout=30) as http_client:
+                    resp = await http_client.get(
+                        models_url,
+                        headers={"Authorization": f"Bearer {llm_key}"}
+                    )
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        models_data = data.get('data', [])
+                        if models_data:
+                            llm_models = []
+                            for model in models_data:
+                                model_id = model.get('id', '').lower()
+                                # 排除 embedding 模型
+                                if not any(kw in model_id for kw in ['embed', 'bge', 'bce', 'e5-', 'minilm']):
+                                    llm_models.append({
+                                        "id": model.get('id'),
+                                        "owned_by": model.get('owned_by', 'unknown')
+                                    })
+                            return {
+                                "success": True,
+                                "message": f"获取到 {len(llm_models)} 个模型",
+                                "models": llm_models,
+                                "api_base": llm_base or "默认"
+                            }
+                    # 如果请求失败，返回详细错误
+                    return {
+                        "success": False,
+                        "message": f"该 API 不支持获取模型列表 (HTTP {resp.status_code})，请手动输入模型名称",
+                        "models": [],
+                        "hint": "选择'自定义模型'并手动输入模型名称"
+                    }
+            except Exception as http_err:
+                return {
+                    "success": False,
+                    "message": f"该 API 不支持 /models 端点，请手动输入模型名称",
+                    "models": [],
+                    "hint": "选择'自定义模型'并手动输入模型名称",
+                    "error_detail": str(http_err)
+                }
         
         # 过滤出 LLM/Chat 相关的模型（排除 embedding 模型）
         llm_models = []
@@ -1065,10 +1238,12 @@ async def get_llm_models(api_key: Optional[str] = None, api_base: Optional[str] 
         }
         
     except Exception as e:
+        import traceback
         return {
             "success": False,
             "message": f"获取模型列表失败: {str(e)}",
-            "models": []
+            "models": [],
+            "error_detail": traceback.format_exc()
         }
 
 
@@ -1204,10 +1379,10 @@ async def update_config(request: ConfigUpdateRequest):
 
 @app.get("/v1/config/full", tags=["Admin"])
 async def get_full_config():
-    """获取完整配置信息（供插件使用）
+    """获取完整配置信息
     
     返回 Embedding 和 LLM 的完整配置状态，包括脱敏后的 API Key。
-    专为 SillyTavern 插件设计。
+    供任何客户端（插件、Web UI、CLI 等）使用。
     """
     def mask_key(key: str) -> str:
         """脱敏显示 API Key"""
@@ -1233,7 +1408,7 @@ async def get_full_config():
         "api_key_status": get_key_status(embedding_key),
         "api_base": os.environ.get('EMBEDDING_API_BASE', ''),
         "model": os.environ.get('EMBEDDING_MODEL', ''),
-        "dimension": os.environ.get('EMBEDDING_DIMENSION', '1024'),
+        "dimension": os.environ.get('EMBEDDING_DIMENSION', ''),
         "mode": os.environ.get('RECALL_EMBEDDING_MODE', 'auto'),
     }
     
