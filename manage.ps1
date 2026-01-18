@@ -341,7 +341,8 @@ function Do-Status {
         try {
             $stats = Invoke-RestMethod -Uri "http://127.0.0.1:$DEFAULT_PORT/v1/stats" -TimeoutSec 5
             Write-Dim "Total Memories: $($stats.total_memories)"
-            Write-Dim "Embedding Mode: $($stats.embedding_mode)"
+            $mode = if ($stats.lightweight) { "轻量模式" } else { "完整模式" }
+            Write-Dim "Embedding Mode: $mode"
         } catch {}
     } else {
         Write-Error2 "Service is not running"
@@ -594,7 +595,7 @@ function Reload-Config {
         
         # Show current mode
         $configInfo = Invoke-RestMethod -Uri "http://127.0.0.1:$DEFAULT_PORT/v1/config" -TimeoutSec 5
-        Write-Dim "Current Embedding Mode: $($configInfo.embedding_mode)"
+        Write-Dim "Current Embedding Mode: $($configInfo.embedding.mode)"
     } catch {
         Write-Error2 "Hot reload failed: $_"
     }
@@ -676,21 +677,30 @@ function Show-CurrentConfig {
         $config = Invoke-RestMethod -Uri "http://127.0.0.1:$DEFAULT_PORT/v1/config" -TimeoutSec 5
         
         Write-Host ""
-        Write-Info "Embedding Mode: $($config.embedding_mode)"
+        Write-Info "Embedding Mode: $($config.embedding.mode)"
         Write-Host ""
         
         Write-Dim "Config File: $($config.config_file)"
         Write-Dim "File Exists: $($config.config_file_exists)"
         
         Write-Host ""
-        Write-Info "Provider Status:"
+        Write-Info "Embedding Config:"
+        $embStatus = $config.embedding.status
+        $statusColor = if ($embStatus -eq "已配置") { "Green" } else { "DarkGray" }
+        Write-Host "  Status: " -NoNewline
+        Write-Host $embStatus -ForegroundColor $statusColor
+        Write-Dim "  API Base: $($config.embedding.api_base)"
+        Write-Dim "  Model: $($config.embedding.model)"
+        Write-Dim "  Dimension: $($config.embedding.dimension)"
         
-        foreach ($provider in @("siliconflow", "openai", "custom")) {
-            $p = $config.providers.$provider
-            $statusColor = if ($p.status -eq "Configured") { "Green" } else { "DarkGray" }
-            Write-Host "  - $provider`: " -NoNewline
-            Write-Host $p.status -ForegroundColor $statusColor
-        }
+        Write-Host ""
+        Write-Info "LLM Config:"
+        $llmStatus = $config.llm.status
+        $statusColor = if ($llmStatus -eq "已配置") { "Green" } else { "DarkGray" }
+        Write-Host "  Status: " -NoNewline
+        Write-Host $llmStatus -ForegroundColor $statusColor
+        Write-Dim "  API Base: $($config.llm.api_base)"
+        Write-Dim "  Model: $($config.llm.model)"
     } catch {
         Write-Error2 "Failed to get config: $_"
     }

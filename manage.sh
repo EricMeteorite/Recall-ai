@@ -351,7 +351,7 @@ do_status() {
         local stats=$(curl -s "http://127.0.0.1:$DEFAULT_PORT/v1/stats" 2>/dev/null || echo "")
         if [[ -n "$stats" ]]; then
             local total=$(echo "$stats" | python3 -c "import sys,json; print(json.load(sys.stdin).get('total_memories', 'N/A'))" 2>/dev/null || echo "N/A")
-            local mode=$(echo "$stats" | python3 -c "import sys,json; print(json.load(sys.stdin).get('embedding_mode', 'N/A'))" 2>/dev/null || echo "N/A")
+            local mode=$(echo "$stats" | python3 -c "import sys,json; d=json.load(sys.stdin); print('轻量模式' if d.get('lightweight', False) else '完整模式')" 2>/dev/null || echo "N/A")
             print_dim "记忆总数: $total"
             print_dim "Embedding 模式: $mode"
         fi
@@ -615,7 +615,7 @@ reload_config() {
         # 显示当前模式
         local config_info=$(curl -s "http://127.0.0.1:$DEFAULT_PORT/v1/config" 2>/dev/null || echo "")
         if [[ -n "$config_info" ]]; then
-            local mode=$(echo "$config_info" | python3 -c "import sys,json; print(json.load(sys.stdin).get('embedding_mode', 'unknown'))" 2>/dev/null || echo "unknown")
+            local mode=$(echo "$config_info" | python3 -c "import sys,json; print(json.load(sys.stdin).get('embedding', {}).get('mode', 'unknown'))" 2>/dev/null || echo "unknown")
             print_dim "当前 Embedding 模式: $mode"
         fi
     else
@@ -717,7 +717,7 @@ show_current_config() {
     
     if [[ -n "$config" ]]; then
         echo ""
-        local mode=$(echo "$config" | python3 -c "import sys,json; print(json.load(sys.stdin).get('embedding_mode', 'unknown'))" 2>/dev/null || echo "unknown")
+        local mode=$(echo "$config" | python3 -c "import sys,json; print(json.load(sys.stdin).get('embedding', {}).get('mode', 'unknown'))" 2>/dev/null || echo "unknown")
         print_info "Embedding 模式: $mode"
         echo ""
         
@@ -727,16 +727,32 @@ show_current_config() {
         print_dim "文件存在: $file_exists"
         
         echo ""
-        print_info "Provider 状态:"
+        print_info "Embedding 配置:"
+        local emb_status=$(echo "$config" | python3 -c "import sys,json; print(json.load(sys.stdin).get('embedding', {}).get('status', '未配置'))" 2>/dev/null || echo "未配置")
+        local emb_base=$(echo "$config" | python3 -c "import sys,json; print(json.load(sys.stdin).get('embedding', {}).get('api_base', '未配置'))" 2>/dev/null || echo "未配置")
+        local emb_model=$(echo "$config" | python3 -c "import sys,json; print(json.load(sys.stdin).get('embedding', {}).get('model', '未配置'))" 2>/dev/null || echo "未配置")
+        local emb_dim=$(echo "$config" | python3 -c "import sys,json; print(json.load(sys.stdin).get('embedding', {}).get('dimension', '未配置'))" 2>/dev/null || echo "未配置")
+        if [[ "$emb_status" == "已配置" ]]; then
+            echo -e "  状态: ${GREEN}$emb_status${NC}"
+        else
+            echo -e "  状态: ${GRAY}$emb_status${NC}"
+        fi
+        print_dim "  API 地址: $emb_base"
+        print_dim "  模型: $emb_model"
+        print_dim "  维度: $emb_dim"
         
-        for provider in "siliconflow" "openai" "custom"; do
-            local status=$(echo "$config" | python3 -c "import sys,json; print(json.load(sys.stdin)['providers']['$provider']['status'])" 2>/dev/null || echo "未知")
-            if [[ "$status" == "已配置" ]]; then
-                echo -e "  - $provider: ${GREEN}$status${NC}"
-            else
-                echo -e "  - $provider: ${GRAY}$status${NC}"
-            fi
-        done
+        echo ""
+        print_info "LLM 配置:"
+        local llm_status=$(echo "$config" | python3 -c "import sys,json; print(json.load(sys.stdin).get('llm', {}).get('status', '未配置'))" 2>/dev/null || echo "未配置")
+        local llm_base=$(echo "$config" | python3 -c "import sys,json; print(json.load(sys.stdin).get('llm', {}).get('api_base', '未配置'))" 2>/dev/null || echo "未配置")
+        local llm_model=$(echo "$config" | python3 -c "import sys,json; print(json.load(sys.stdin).get('llm', {}).get('model', '未配置'))" 2>/dev/null || echo "未配置")
+        if [[ "$llm_status" == "已配置" ]]; then
+            echo -e "  状态: ${GREEN}$llm_status${NC}"
+        else
+            echo -e "  状态: ${GRAY}$llm_status${NC}"
+        fi
+        print_dim "  API 地址: $llm_base"
+        print_dim "  模型: $llm_model"
     else
         print_error "获取配置失败"
     fi
