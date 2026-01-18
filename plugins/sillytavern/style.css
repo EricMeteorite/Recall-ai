@@ -3,25 +3,8 @@
  * 使用 SillyTavern 原生变量和样式
  */
 
-/* ========== 折叠面板兼容 ========== */
-#recall-extension.inline-drawer .inline-drawer-content {
-    display: none;
-    padding: 10px 0;
-}
-
-#recall-extension.inline-drawer.open .inline-drawer-content {
-    display: block;
-}
-
-#recall-extension .inline-drawer-toggle {
-    cursor: pointer;
-    user-select: none;
-}
-
-/* 展开时图标旋转180度（向上） */
-#recall-extension.inline-drawer.open .inline-drawer-icon {
-    transform: rotate(180deg);
-}
+/* ========== 折叠面板 - 完全依赖 SillyTavern 原生样式 ========== */
+/* SillyTavern 自带 inline-drawer 的展开/收起逻辑，无需自定义 */
 
 /* ========== 连接状态栏 ========== */
 .recall-status-bar {
