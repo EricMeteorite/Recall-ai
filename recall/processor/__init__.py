@@ -2,6 +2,12 @@
 
 from .entity_extractor import EntityExtractor, ExtractedEntity
 from .foreshadowing import ForeshadowingTracker, ForeshadowingTrackerLite, Foreshadowing
+from .foreshadowing_analyzer import (
+    ForeshadowingAnalyzer, 
+    ForeshadowingAnalyzerConfig,
+    AnalyzerBackend,
+    AnalysisResult
+)
 from .consistency import ConsistencyChecker, ConsistencyResult, Violation
 from .memory_summarizer import MemorySummarizer, MemoryItem
 from .scenario import ScenarioDetector
@@ -12,6 +18,10 @@ __all__ = [
     'ForeshadowingTracker',
     'ForeshadowingTrackerLite',
     'Foreshadowing',
+    'ForeshadowingAnalyzer',
+    'ForeshadowingAnalyzerConfig',
+    'AnalyzerBackend',
+    'AnalysisResult',
     'ConsistencyChecker',
     'ConsistencyResult',
     'Violation',

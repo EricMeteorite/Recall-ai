@@ -214,8 +214,9 @@ show_config_menu() {
     echo -e "  ${YELLOW}│    [1] 📝 编辑 API 配置文件                             │${NC}"
     echo -e "  ${YELLOW}│    [2] 🔄 热更新配置（无需重启）                        │${NC}"
     echo -e "  ${YELLOW}│    [3] 🧪 测试 Embedding API 连接                       │${NC}"
-    echo -e "  ${YELLOW}│    [4] 📋 查看当前配置                                  │${NC}"
-    echo -e "  ${YELLOW}│    [5] 🗑️  重置配置为默认值                             │${NC}"
+    echo -e "  ${YELLOW}│    [4] 🤖 测试 LLM API 连接                             │${NC}"
+    echo -e "  ${YELLOW}│    [5] 📋 查看当前配置                                  │${NC}"
+    echo -e "  ${YELLOW}│    [6] 🗑️  重置配置为默认值                             │${NC}"
     echo -e "  ${YELLOW}│                                                         │${NC}"
     echo -e "  ${YELLOW}│    [0] ← 返回主菜单                                     │${NC}"
     echo -e "  ${YELLOW}│                                                         │${NC}"
@@ -663,6 +664,47 @@ test_embedding_api() {
     read -p "  按 Enter 返回"
 }
 
+test_llm_api() {
+    print_title "测试 LLM API"
+    
+    if ! test_service_running; then
+        print_error "服务未运行"
+        return
+    fi
+    
+    print_info "正在测试 LLM API 连接..."
+    
+    local result=$(curl -s "http://127.0.0.1:$DEFAULT_PORT/v1/config/test/llm" 2>/dev/null || echo "")
+    
+    echo ""
+    if [[ -n "$result" ]]; then
+        local success=$(echo "$result" | python3 -c "import sys,json; print(json.load(sys.stdin).get('success', False))" 2>/dev/null || echo "False")
+        
+        if [[ "$success" == "True" ]]; then
+            print_success "LLM API 连接成功！"
+            local model=$(echo "$result" | python3 -c "import sys,json; print(json.load(sys.stdin).get('model', 'N/A'))" 2>/dev/null || echo "N/A")
+            local api_base=$(echo "$result" | python3 -c "import sys,json; print(json.load(sys.stdin).get('api_base', 'N/A'))" 2>/dev/null || echo "N/A")
+            local response=$(echo "$result" | python3 -c "import sys,json; print(json.load(sys.stdin).get('response', 'N/A'))" 2>/dev/null || echo "N/A")
+            local latency=$(echo "$result" | python3 -c "import sys,json; print(json.load(sys.stdin).get('latency_ms', 'N/A'))" 2>/dev/null || echo "N/A")
+            print_dim "模型: $model"
+            print_dim "API 地址: $api_base"
+            print_dim "响应: $response"
+            print_dim "延迟: ${latency}ms"
+        else
+            print_error "LLM API 连接失败"
+            local message=$(echo "$result" | python3 -c "import sys,json; print(json.load(sys.stdin).get('message', ''))" 2>/dev/null || echo "")
+            if [[ -n "$message" ]]; then
+                print_dim "$message"
+            fi
+        fi
+    else
+        print_error "测试失败"
+    fi
+    
+    echo ""
+    read -p "  按 Enter 返回"
+}
+
 show_current_config() {
     print_title "当前配置"
     
@@ -758,8 +800,9 @@ run_config_menu() {
             1) edit_config; read -p "  按 Enter 继续" ;;
             2) reload_config; read -p "  按 Enter 继续" ;;
             3) test_embedding_api ;;
-            4) show_current_config ;;
-            5) reset_config; read -p "  按 Enter 继续" ;;
+            4) test_llm_api ;;
+            5) show_current_config ;;
+            6) reset_config; read -p "  按 Enter 继续" ;;
             0) return ;;
             *) print_error "无效选择" ;;
         esac

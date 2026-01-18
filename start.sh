@@ -227,8 +227,8 @@ load_api_keys() {
     # 从配置文件加载配置
     local config_file="$DATA_PATH/config/api_keys.env"
     
-    # 支持的配置项（包括新增的 MODEL 配置）
-    local supported_keys="SILICONFLOW_API_KEY SILICONFLOW_MODEL OPENAI_API_KEY OPENAI_API_BASE OPENAI_MODEL EMBEDDING_API_KEY EMBEDDING_API_BASE EMBEDDING_MODEL EMBEDDING_DIMENSION RECALL_EMBEDDING_MODE"
+    # 支持的配置项
+    local supported_keys="EMBEDDING_API_KEY EMBEDDING_API_BASE EMBEDDING_MODEL EMBEDDING_DIMENSION RECALL_EMBEDDING_MODE LLM_API_KEY LLM_API_BASE LLM_MODEL"
     
     if [ -f "$config_file" ]; then
         print_info "加载配置文件: $config_file"
@@ -261,88 +261,31 @@ load_api_keys() {
         # 创建默认配置文件
         mkdir -p "$DATA_PATH/config"
         cat > "$config_file" << 'EOF'
-# ============================================
-# Recall API 配置文件
-# ============================================
-# 
-# 使用方法：
-# 1. 直接用文本编辑器打开此文件
-# 2. 填入你需要的配置（三种方式选一种）
-# 3. 保存文件
-# 4. 热更新: curl -X POST http://localhost:18888/v1/config/reload
-# 5. 测试连接: curl http://localhost:18888/v1/config/test
-#
-# ============================================
+# ============================================================================
+# Recall-AI 配置文件
+# Recall-AI Configuration File
+# ============================================================================
 
+# ----------------------------------------------------------------------------
+# Embedding 配置 (自定义 OpenAI 兼容接口)
+# Embedding Configuration (Custom OpenAI Compatible API)
+# ----------------------------------------------------------------------------
+EMBEDDING_API_KEY=your_embedding_api_key_here
+EMBEDDING_API_BASE=https://api.siliconflow.cn/v1
+EMBEDDING_MODEL=BAAI/bge-m3
+EMBEDDING_DIMENSION=1024
 
-# ============================================
-# 方式一：硅基流动（推荐国内用户，便宜快速）
-# ============================================
-# 获取地址：https://cloud.siliconflow.cn/
-SILICONFLOW_API_KEY=
-# 模型选择（默认 BAAI/bge-large-zh-v1.5）
-# 可选: BAAI/bge-large-zh-v1.5, BAAI/bge-m3, BAAI/bge-large-en-v1.5
-SILICONFLOW_MODEL=BAAI/bge-large-zh-v1.5
+# Embedding 模式: auto(自动检测), local(本地), api(远程API)
+# Embedding Mode: auto(auto detect), local(local model), api(remote API)
+RECALL_EMBEDDING_MODE=auto
 
-
-# ============================================
-# 方式二：OpenAI（支持官方和中转站）
-# ============================================
-# 获取地址：https://platform.openai.com/
-OPENAI_API_KEY=
-# API 地址（默认官方，可改为中转站地址）
-OPENAI_API_BASE=
-# 模型选择（默认 text-embedding-3-small）
-# 可选: text-embedding-3-small, text-embedding-3-large, text-embedding-ada-002
-OPENAI_MODEL=text-embedding-3-small
-
-
-# ============================================
-# 方式三：自定义 API（Azure/Ollama/其他兼容服务）
-# ============================================
-# 适用于：Azure OpenAI、本地Ollama、其他OpenAI兼容服务
-# 注意：需要同时填写 KEY、BASE、MODEL、DIMENSION
-EMBEDDING_API_KEY=
-EMBEDDING_API_BASE=
-EMBEDDING_MODEL=
-EMBEDDING_DIMENSION=1536
-
-
-# ============================================
-# 常用 Embedding 模型参考
-# ============================================
-# 
-# OpenAI:
-#   text-embedding-3-small   维度:1536  推荐,性价比高
-#   text-embedding-3-large   维度:3072  精度更高
-#   text-embedding-ada-002   维度:1536  旧版本
-# 
-# 硅基流动:
-#   BAAI/bge-large-zh-v1.5   维度:1024  中文推荐
-#   BAAI/bge-m3              维度:1024  多语言
-#   BAAI/bge-large-en-v1.5   维度:1024  英文
-#
-# Ollama (本地):
-#   nomic-embed-text         维度:768
-#   mxbai-embed-large        维度:1024
-#
-# ============================================
-# 模式说明
-# ============================================
-# 
-# 【轻量模式】不需要填写任何配置
-#   - 仅使用关键词搜索，无语义搜索
-#   - 内存占用最低（~100MB）
-# 
-# 【Hybrid模式】需要 API 配置（上面三种方式选一种）
-#   - 支持语义搜索
-#   - 内存占用低（~150MB）
-# 
-# 【完整模式】不需要填写任何配置
-#   - 使用本地模型，完全离线
-#   - 内存占用高（~1.5GB）
-#
-# ============================================
+# ----------------------------------------------------------------------------
+# LLM 配置 (自定义 OpenAI 兼容接口)
+# LLM Configuration (Custom OpenAI Compatible API)
+# ----------------------------------------------------------------------------
+LLM_API_KEY=your_llm_api_key_here
+LLM_API_BASE=https://api.siliconflow.cn/v1
+LLM_MODEL=Qwen/Qwen2.5-7B-Instruct
 EOF
         print_info "已创建配置文件: $config_file"
     fi
@@ -359,14 +302,9 @@ get_embedding_mode() {
         case $install_mode in
             lightweight) echo "none" ;;
             hybrid)
-                # Hybrid 模式需要检查 API Key（支持多种配置方式）
-                # 优先级：custom > siliconflow > openai
-                if [ -n "$EMBEDDING_API_KEY" ] && [ -n "$EMBEDDING_API_BASE" ]; then
-                    echo "custom"
-                elif [ -n "$SILICONFLOW_API_KEY" ]; then
-                    echo "siliconflow"
-                elif [ -n "$OPENAI_API_KEY" ]; then
-                    echo "openai"
+                # Hybrid 模式需要检查 Embedding API Key
+                if [ -n "$EMBEDDING_API_KEY" ]; then
+                    echo "api"
                 else
                     echo "api_required"
                 fi
@@ -415,17 +353,11 @@ do_start() {
         echo ""
         echo -e "  ${YELLOW}请编辑配置文件: ${CYAN}$DATA_PATH/config/api_keys.env${NC}"
         echo ""
-        echo -e "  或设置环境变量："
-        echo ""
-        echo -e "  方式1 - OpenAI:"
-        echo -e "    ${CYAN}export OPENAI_API_KEY=sk-xxx${NC}"
-        echo ""
-        echo -e "  方式2 - 硅基流动 (推荐国内用户):"
-        echo -e "    ${CYAN}export SILICONFLOW_API_KEY=sf-xxx${NC}"
-        echo ""
-        echo -e "  方式3 - 自定义 API (中转站等):"
-        echo -e "    ${CYAN}export EMBEDDING_API_KEY=sk-xxx${NC}"
-        echo -e "    ${CYAN}export EMBEDDING_API_BASE=https://your-api.com/v1${NC}"
+        echo -e "  设置以下配置项（OpenAI 兼容格式）:"
+        echo -e "    ${CYAN}EMBEDDING_API_KEY=sk-xxx${NC}"
+        echo -e "    ${CYAN}EMBEDDING_API_BASE=https://api.siliconflow.cn/v1${NC}"
+        echo -e "    ${CYAN}EMBEDDING_MODEL=BAAI/bge-m3${NC}"
+        echo -e "    ${CYAN}EMBEDDING_DIMENSION=1024${NC}"
         echo ""
         echo -e "  然后重新运行: ${CYAN}./start.sh${NC}"
         exit 1
@@ -448,16 +380,10 @@ do_start() {
         none)
             print_info "Embedding: ${YELLOW}轻量模式${NC} (仅关键词搜索)"
             ;;
-        openai)
+        api)
             local base_info=""
-            [ -n "$OPENAI_API_BASE" ] && base_info=" ($OPENAI_API_BASE)"
-            print_info "Embedding: ${GREEN}Hybrid-OpenAI${NC}$base_info"
-            ;;
-        siliconflow)
-            print_info "Embedding: ${GREEN}Hybrid-硅基流动${NC}"
-            ;;
-        custom)
-            print_info "Embedding: ${GREEN}Hybrid-自定义${NC} ($EMBEDDING_API_BASE)"
+            [ -n "$EMBEDDING_API_BASE" ] && base_info=" ($EMBEDDING_API_BASE)"
+            print_info "Embedding: ${GREEN}Hybrid-API${NC}$base_info"
             ;;
         local)
             print_info "Embedding: ${GREEN}完整模式${NC} (本地模型)"

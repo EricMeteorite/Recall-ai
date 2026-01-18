@@ -18,7 +18,8 @@ from .index import EntityIndex, InvertedIndex, VectorIndex, OptimizedNgramIndex
 from .graph import KnowledgeGraph, RelationExtractor
 from .processor import (
     EntityExtractor, ForeshadowingTracker,
-    ConsistencyChecker, MemorySummarizer, ScenarioDetector
+    ConsistencyChecker, MemorySummarizer, ScenarioDetector,
+    ForeshadowingAnalyzer, ForeshadowingAnalyzerConfig, AnalysisResult
 )
 from .processor.foreshadowing import Foreshadowing
 from .retrieval import EightLayerRetriever, ContextBuilder, ParallelRetriever
@@ -88,7 +89,8 @@ class RecallEngine:
         llm_api_key: Optional[str] = None,
         lightweight: bool = False,
         embedding_config: Optional[EmbeddingConfig] = None,
-        auto_warmup: bool = True
+        auto_warmup: bool = True,
+        foreshadowing_config: Optional[ForeshadowingAnalyzerConfig] = None
     ):
         """初始化 Recall 引擎
         
@@ -104,6 +106,9 @@ class RecallEngine:
                 - EmbeddingConfig.hybrid_siliconflow(key): Hybrid模式（国内）
                 - EmbeddingConfig.full(): 完整模式，~1.5GB内存
             auto_warmup: 是否自动预热模型
+            foreshadowing_config: 伏笔分析器配置（可选）
+                - None/默认: 手动模式，不启用自动分析
+                - ForeshadowingAnalyzerConfig.llm_based(...): LLM 辅助模式
         """
         # 1. 初始化环境
         self.env_manager = EnvironmentManager(data_root)
@@ -112,6 +117,9 @@ class RecallEngine:
         
         # 2. 加载配置
         self.config = self.env_manager.load_config()
+        
+        # 保存伏笔分析器配置（稍后在 _init_components 中使用）
+        self._foreshadowing_config = foreshadowing_config
         
         # 3. 确定 Embedding 配置
         if lightweight:
@@ -182,6 +190,13 @@ class RecallEngine:
         self.foreshadowing_tracker = ForeshadowingTracker(
             storage_dir=os.path.join(self.data_root, 'data', 'foreshadowings')
         )
+        
+        # 伏笔分析器（可选功能，默认手动模式）
+        self.foreshadowing_analyzer = ForeshadowingAnalyzer(
+            tracker=self.foreshadowing_tracker,
+            config=self._foreshadowing_config  # 可能是 None，会使用默认手动模式
+        )
+        
         self.consistency_checker = ConsistencyChecker()
         self.memory_summarizer = MemorySummarizer(llm_client=self.llm_client)
         self.scenario_detector = ScenarioDetector()
@@ -588,6 +603,62 @@ class RecallEngine:
     def get_active_foreshadowings(self, user_id: str = "default") -> List[Foreshadowing]:
         """获取活跃伏笔"""
         return self.foreshadowing_tracker.get_active(user_id)
+    
+    def on_foreshadowing_turn(
+        self, 
+        content: str, 
+        role: str = "user", 
+        user_id: str = "default"
+    ) -> AnalysisResult:
+        """处理新的一轮对话（用于伏笔分析）
+        
+        在每轮对话后调用此方法，分析器会：
+        - 手动模式：不做任何操作，返回空结果
+        - LLM模式：累积对话，达到触发条件时自动分析
+        
+        Args:
+            content: 对话内容
+            role: 角色（user/assistant）
+            user_id: 用户ID
+            
+        Returns:
+            AnalysisResult: 分析结果
+        """
+        return self.foreshadowing_analyzer.on_new_turn(
+            content=content,
+            role=role,
+            user_id=user_id
+        )
+    
+    def trigger_foreshadowing_analysis(self, user_id: str = "default") -> AnalysisResult:
+        """手动触发伏笔分析
+        
+        可以在任何时候调用，强制触发 LLM 分析（如果已配置）。
+        
+        Args:
+            user_id: 用户ID
+            
+        Returns:
+            AnalysisResult: 分析结果
+        """
+        return self.foreshadowing_analyzer.trigger_analysis(user_id)
+    
+    def get_foreshadowing_analyzer_config(self) -> Dict[str, Any]:
+        """获取伏笔分析器配置"""
+        return self.foreshadowing_analyzer.config.to_dict()
+    
+    def update_foreshadowing_analyzer_config(
+        self,
+        trigger_interval: Optional[int] = None,
+        auto_plant: Optional[bool] = None,
+        auto_resolve: Optional[bool] = None
+    ):
+        """更新伏笔分析器配置"""
+        self.foreshadowing_analyzer.update_config(
+            trigger_interval=trigger_interval,
+            auto_plant=auto_plant,
+            auto_resolve=auto_resolve
+        )
     
     # ==================== 实体 API ====================
     

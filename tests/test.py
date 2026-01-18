@@ -107,7 +107,7 @@ def run_quick_test():
             print("\n[4/5] 高级功能...")
             
             # 伏笔
-            fsh = engine.plant_foreshadowing("神秘的盒子", ["Alice"])
+            fsh = engine.plant_foreshadowing("神秘的盒子", user_id="test", related_entities=["Alice"])
             assert fsh.id, "foreshadowing failed"
             ok("伏笔功能正常")
             

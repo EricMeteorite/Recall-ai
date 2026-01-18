@@ -255,70 +255,168 @@ function createUI() {
                 
                 <!-- 设置标签页 -->
                 <div id="recall-tab-settings" class="recall-tab-content">
-                    <div class="recall-setting-group">
-                        <label class="recall-setting-label">
-                            <input type="checkbox" id="recall-enabled" ${pluginSettings.enabled ? 'checked' : ''}>
-                            <span>启用记忆功能</span>
-                        </label>
+                    <!-- 基本设置 -->
+                    <div class="recall-settings-section">
+                        <div class="recall-settings-section-title">🔧 基本设置</div>
+                        
+                        <div class="recall-setting-group">
+                            <label class="recall-setting-label">
+                                <input type="checkbox" id="recall-enabled" ${pluginSettings.enabled ? 'checked' : ''}>
+                                <span>启用记忆功能</span>
+                            </label>
+                        </div>
+                        
+                        <div class="recall-setting-group">
+                            <label class="recall-setting-title">API 地址</label>
+                            <input type="text" id="recall-api-url" value="${pluginSettings.apiUrl}" 
+                                   placeholder="http://127.0.0.1:18888" class="text_pole">
+                        </div>
+                        
+                        <div class="recall-setting-group">
+                            <label class="recall-setting-label">
+                                <input type="checkbox" id="recall-auto-inject" ${pluginSettings.autoInject ? 'checked' : ''}>
+                                <span>自动注入记忆到上下文</span>
+                            </label>
+                        </div>
+                        
+                        <div class="recall-setting-group">
+                            <label class="recall-setting-label">
+                                <input type="checkbox" id="recall-filter-thinking" ${pluginSettings.filterThinking ? 'checked' : ''}>
+                                <span>过滤AI思考过程</span>
+                            </label>
+                            <div class="recall-setting-hint">只保存AI的最终回复，不保存&lt;thinking&gt;等思考内容</div>
+                        </div>
+                        
+                        <div class="recall-setting-group">
+                            <label class="recall-setting-label">
+                                <input type="checkbox" id="recall-auto-chunk" ${pluginSettings.autoChunkLongText ? 'checked' : ''}>
+                                <span>长文本自动分段</span>
+                            </label>
+                            <div class="recall-setting-hint">超长回复(>${pluginSettings.chunkSize || 2000}字)自动分成多条记忆保存</div>
+                        </div>
+                        
+                        <div class="recall-setting-group">
+                            <label class="recall-setting-title">分段大小 (字符数)</label>
+                            <input type="number" id="recall-chunk-size" value="${pluginSettings.chunkSize || 2000}" 
+                                   min="500" max="10000" step="500" class="text_pole">
+                        </div>
+                        
+                        <div class="recall-setting-group">
+                            <label class="recall-setting-title">预览字数</label>
+                            <input type="number" id="recall-preview-length" value="${pluginSettings.previewLength || 200}" 
+                                   min="50" max="500" step="50" class="text_pole">
+                        </div>
+                        
+                        <div class="recall-setting-group">
+                            <label class="recall-setting-title">最大注入记忆数</label>
+                            <input type="number" id="recall-max-memories" value="${pluginSettings.maxMemories}" 
+                                   min="1" max="50" class="text_pole">
+                        </div>
+                        
+                        <div class="recall-setting-actions">
+                            <button id="recall-test-connection" class="menu_button">
+                                <i class="fa-solid fa-plug"></i>
+                                <span>测试连接</span>
+                            </button>
+                            <button id="recall-save-settings" class="menu_button menu_button_icon">
+                                <i class="fa-solid fa-save"></i>
+                                <span>保存设置</span>
+                            </button>
+                        </div>
                     </div>
                     
-                    <div class="recall-setting-group">
-                        <label class="recall-setting-title">API 地址</label>
-                        <input type="text" id="recall-api-url" value="${pluginSettings.apiUrl}" 
-                               placeholder="http://127.0.0.1:18888" class="text_pole">
+                    <!-- Embedding API 配置 -->
+                    <div class="recall-settings-section recall-api-section">
+                        <div class="recall-settings-section-title">
+                            🔗 Embedding API 配置
+                            <span class="recall-api-status" id="recall-embedding-status">未知</span>
+                        </div>
+                        <div class="recall-setting-hint" style="margin-top:-5px;margin-bottom:10px;">用于语义搜索和相似度匹配（OpenAI 兼容接口）</div>
+                        
+                        <div class="recall-setting-group">
+                            <label class="recall-setting-title">API Key</label>
+                            <div class="recall-api-key-input">
+                                <input type="password" id="recall-embedding-api-key" class="text_pole" 
+                                       placeholder="sk-xxxxxxxx">
+                                <button class="recall-toggle-key-btn" data-target="recall-embedding-api-key" title="显示/隐藏">👁</button>
+                            </div>
+                        </div>
+                        
+                        <div class="recall-setting-group">
+                            <label class="recall-setting-title">API 地址</label>
+                            <input type="text" id="recall-embedding-api-base" class="text_pole" 
+                                   placeholder="https://api.siliconflow.cn/v1">
+                            <div class="recall-setting-hint">硅基流动: https://api.siliconflow.cn/v1</div>
+                        </div>
+                        
+                        <div class="recall-setting-group">
+                            <label class="recall-setting-title">模型名称</label>
+                            <input type="text" id="recall-embedding-model" class="text_pole" 
+                                   placeholder="BAAI/bge-m3">
+                            <div class="recall-setting-hint">硅基流动推荐: BAAI/bge-m3</div>
+                        </div>
+                        
+                        <div class="recall-setting-group">
+                            <label class="recall-setting-title">向量维度</label>
+                            <input type="number" id="recall-embedding-dimension" class="text_pole" 
+                                   placeholder="1024" value="1024">
+                            <div class="recall-setting-hint">BAAI/bge-m3 维度: 1024</div>
+                        </div>
+                        
+                        <div class="recall-setting-actions">
+                            <button id="recall-test-embedding" class="menu_button">
+                                <i class="fa-solid fa-flask-vial"></i>
+                                <span>测试 Embedding 连接</span>
+                            </button>
+                            <button id="recall-save-embedding" class="menu_button menu_button_icon">
+                                <i class="fa-solid fa-save"></i>
+                                <span>保存配置</span>
+                            </button>
+                        </div>
                     </div>
                     
-                    <div class="recall-setting-group">
-                        <label class="recall-setting-label">
-                            <input type="checkbox" id="recall-auto-inject" ${pluginSettings.autoInject ? 'checked' : ''}>
-                            <span>自动注入记忆到上下文</span>
-                        </label>
-                    </div>
-                    
-                    <div class="recall-setting-group">
-                        <label class="recall-setting-label">
-                            <input type="checkbox" id="recall-filter-thinking" ${pluginSettings.filterThinking ? 'checked' : ''}>
-                            <span>过滤AI思考过程</span>
-                        </label>
-                        <div class="recall-setting-hint">只保存AI的最终回复，不保存&lt;thinking&gt;等思考内容</div>
-                    </div>
-                    
-                    <div class="recall-setting-group">
-                        <label class="recall-setting-label">
-                            <input type="checkbox" id="recall-auto-chunk" ${pluginSettings.autoChunkLongText ? 'checked' : ''}>
-                            <span>长文本自动分段</span>
-                        </label>
-                        <div class="recall-setting-hint">超长回复(>${pluginSettings.chunkSize || 2000}字)自动分成多条记忆保存</div>
-                    </div>
-                    
-                    <div class="recall-setting-group">
-                        <label class="recall-setting-title">分段大小 (字符数)</label>
-                        <input type="number" id="recall-chunk-size" value="${pluginSettings.chunkSize || 2000}" 
-                               min="500" max="10000" step="500" class="text_pole">
-                    </div>
-                    
-                    <div class="recall-setting-group">
-                        <label class="recall-setting-title">预览字数</label>
-                        <input type="number" id="recall-preview-length" value="${pluginSettings.previewLength || 200}" 
-                               min="50" max="500" step="50" class="text_pole">
-                        <div class="recall-setting-hint">记忆列表中显示的文字数量，可展开查看全文</div>
-                    </div>
-                    
-                    <div class="recall-setting-group">
-                        <label class="recall-setting-title">最大注入记忆数</label>
-                        <input type="number" id="recall-max-memories" value="${pluginSettings.maxMemories}" 
-                               min="1" max="50" class="text_pole">
-                    </div>
-                    
-                    <div class="recall-setting-actions">
-                        <button id="recall-test-connection" class="menu_button">
-                            <i class="fa-solid fa-plug"></i>
-                            <span>测试连接</span>
-                        </button>
-                        <button id="recall-save-settings" class="menu_button menu_button_icon">
-                            <i class="fa-solid fa-save"></i>
-                            <span>保存设置</span>
-                        </button>
+                    <!-- LLM API 配置 -->
+                    <div class="recall-settings-section recall-api-section">
+                        <div class="recall-settings-section-title">
+                            🤖 LLM API 配置
+                            <span class="recall-api-status" id="recall-llm-status">未知</span>
+                        </div>
+                        <div class="recall-setting-hint" style="margin-top:-5px;margin-bottom:10px;">用于伏笔分析、智能总结等高级功能（可选）</div>
+                        
+                        <div class="recall-setting-group">
+                            <label class="recall-setting-title">API Key</label>
+                            <div class="recall-api-key-input">
+                                <input type="password" id="recall-llm-api-key" class="text_pole" 
+                                       placeholder="sk-xxxxxxxx">
+                                <button class="recall-toggle-key-btn" data-target="recall-llm-api-key" title="显示/隐藏">👁</button>
+                            </div>
+                            <div class="recall-setting-hint">支持 OpenAI、Claude、硅基流动等多种 LLM</div>
+                        </div>
+                        
+                        <div class="recall-setting-group">
+                            <label class="recall-setting-title">API 地址（可选）</label>
+                            <input type="text" id="recall-llm-api-base" class="text_pole" 
+                                   placeholder="留空使用 OpenAI 官方地址">
+                            <div class="recall-setting-hint">硅基流动: https://api.siliconflow.cn/v1</div>
+                        </div>
+                        
+                        <div class="recall-setting-group">
+                            <label class="recall-setting-title">模型名称</label>
+                            <input type="text" id="recall-llm-model" class="text_pole" 
+                                   placeholder="gpt-3.5-turbo" value="gpt-3.5-turbo">
+                            <div class="recall-setting-hint">示例: gpt-4, claude-3-sonnet, deepseek/deepseek-chat</div>
+                        </div>
+                        
+                        <div class="recall-setting-actions">
+                            <button id="recall-test-llm" class="menu_button">
+                                <i class="fa-solid fa-flask-vial"></i>
+                                <span>测试 LLM 连接</span>
+                            </button>
+                            <button id="recall-save-llm" class="menu_button menu_button_icon">
+                                <i class="fa-solid fa-save"></i>
+                                <span>保存配置</span>
+                            </button>
+                        </div>
                     </div>
                     
                     <div class="recall-info-box">
@@ -326,8 +424,8 @@ function createUI() {
                         <ul>
                             <li>确保 Recall 服务已启动</li>
                             <li>切换角色会自动加载对应记忆</li>
-                            <li>记忆会随对话自动积累</li>
-                            <li>长文本会自动分段，确保完整分析</li>
+                            <li>Embedding API 用于语义搜索（推荐配置）</li>
+                            <li>LLM API 用于伏笔分析（可选配置）</li>
                         </ul>
                     </div>
                 </div>
@@ -371,6 +469,32 @@ function createUI() {
     document.getElementById('recall-refresh-btn')?.addEventListener('click', safeExecute(loadMemories, '刷新失败'));
     document.getElementById('recall-load-more-btn')?.addEventListener('click', safeExecute(onLoadMoreMemories, '加载更多失败'));
     
+    // API 配置相关事件绑定
+    document.getElementById('recall-test-embedding')?.addEventListener('click', safeExecute(onTestEmbedding, '测试 Embedding 失败'));
+    document.getElementById('recall-save-embedding')?.addEventListener('click', safeExecute(onSaveEmbeddingConfig, '保存 Embedding 配置失败'));
+    document.getElementById('recall-test-llm')?.addEventListener('click', safeExecute(onTestLLM, '测试 LLM 失败'));
+    document.getElementById('recall-save-llm')?.addEventListener('click', safeExecute(onSaveLLMConfig, '保存 LLM 配置失败'));
+    
+    // API Key 显示/隐藏切换
+    document.querySelectorAll('.recall-toggle-key-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const targetId = btn.dataset.target;
+            const input = document.getElementById(targetId);
+            if (input) {
+                if (input.type === 'password') {
+                    input.type = 'text';
+                    btn.textContent = '🔒';
+                } else {
+                    input.type = 'password';
+                    btn.textContent = '👁';
+                }
+            }
+        });
+    });
+    
+    // 初始化加载 API 配置
+    loadApiConfig();
+    
     // 回车键快捷搜索
     document.getElementById('recall-search-input')?.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') onSearch();
@@ -381,6 +505,232 @@ function createUI() {
     document.getElementById('recall-foreshadowing-input')?.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') onPlantForeshadowing();
     });
+}
+
+/**
+ * 加载 API 配置
+ */
+async function loadApiConfig() {
+    if (!isConnected) return;
+    
+    try {
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/config/full`);
+        const config = await response.json();
+        
+        if (config.embedding) {
+            // 加载 Embedding 配置
+            const emb = config.embedding;
+            document.getElementById('recall-embedding-api-key').value = emb.api_key || '';
+            document.getElementById('recall-embedding-api-base').value = emb.api_base || '';
+            document.getElementById('recall-embedding-model').value = emb.model || '';
+            document.getElementById('recall-embedding-dimension').value = emb.dimension || '1024';
+            
+            // 更新状态指示器
+            updateEmbeddingStatus(emb.api_key_status);
+        }
+        
+        if (config.llm) {
+            // 加载 LLM 配置
+            const llm = config.llm;
+            document.getElementById('recall-llm-api-key').value = llm.api_key || '';
+            document.getElementById('recall-llm-api-base').value = llm.api_base || '';
+            document.getElementById('recall-llm-model').value = llm.model || 'gpt-3.5-turbo';
+            
+            // 更新状态指示器
+            updateLLMStatus(llm.api_key_status);
+        }
+        
+        console.log('[Recall] API 配置加载完成');
+    } catch (e) {
+        console.warn('[Recall] 加载 API 配置失败:', e);
+    }
+}
+
+/**
+ * 更新 Embedding 状态指示器
+ */
+function updateEmbeddingStatus(status) {
+    const statusEl = document.getElementById('recall-embedding-status');
+    if (!statusEl) return;
+    
+    if (status === '已配置') {
+        statusEl.textContent = '已配置';
+        statusEl.className = 'recall-api-status recall-status-configured';
+    } else {
+        statusEl.textContent = '未配置';
+        statusEl.className = 'recall-api-status recall-status-unconfigured';
+    }
+}
+
+/**
+ * 更新 LLM 状态指示器
+ */
+function updateLLMStatus(status) {
+    const statusEl = document.getElementById('recall-llm-status');
+    if (!statusEl) return;
+    
+    if (status === '已配置') {
+        statusEl.textContent = '已配置';
+        statusEl.className = 'recall-api-status recall-status-configured';
+    } else {
+        statusEl.textContent = '未配置';
+        statusEl.className = 'recall-api-status recall-status-unconfigured';
+    }
+}
+
+/**
+ * 测试 Embedding 连接
+ */
+async function onTestEmbedding() {
+    const testBtn = document.getElementById('recall-test-embedding');
+    const originalText = testBtn.innerHTML;
+    testBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 测试中...';
+    testBtn.disabled = true;
+    
+    try {
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/config/test`);
+        const result = await response.json();
+        
+        if (result.success) {
+            alert(`✅ Embedding 连接成功！\n\n模型: ${result.model}\n维度: ${result.dimension}\n延迟: ${result.latency_ms}ms`);
+            updateEmbeddingStatusDirect(true);
+        } else {
+            alert(`❌ Embedding 连接失败\n\n${result.message}`);
+            updateEmbeddingStatusDirect(false);
+        }
+    } catch (e) {
+        alert(`❌ 测试失败: ${e.message}`);
+    } finally {
+        testBtn.innerHTML = originalText;
+        testBtn.disabled = false;
+    }
+}
+
+/**
+ * 直接更新 Embedding 状态
+ */
+function updateEmbeddingStatusDirect(success) {
+    const statusEl = document.getElementById('recall-embedding-status');
+    if (statusEl) {
+        statusEl.textContent = success ? '已配置' : '未配置';
+        statusEl.className = 'recall-api-status ' + (success ? 'recall-status-configured' : 'recall-status-unconfigured');
+    }
+}
+
+/**
+ * 测试 LLM 连接
+ */
+async function onTestLLM() {
+    const testBtn = document.getElementById('recall-test-llm');
+    const originalText = testBtn.innerHTML;
+    testBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 测试中...';
+    testBtn.disabled = true;
+    
+    try {
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/config/test/llm`);
+        const result = await response.json();
+        
+        if (result.success) {
+            alert(`✅ LLM 连接成功！\n\n模型: ${result.model}\n延迟: ${result.latency_ms}ms\n响应: ${result.response}`);
+            updateLLMStatus('已配置');
+        } else {
+            alert(`❌ LLM 连接失败\n\n${result.message}`);
+            updateLLMStatus('未配置');
+        }
+    } catch (e) {
+        alert(`❌ 测试失败: ${e.message}`);
+    } finally {
+        testBtn.innerHTML = originalText;
+        testBtn.disabled = false;
+    }
+}
+
+/**
+ * 保存 Embedding 配置
+ */
+async function onSaveEmbeddingConfig() {
+    const embKey = document.getElementById('recall-embedding-api-key').value.trim();
+    const embBase = document.getElementById('recall-embedding-api-base').value.trim();
+    const embModel = document.getElementById('recall-embedding-model').value.trim();
+    const embDim = document.getElementById('recall-embedding-dimension').value.trim();
+    
+    const configData = {};
+    
+    // 只有当输入的不是掩码值时才更新 API Key
+    if (embKey && !embKey.includes('*')) {
+        configData.embedding_api_key = embKey;
+    }
+    if (embBase) configData.embedding_api_base = embBase;
+    if (embModel) configData.embedding_model = embModel;
+    if (embDim) configData.embedding_dimension = parseInt(embDim);
+    
+    if (Object.keys(configData).length === 0) {
+        alert('请填写配置项');
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/config`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(configData)
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            alert(`✅ Embedding 配置已保存\n\n已更新: ${result.updated_fields.join(', ')}`);
+            // 重新加载配置
+            loadApiConfig();
+        } else {
+            alert(`❌ 保存失败: ${result.message}`);
+        }
+    } catch (e) {
+        alert(`❌ 保存失败: ${e.message}`);
+    }
+}
+
+/**
+ * 保存 LLM 配置
+ */
+async function onSaveLLMConfig() {
+    const llmKey = document.getElementById('recall-llm-api-key').value.trim();
+    const llmBase = document.getElementById('recall-llm-api-base').value.trim();
+    const llmModel = document.getElementById('recall-llm-model').value.trim();
+    
+    const configData = {};
+    
+    // 只有当输入的不是掩码值时才更新 API Key
+    if (llmKey && !llmKey.includes('****')) {
+        configData.llm_api_key = llmKey;
+    }
+    if (llmBase) configData.llm_api_base = llmBase;
+    if (llmModel) configData.llm_model = llmModel;
+    
+    if (Object.keys(configData).length === 0) {
+        alert('请填写配置项');
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/config`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(configData)
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            alert(`✅ LLM 配置已保存\n\n已更新: ${result.updated_fields.join(', ')}`);
+            // 重新加载配置
+            loadApiConfig();
+        } else {
+            alert(`❌ 保存失败: ${result.message}`);
+        }
+    } catch (e) {
+        alert(`❌ 保存失败: ${e.message}`);
+    }
 }
 
 /**

@@ -201,8 +201,9 @@ function Show-ConfigMenu {
     Write-Host "  |    [1] Edit API Config File                               |" -ForegroundColor Yellow
     Write-Host "  |    [2] Hot Reload Config (No Restart)                     |" -ForegroundColor Yellow
     Write-Host "  |    [3] Test Embedding API Connection                      |" -ForegroundColor Yellow
-    Write-Host "  |    [4] View Current Config                                |" -ForegroundColor Yellow
-    Write-Host "  |    [5] Reset Config to Default                            |" -ForegroundColor Yellow
+    Write-Host "  |    [4] Test LLM API Connection                            |" -ForegroundColor Yellow
+    Write-Host "  |    [5] View Current Config                                |" -ForegroundColor Yellow
+    Write-Host "  |    [6] Reset Config to Default                            |" -ForegroundColor Yellow
     Write-Host "  |                                                           |" -ForegroundColor Yellow
     Write-Host "  |    [0] <- Back to Main Menu                               |" -ForegroundColor Yellow
     Write-Host "  |                                                           |" -ForegroundColor Yellow
@@ -607,20 +608,52 @@ function Test-EmbeddingAPI {
         return
     }
     
-    Write-Info "Testing API connection..."
+    Write-Info "Testing Embedding API connection..."
     
     try {
         $result = Invoke-RestMethod -Uri "http://127.0.0.1:$DEFAULT_PORT/v1/config/test" -TimeoutSec 30
         
         Write-Host ""
         if ($result.success) {
-            Write-Success "API connection successful!"
+            Write-Success "Embedding API connection successful!"
             Write-Dim "Backend: $($result.backend)"
             Write-Dim "Model: $($result.model)"
             Write-Dim "Dimension: $($result.dimension)"
             Write-Dim "Latency: $($result.latency_ms)ms"
         } else {
-            Write-Error2 "API connection failed"
+            Write-Error2 "Embedding API connection failed"
+            Write-Dim $result.message
+        }
+    } catch {
+        Write-Error2 "Test failed: $_"
+    }
+    
+    Write-Host ""
+    Read-Host "  Press Enter to continue"
+}
+
+function Test-LlmAPI {
+    Write-Title "Test LLM API"
+    
+    if (-not (Test-ServiceRunning)) {
+        Write-Error2 "Service not running"
+        return
+    }
+    
+    Write-Info "Testing LLM API connection..."
+    
+    try {
+        $result = Invoke-RestMethod -Uri "http://127.0.0.1:$DEFAULT_PORT/v1/config/test/llm" -TimeoutSec 30
+        
+        Write-Host ""
+        if ($result.success) {
+            Write-Success "LLM API connection successful!"
+            Write-Dim "Model: $($result.model)"
+            Write-Dim "API Base: $($result.api_base)"
+            Write-Dim "Response: $($result.response)"
+            Write-Dim "Latency: $($result.latency_ms)ms"
+        } else {
+            Write-Error2 "LLM API connection failed"
             Write-Dim $result.message
         }
     } catch {
@@ -721,8 +754,9 @@ function Run-ConfigMenu {
             "1" { Edit-Config; Read-Host "  Press Enter to continue" }
             "2" { Reload-Config; Read-Host "  Press Enter to continue" }
             "3" { Test-EmbeddingAPI }
-            "4" { Show-CurrentConfig }
-            "5" { Reset-Config; Read-Host "  Press Enter to continue" }
+            "4" { Test-LlmAPI }
+            "5" { Show-CurrentConfig }
+            "6" { Reset-Config; Read-Host "  Press Enter to continue" }
             "0" { return }
             default { Write-Error2 "Invalid selection" }
         }

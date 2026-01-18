@@ -16,24 +16,19 @@ from .engine import RecallEngine
 
 # ==================== 配置文件管理 ====================
 
-# 支持的配置项
+# 支持的配置项（统一使用 OpenAI 兼容格式）
 SUPPORTED_CONFIG_KEYS = {
-    # API Keys
-    'SILICONFLOW_API_KEY',
-    'OPENAI_API_KEY',
+    # Embedding 配置
     'EMBEDDING_API_KEY',
-    # API URLs
-    'OPENAI_API_BASE',
     'EMBEDDING_API_BASE',
-    # Model settings - 硅基流动
-    'SILICONFLOW_MODEL',
-    # Model settings - OpenAI
-    'OPENAI_MODEL',
-    # Model settings - 自定义
     'EMBEDDING_MODEL',
     'EMBEDDING_DIMENSION',
-    # Mode
+    # Embedding 模式
     'RECALL_EMBEDDING_MODE',
+    # LLM 配置（用于伏笔分析器等功能）
+    'LLM_API_KEY',
+    'LLM_API_BASE',
+    'LLM_MODEL',
 }
 
 
@@ -46,106 +41,31 @@ def get_config_file_path() -> Path:
 
 def get_default_config_content() -> str:
     """获取默认配置文件内容"""
-    return '''# ============================================
-# Recall API 配置文件
-# ============================================
-# 
-# 使用方法：
-# 1. 直接用文本编辑器打开此文件
-# 2. 设置 RECALL_EMBEDDING_MODE（必须！）
-# 3. 根据选择的模式填写对应的 API 配置
-# 4. 保存文件
-# 5. 热更新: curl -X POST http://localhost:18888/v1/config/reload
-# 6. 测试连接: curl http://localhost:18888/v1/config/test
-#
-# ============================================
+    return '''# ============================================================================
+# Recall-AI 配置文件
+# Recall-AI Configuration File
+# ============================================================================
 
+# ----------------------------------------------------------------------------
+# Embedding 配置 (自定义 OpenAI 兼容接口)
+# Embedding Configuration (Custom OpenAI Compatible API)
+# ----------------------------------------------------------------------------
+EMBEDDING_API_KEY=your_embedding_api_key_here
+EMBEDDING_API_BASE=https://api.siliconflow.cn/v1
+EMBEDDING_MODEL=BAAI/bge-m3
+EMBEDDING_DIMENSION=1024
 
-# ============================================
-# 【必须】选择 Embedding 模式
-# ============================================
-# 可选值：
-#   none       - 轻量模式，无语义搜索，内存最低（~100MB）
-#   siliconflow - 硅基流动 API（推荐国内用户）
-#   openai     - OpenAI API（或中转站）
-#   custom     - 自定义 API（Azure/Ollama/Gemini等）
-#   local      - 本地模型，完全离线，内存最高（~1.5GB）
-#
-# 示例：使用硅基流动
-# RECALL_EMBEDDING_MODE=siliconflow
-#
-# 示例：使用自定义API（如Gemini中转站）
-# RECALL_EMBEDDING_MODE=custom
-#
-RECALL_EMBEDDING_MODE=none
+# Embedding 模式: auto(自动检测), local(本地), api(远程API)
+# Embedding Mode: auto(auto detect), local(local model), api(remote API)
+RECALL_EMBEDDING_MODE=auto
 
-
-# ============================================
-# 方式一：硅基流动（推荐国内用户，便宜快速）
-# ============================================
-# 设置 RECALL_EMBEDDING_MODE=siliconflow 后填写以下配置
-# 获取地址：https://cloud.siliconflow.cn/
-SILICONFLOW_API_KEY=
-# 模型选择（默认 BAAI/bge-large-zh-v1.5）
-# 可选: BAAI/bge-large-zh-v1.5, BAAI/bge-m3, BAAI/bge-large-en-v1.5
-SILICONFLOW_MODEL=BAAI/bge-large-zh-v1.5
-
-
-# ============================================
-# 方式二：OpenAI（支持官方和中转站）
-# ============================================
-# 设置 RECALL_EMBEDDING_MODE=openai 后填写以下配置
-# 获取地址：https://platform.openai.com/
-OPENAI_API_KEY=
-# API 地址（默认官方，可改为中转站地址，不要带尾部斜杠）
-OPENAI_API_BASE=
-# 模型选择（默认 text-embedding-3-small）
-# 可选: text-embedding-3-small, text-embedding-3-large, text-embedding-ada-002
-OPENAI_MODEL=text-embedding-3-small
-
-
-# ============================================
-# 方式三：自定义 API（Azure/Ollama/Gemini等）
-# ============================================
-# 设置 RECALL_EMBEDDING_MODE=custom 后填写以下配置
-# 适用于：Azure OpenAI、本地Ollama、Gemini中转站、其他OpenAI兼容服务
-# 注意：必须同时填写 KEY、BASE、MODEL、DIMENSION 四项
-#
-# 示例（Gemini中转站）：
-# EMBEDDING_API_KEY=sk-your-key
-# EMBEDDING_API_BASE=https://your-proxy.com/v1
-# EMBEDDING_MODEL=gemini-embedding-exp-03-07
-# EMBEDDING_DIMENSION=768
-#
-EMBEDDING_API_KEY=
-EMBEDDING_API_BASE=
-EMBEDDING_MODEL=
-EMBEDDING_DIMENSION=1536
-
-
-# ============================================
-# 常用 Embedding 模型参考
-# ============================================
-# 
-# OpenAI:
-#   text-embedding-3-small   维度:1536  推荐,性价比高
-#   text-embedding-3-large   维度:3072  精度更高
-#   text-embedding-ada-002   维度:1536  旧版本
-# 
-# 硅基流动:
-#   BAAI/bge-large-zh-v1.5   维度:1024  中文推荐
-#   BAAI/bge-m3              维度:1024  多语言
-#   BAAI/bge-large-en-v1.5   维度:1024  英文
-#
-# Ollama (本地):
-#   nomic-embed-text         维度:768
-#   mxbai-embed-large        维度:1024
-#
-# Gemini (通过中转站):
-#   gemini-embedding-exp-03-07  维度:768
-#   text-embedding-004          维度:768
-#
-# ============================================
+# ----------------------------------------------------------------------------
+# LLM 配置 (自定义 OpenAI 兼容接口)
+# LLM Configuration (Custom OpenAI Compatible API)
+# ----------------------------------------------------------------------------
+LLM_API_KEY=your_llm_api_key_here
+LLM_API_BASE=https://api.siliconflow.cn/v1
+LLM_MODEL=Qwen/Qwen2.5-7B-Instruct
 '''
 
 
@@ -259,6 +179,28 @@ class ForeshadowingItem(BaseModel):
     importance: float
     hints: List[str] = []
     resolution: Optional[str] = None
+
+
+class ForeshadowingAnalysisRequest(BaseModel):
+    """伏笔分析请求"""
+    content: str = Field(..., description="对话内容")
+    role: str = Field(default="user", description="角色（user/assistant）")
+    user_id: str = Field(default="default", description="用户ID（角色名）")
+
+
+class ForeshadowingAnalysisResult(BaseModel):
+    """伏笔分析结果"""
+    triggered: bool = Field(default=False, description="是否触发了分析")
+    new_foreshadowings: List[dict] = Field(default=[], description="新检测到的伏笔")
+    potentially_resolved: List[dict] = Field(default=[], description="可能已解决的伏笔")
+    error: Optional[str] = Field(default=None, description="错误信息")
+
+
+class ForeshadowingConfigUpdate(BaseModel):
+    """伏笔分析器配置更新"""
+    trigger_interval: Optional[int] = Field(default=None, ge=1, description="触发间隔（轮次）")
+    auto_plant: Optional[bool] = Field(default=None, description="自动埋下伏笔")
+    auto_resolve: Optional[bool] = Field(default=None, description="自动解决伏笔")
 
 
 # ==================== 全局引擎 ====================
@@ -610,6 +552,71 @@ async def resolve_foreshadowing(
     return {"success": True, "message": "伏笔已解决"}
 
 
+# ==================== 伏笔分析 API ====================
+
+@app.post("/v1/foreshadowing/analyze/turn", response_model=ForeshadowingAnalysisResult, tags=["Foreshadowing Analysis"])
+async def analyze_foreshadowing_turn(request: ForeshadowingAnalysisRequest):
+    """处理新的一轮对话（用于伏笔分析）
+    
+    在每轮对话后调用此端点，分析器会根据配置决定是否触发分析：
+    - 手动模式：不做任何操作，返回空结果
+    - LLM模式：累积对话，达到触发条件时自动分析
+    """
+    engine = get_engine()
+    result = engine.on_foreshadowing_turn(
+        content=request.content,
+        role=request.role,
+        user_id=request.user_id
+    )
+    return ForeshadowingAnalysisResult(
+        triggered=result.triggered,
+        new_foreshadowings=result.new_foreshadowings,
+        potentially_resolved=result.potentially_resolved,
+        error=result.error
+    )
+
+
+@app.post("/v1/foreshadowing/analyze/trigger", response_model=ForeshadowingAnalysisResult, tags=["Foreshadowing Analysis"])
+async def trigger_foreshadowing_analysis(
+    user_id: str = Query(default="default", description="用户ID（角色名）")
+):
+    """手动触发伏笔分析
+    
+    强制触发 LLM 分析（如果已配置）。可以在任何时候调用。
+    """
+    engine = get_engine()
+    result = engine.trigger_foreshadowing_analysis(user_id)
+    return ForeshadowingAnalysisResult(
+        triggered=result.triggered,
+        new_foreshadowings=result.new_foreshadowings,
+        potentially_resolved=result.potentially_resolved,
+        error=result.error
+    )
+
+
+@app.get("/v1/foreshadowing/analyzer/config", tags=["Foreshadowing Analysis"])
+async def get_foreshadowing_analyzer_config():
+    """获取伏笔分析器配置"""
+    engine = get_engine()
+    return engine.get_foreshadowing_analyzer_config()
+
+
+@app.put("/v1/foreshadowing/analyzer/config", tags=["Foreshadowing Analysis"])
+async def update_foreshadowing_analyzer_config(config: ForeshadowingConfigUpdate):
+    """更新伏笔分析器配置
+    
+    注意：此端点只能更新部分配置，不能更改后端模式或 API key。
+    要更改后端模式，需要重启服务器。
+    """
+    engine = get_engine()
+    engine.update_foreshadowing_analyzer_config(
+        trigger_interval=config.trigger_interval,
+        auto_plant=config.auto_plant,
+        auto_resolve=config.auto_resolve
+    )
+    return {"success": True, "config": engine.get_foreshadowing_analyzer_config()}
+
+
 # ==================== 实体 API ====================
 
 @app.get("/v1/entities/{name}", tags=["Entities"])
@@ -710,47 +717,34 @@ async def get_config():
             return key[:4] + '****' + key[-4:]
         return '****'
     
-    # API Keys
-    siliconflow_key = os.environ.get('SILICONFLOW_API_KEY', '')
-    openai_key = os.environ.get('OPENAI_API_KEY', '')
-    custom_key = os.environ.get('EMBEDDING_API_KEY', '')
-    
-    # URLs
-    openai_base = os.environ.get('OPENAI_API_BASE', '')
-    custom_base = os.environ.get('EMBEDDING_API_BASE', '')
-    
-    # Model settings - 新增模型配置
-    siliconflow_model = os.environ.get('SILICONFLOW_MODEL', 'BAAI/bge-large-zh-v1.5')
-    openai_model = os.environ.get('OPENAI_MODEL', 'text-embedding-3-small')
-    custom_model = os.environ.get('EMBEDDING_MODEL', '')
-    custom_dimension = os.environ.get('EMBEDDING_DIMENSION', '')
-    
-    # Mode
+    # Embedding 配置
+    embedding_key = os.environ.get('EMBEDDING_API_KEY', '')
+    embedding_base = os.environ.get('EMBEDDING_API_BASE', '')
+    embedding_model = os.environ.get('EMBEDDING_MODEL', '')
+    embedding_dimension = os.environ.get('EMBEDDING_DIMENSION', '')
     embedding_mode = os.environ.get('RECALL_EMBEDDING_MODE', 'auto')
+    
+    # LLM 配置
+    llm_key = os.environ.get('LLM_API_KEY', '')
+    llm_base = os.environ.get('LLM_API_BASE', '')
+    llm_model = os.environ.get('LLM_MODEL', '')
     
     return {
         "config_file": str(config_file),
         "config_file_exists": config_file.exists(),
-        "embedding_mode": embedding_mode,
-        "providers": {
-            "siliconflow": {
-                "api_key": mask_key(siliconflow_key),
-                "model": siliconflow_model,
-                "status": "已配置" if siliconflow_key else "未配置"
-            },
-            "openai": {
-                "api_key": mask_key(openai_key),
-                "api_base": openai_base or "默认 (api.openai.com)",
-                "model": openai_model,
-                "status": "已配置" if openai_key else "未配置"
-            },
-            "custom": {
-                "api_key": mask_key(custom_key),
-                "api_base": custom_base or "未配置",
-                "model": custom_model or "未配置",
-                "dimension": custom_dimension or "未配置",
-                "status": "已配置" if (custom_key and custom_base) else "未配置"
-            }
+        "embedding": {
+            "api_key": mask_key(embedding_key),
+            "api_base": embedding_base or "未配置",
+            "model": embedding_model or "未配置",
+            "dimension": embedding_dimension or "未配置",
+            "mode": embedding_mode,
+            "status": "已配置" if (embedding_key and embedding_base) else "未配置"
+        },
+        "llm": {
+            "api_key": mask_key(llm_key),
+            "api_base": llm_base or "未配置",
+            "model": llm_model or "未配置",
+            "status": "已配置" if llm_key else "未配置"
         },
         "hint": "编辑配置文件后调用 POST /v1/config/reload 热更新，测试连接 GET /v1/config/test"
     }
@@ -855,6 +849,280 @@ async def test_connection():
             "dimension": None,
             "latency_ms": 0
         }
+
+
+@app.get("/v1/config/test/llm", tags=["Admin"])
+async def test_llm_connection():
+    """测试 LLM API 连接
+    
+    测试当前配置的 LLM API 是否可以正常连接。
+    会实际调用 API 生成一个简短回复来验证。
+    
+    使用方法：
+    curl http://localhost:18888/v1/config/test/llm
+    
+    返回：
+    - success: true/false
+    - message: 测试结果描述
+    - model: 当前配置的模型
+    - latency_ms: API 调用延迟（毫秒）
+    """
+    # 获取 LLM 配置
+    llm_api_key = os.environ.get('LLM_API_KEY', '')
+    llm_api_base = os.environ.get('LLM_API_BASE', '')
+    llm_model = os.environ.get('LLM_MODEL', 'gpt-3.5-turbo')
+    
+    # 如果没有 LLM_API_KEY，尝试使用 OPENAI_API_KEY
+    if not llm_api_key:
+        llm_api_key = os.environ.get('OPENAI_API_KEY', '')
+    
+    if not llm_api_key:
+        return {
+            "success": False,
+            "message": "LLM API Key 未配置",
+            "model": llm_model,
+            "api_base": llm_api_base or "默认",
+            "latency_ms": 0,
+            "hint": "请在 api_keys.env 中设置 LLM_API_KEY 或 OPENAI_API_KEY"
+        }
+    
+    try:
+        from .utils.llm_client import LLMClient
+        
+        start_time = time.time()
+        
+        # 创建 LLM 客户端
+        client = LLMClient(
+            model=llm_model,
+            api_key=llm_api_key,
+            api_base=llm_api_base if llm_api_base else None,
+            timeout=15.0,
+            max_retries=1
+        )
+        
+        # 发送简单的测试请求
+        response = client.chat(
+            messages=[{"role": "user", "content": "Say 'Hello' in one word."}],
+            max_tokens=10,
+            temperature=0
+        )
+        
+        elapsed_ms = (time.time() - start_time) * 1000
+        
+        return {
+            "success": True,
+            "message": f"LLM 连接成功！模型 {response.model} 工作正常",
+            "model": response.model,
+            "api_base": llm_api_base or "默认",
+            "response": response.content[:50] if response.content else "",
+            "latency_ms": round(elapsed_ms, 2),
+            "usage": response.usage
+        }
+        
+    except Exception as e:
+        error_msg = str(e)
+        
+        # 友好的错误提示
+        if "API key" in error_msg.lower() or "unauthorized" in error_msg.lower() or "401" in error_msg:
+            friendly_msg = "API Key 无效或未授权"
+        elif "connection" in error_msg.lower() or "network" in error_msg.lower():
+            friendly_msg = "网络连接失败，请检查网络或 API 地址"
+        elif "model" in error_msg.lower() or "404" in error_msg:
+            friendly_msg = f"模型 {llm_model} 不存在或不可用"
+        elif "timeout" in error_msg.lower():
+            friendly_msg = "请求超时，请检查网络连接"
+        else:
+            friendly_msg = f"连接失败: {error_msg}"
+        
+        return {
+            "success": False,
+            "message": friendly_msg,
+            "error": error_msg,
+            "model": llm_model,
+            "api_base": llm_api_base or "默认",
+            "latency_ms": 0
+        }
+
+
+class ConfigUpdateRequest(BaseModel):
+    """配置更新请求（统一使用 OpenAI 兼容格式）"""
+    # Embedding 配置
+    embedding_api_key: Optional[str] = Field(default=None, description="Embedding API Key")
+    embedding_api_base: Optional[str] = Field(default=None, description="Embedding API 地址")
+    embedding_model: Optional[str] = Field(default=None, description="Embedding 模型")
+    embedding_dimension: Optional[int] = Field(default=None, description="向量维度")
+    recall_embedding_mode: Optional[str] = Field(default=None, description="Embedding 模式")
+    # LLM 配置
+    llm_api_key: Optional[str] = Field(default=None, description="LLM API Key")
+    llm_api_base: Optional[str] = Field(default=None, description="LLM API 地址")
+    llm_model: Optional[str] = Field(default=None, description="LLM 模型")
+
+
+@app.put("/v1/config", tags=["Admin"])
+async def update_config(request: ConfigUpdateRequest):
+    """更新配置文件
+    
+    更新 api_keys.env 中的配置项。只会更新请求中包含的非空字段。
+    更新后会自动重新加载配置。
+    
+    使用方法：
+    curl -X PUT http://localhost:18888/v1/config \\
+         -H "Content-Type: application/json" \\
+         -d '{"siliconflow_api_key": "sk-xxx", "llm_api_key": "sk-yyy"}'
+    """
+    config_file = get_config_file_path()
+    
+    # 读取当前配置
+    current_config = {}
+    if config_file.exists():
+        with open(config_file, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#') and '=' in line:
+                    key, _, value = line.partition('=')
+                    current_config[key.strip()] = value.strip()
+    
+    # 映射请求字段到配置键（统一使用 OpenAI 兼容格式）
+    field_to_key = {
+        'embedding_api_key': 'EMBEDDING_API_KEY',
+        'embedding_api_base': 'EMBEDDING_API_BASE',
+        'embedding_model': 'EMBEDDING_MODEL',
+        'embedding_dimension': 'EMBEDDING_DIMENSION',
+        'recall_embedding_mode': 'RECALL_EMBEDDING_MODE',
+        'llm_api_key': 'LLM_API_KEY',
+        'llm_api_base': 'LLM_API_BASE',
+        'llm_model': 'LLM_MODEL',
+    }
+    
+    # 更新配置
+    updated_fields = []
+    request_dict = request.model_dump(exclude_none=True)
+    
+    for field, config_key in field_to_key.items():
+        if field in request_dict:
+            value = request_dict[field]
+            if value is not None:
+                # 转换为字符串
+                str_value = str(value) if not isinstance(value, str) else value
+                current_config[config_key] = str_value
+                # 同时更新环境变量
+                os.environ[config_key] = str_value
+                updated_fields.append(config_key)
+    
+    if not updated_fields:
+        return {
+            "success": False,
+            "message": "没有提供需要更新的配置项"
+        }
+    
+    # 写回配置文件（保留注释和格式）
+    try:
+        # 确保目录存在
+        config_file.parent.mkdir(parents=True, exist_ok=True)
+        
+        # 读取原文件保留注释
+        lines = []
+        existing_keys = set()
+        
+        if config_file.exists():
+            with open(config_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    original_line = line.rstrip('\n\r')
+                    stripped = original_line.strip()
+                    
+                    if stripped and not stripped.startswith('#') and '=' in stripped:
+                        key = stripped.split('=')[0].strip()
+                        if key in current_config:
+                            # 更新这行的值
+                            lines.append(f"{key}={current_config[key]}")
+                            existing_keys.add(key)
+                        else:
+                            lines.append(original_line)
+                    else:
+                        lines.append(original_line)
+        
+        # 添加新的配置项
+        for key, value in current_config.items():
+            if key not in existing_keys and key in SUPPORTED_CONFIG_KEYS:
+                lines.append(f"{key}={value}")
+        
+        # 写入文件
+        with open(config_file, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(lines))
+            if not lines[-1].endswith('\n'):
+                f.write('\n')
+        
+        # 重新加载引擎配置
+        try:
+            reload_engine()
+        except Exception as reload_err:
+            # 配置已保存，但重新加载失败
+            return {
+                "success": True,
+                "message": f"配置已保存，但重新加载失败: {str(reload_err)}",
+                "updated_fields": updated_fields,
+                "hint": "请手动重启服务或调用 POST /v1/config/reload"
+            }
+        
+        return {
+            "success": True,
+            "message": "配置已更新并重新加载",
+            "updated_fields": updated_fields
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"保存配置失败: {str(e)}")
+
+
+@app.get("/v1/config/full", tags=["Admin"])
+async def get_full_config():
+    """获取完整配置信息（供插件使用）
+    
+    返回 Embedding 和 LLM 的完整配置状态，包括脱敏后的 API Key。
+    专为 SillyTavern 插件设计。
+    """
+    def mask_key(key: str) -> str:
+        """脱敏显示 API Key"""
+        if not key:
+            return ""
+        if len(key) > 12:
+            return key[:4] + '*' * 8 + key[-4:]
+        elif len(key) > 4:
+            return key[:2] + '*' * (len(key) - 2)
+        return '****'
+    
+    def get_key_status(key: str) -> str:
+        """获取 API Key 状态"""
+        if not key:
+            return "未配置"
+        return "已配置"
+    
+    # Embedding 配置（统一使用 OpenAI 兼容格式）
+    embedding_key = os.environ.get('EMBEDDING_API_KEY', '')
+    
+    embedding_config = {
+        "api_key": mask_key(embedding_key),
+        "api_key_status": get_key_status(embedding_key),
+        "api_base": os.environ.get('EMBEDDING_API_BASE', ''),
+        "model": os.environ.get('EMBEDDING_MODEL', ''),
+        "dimension": os.environ.get('EMBEDDING_DIMENSION', '1024'),
+        "mode": os.environ.get('RECALL_EMBEDDING_MODE', 'auto'),
+    }
+    
+    # LLM 配置
+    llm_key = os.environ.get('LLM_API_KEY', '')
+    llm_config = {
+        "api_key": mask_key(llm_key),
+        "api_key_status": get_key_status(llm_key),
+        "api_base": os.environ.get('LLM_API_BASE', ''),
+        "model": os.environ.get('LLM_MODEL', 'gpt-3.5-turbo'),
+    }
+    
+    return {
+        "embedding": embedding_config,
+        "llm": llm_config,
+        "config_file": str(get_config_file_path()),
+    }
 
 
 @app.post("/v1/consolidate", tags=["Admin"])

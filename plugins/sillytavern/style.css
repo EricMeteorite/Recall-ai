@@ -472,26 +472,77 @@
     background: var(--SmartThemeQuoteColor, rgba(255,255,255,0.4));
 }
 
-/* ========== SillyTavern 按钮扩展 ========== */
-.menu_button i + span,
-.menu_button span {
-    margin-left: 6px;
+/* ========== API 配置区域 ========== */
+.recall-settings-section {
+    background: var(--SmartThemeBlurTintColor, rgba(0,0,0,0.15));
+    border: 1px solid var(--SmartThemeBorderColor, #333);
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 12px;
 }
 
-/* ========== 响应式 ========== */
-@media (max-width: 768px) {
-    .recall-tabs {
-        flex-wrap: wrap;
-    }
-    
-    .recall-tab {
-        flex: 1;
-        text-align: center;
-        padding: 6px 8px;
-        font-size: 11px;
-    }
-    
-    .recall-setting-actions {
-        flex-direction: column;
-    }
+.recall-settings-section-title {
+    font-weight: 600;
+    font-size: 14px;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    color: var(--SmartThemeBodyColor, #fff);
 }
+
+.recall-api-section {
+    border-left: 3px solid var(--SmartThemeQuoteColor, #7c7cff);
+}
+
+.recall-api-status {
+    font-size: 11px;
+    font-weight: 500;
+    padding: 2px 8px;
+    border-radius: 10px;
+}
+
+.recall-status-configured {
+    background: rgba(76, 175, 80, 0.2);
+    color: #4caf50;
+}
+
+.recall-status-unconfigured {
+    background: rgba(158, 158, 158, 0.2);
+    color: #9e9e9e;
+}
+
+.recall-provider-config {
+    animation: fadeIn 0.2s ease;
+}
+
+/* ========== API Key 输入框 ========== */
+.recall-api-key-input {
+    display: flex;
+    gap: 6px;
+}
+
+.recall-api-key-input input {
+    flex: 1;
+}
+
+.recall-toggle-key-btn {
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    background: var(--SmartThemeBlurTintColor, rgba(255,255,255,0.1));
+    border: 1px solid var(--SmartThemeBorderColor, #444);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+}
+
+.recall-toggle-key-btn:hover {
+    background: var(--SmartThemeBlurTintColor, rgba(255,255,255,0.2));
+    border-color: var(--SmartThemeQuoteColor, #666);
+}
+
