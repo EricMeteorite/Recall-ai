@@ -291,6 +291,26 @@ RECALL_EMBEDDING_MODE=auto
 LLM_API_KEY=
 LLM_API_BASE=
 LLM_MODEL=
+
+# ----------------------------------------------------------------------------
+# 伏笔分析器配置
+# Foreshadowing Analyzer Configuration
+# ----------------------------------------------------------------------------
+# 是否启用 LLM 伏笔分析 (true/false)
+# Enable LLM-based foreshadowing analysis
+FORESHADOWING_LLM_ENABLED=false
+
+# 分析触发间隔（每N轮对话触发一次分析，最小1）
+# Analysis trigger interval (trigger analysis every N turns, minimum 1)
+FORESHADOWING_TRIGGER_INTERVAL=10
+
+# 自动埋下伏笔 (true/false)
+# Automatically plant detected foreshadowing
+FORESHADOWING_AUTO_PLANT=true
+
+# 自动解决伏笔 (true/false) - 建议保持 false，让用户手动确认
+# Automatically resolve detected foreshadowing (recommend false)
+FORESHADOWING_AUTO_RESOLVE=false
 EOF
         print_info "已创建配置文件: $config_file"
     fi
