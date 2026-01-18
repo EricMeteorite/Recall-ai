@@ -1087,8 +1087,8 @@ async function loadForeshadowingAnalyzerConfig() {
             
             if (llmEnabledEl) llmEnabledEl.checked = config.llm_enabled === true;
             if (triggerIntervalEl) triggerIntervalEl.value = config.trigger_interval || 10;
-            if (autoPlantEl) autoPlantEl.checked = config.auto_plant !== false;
-            if (autoResolveEl) autoResolveEl.checked = config.auto_resolve !== false;
+            if (autoPlantEl) autoPlantEl.checked = config.auto_plant !== false; // 默认 true
+            if (autoResolveEl) autoResolveEl.checked = config.auto_resolve === true; // 默认 false
             
             // 更新状态显示
             if (statusEl) {

@@ -93,9 +93,9 @@ FORESHADOWING_TRIGGER_INTERVAL=10
 # Automatically plant detected foreshadowing
 FORESHADOWING_AUTO_PLANT=true
 
-# 自动解决伏笔 (true/false)
-# Automatically resolve detected foreshadowing
-FORESHADOWING_AUTO_RESOLVE=true
+# 自动解决伏笔 (true/false) - 建议保持 false，让用户手动确认
+# Automatically resolve detected foreshadowing (recommend false)
+FORESHADOWING_AUTO_RESOLVE=false
 '''
 
 
@@ -329,7 +329,7 @@ def get_engine() -> RecallEngine:
             
             trigger_interval = int(os.environ.get('FORESHADOWING_TRIGGER_INTERVAL', '10'))
             auto_plant_str = os.environ.get('FORESHADOWING_AUTO_PLANT', 'true').lower()
-            auto_resolve_str = os.environ.get('FORESHADOWING_AUTO_RESOLVE', 'true').lower()
+            auto_resolve_str = os.environ.get('FORESHADOWING_AUTO_RESOLVE', 'false').lower()
             
             foreshadowing_config = ForeshadowingAnalyzerConfig.llm_based(
                 api_key=llm_api_key,
@@ -385,7 +385,7 @@ def reload_engine():
         
         trigger_interval = int(os.environ.get('FORESHADOWING_TRIGGER_INTERVAL', '10'))
         auto_plant_str = os.environ.get('FORESHADOWING_AUTO_PLANT', 'true').lower()
-        auto_resolve_str = os.environ.get('FORESHADOWING_AUTO_RESOLVE', 'true').lower()
+        auto_resolve_str = os.environ.get('FORESHADOWING_AUTO_RESOLVE', 'false').lower()
         
         foreshadowing_config = ForeshadowingAnalyzerConfig.llm_based(
             api_key=llm_api_key,
@@ -1533,26 +1533,30 @@ async def update_config(request: ConfigUpdateRequest):
         # 确保目录存在
         config_file.parent.mkdir(parents=True, exist_ok=True)
         
+        # 如果文件不存在，先创建包含完整模板的文件
+        if not config_file.exists():
+            config_file.write_text(get_default_config_content(), encoding='utf-8')
+            print(f"[Config] 已创建配置文件: {config_file}")
+        
         # 读取原文件保留注释
         lines = []
         existing_keys = set()
         
-        if config_file.exists():
-            with open(config_file, 'r', encoding='utf-8') as f:
-                for line in f:
-                    original_line = line.rstrip('\n\r')
-                    stripped = original_line.strip()
-                    
-                    if stripped and not stripped.startswith('#') and '=' in stripped:
-                        key = stripped.split('=')[0].strip()
-                        if key in current_config:
-                            # 更新这行的值
-                            lines.append(f"{key}={current_config[key]}")
-                            existing_keys.add(key)
-                        else:
-                            lines.append(original_line)
+        with open(config_file, 'r', encoding='utf-8') as f:
+            for line in f:
+                original_line = line.rstrip('\n\r')
+                stripped = original_line.strip()
+                
+                if stripped and not stripped.startswith('#') and '=' in stripped:
+                    key = stripped.split('=')[0].strip()
+                    if key in current_config:
+                        # 更新这行的值
+                        lines.append(f"{key}={current_config[key]}")
+                        existing_keys.add(key)
                     else:
                         lines.append(original_line)
+                else:
+                    lines.append(original_line)
         
         # 添加新的配置项
         for key, value in current_config.items():
