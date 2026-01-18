@@ -437,6 +437,49 @@ function createUI() {
                         </div>
                     </div>
                     
+                    <!-- 伏笔分析器配置 -->
+                    <div class="recall-settings-section recall-api-section">
+                        <div class="recall-settings-section-title">
+                            🎭 伏笔分析器配置
+                            <span class="recall-api-status" id="recall-analyzer-status">未知</span>
+                        </div>
+                        <div class="recall-setting-hint" style="margin-top:-5px;margin-bottom:10px;">控制 LLM 自动分析伏笔的行为（需要配置 LLM API）</div>
+                        
+                        <div class="recall-setting-group">
+                            <label class="recall-setting-title">分析触发间隔</label>
+                            <input type="number" id="recall-trigger-interval" class="text_pole" 
+                                   min="1" max="100" value="10" placeholder="10">
+                            <div class="recall-setting-hint">每隔几轮对话触发一次 LLM 分析（1=每轮都分析，10=每10轮分析一次）</div>
+                        </div>
+                        
+                        <div class="recall-setting-group">
+                            <label class="recall-checkbox-label">
+                                <input type="checkbox" id="recall-auto-plant">
+                                <span>自动埋下伏笔</span>
+                            </label>
+                            <div class="recall-setting-hint">LLM 检测到潜在伏笔时自动记录</div>
+                        </div>
+                        
+                        <div class="recall-setting-group">
+                            <label class="recall-checkbox-label">
+                                <input type="checkbox" id="recall-auto-resolve">
+                                <span>自动解决伏笔</span>
+                            </label>
+                            <div class="recall-setting-hint">LLM 检测到伏笔被回收时自动标记为已解决</div>
+                        </div>
+                        
+                        <div class="recall-setting-actions">
+                            <button id="recall-load-analyzer-config" class="menu_button">
+                                <i class="fa-solid fa-refresh"></i>
+                                <span>刷新配置</span>
+                            </button>
+                            <button id="recall-save-analyzer-config" class="menu_button menu_button_icon">
+                                <i class="fa-solid fa-save"></i>
+                                <span>保存配置</span>
+                            </button>
+                        </div>
+                    </div>
+                    
                     <div class="recall-info-box">
                         <div class="recall-info-title">💡 使用提示</div>
                         <ul>
@@ -493,6 +536,10 @@ function createUI() {
     document.getElementById('recall-test-llm')?.addEventListener('click', safeExecute(onTestLLM, '测试 LLM 失败'));
     document.getElementById('recall-save-llm')?.addEventListener('click', safeExecute(onSaveLLMConfig, '保存 LLM 配置失败'));
     
+    // 伏笔分析器配置事件绑定
+    document.getElementById('recall-load-analyzer-config')?.addEventListener('click', safeExecute(loadForeshadowingAnalyzerConfig, '加载伏笔分析器配置失败'));
+    document.getElementById('recall-save-analyzer-config')?.addEventListener('click', safeExecute(onSaveForeshadowingAnalyzerConfig, '保存伏笔分析器配置失败'));
+    
     // 刷新模型列表按钮事件绑定
     document.getElementById('recall-refresh-embedding-models')?.addEventListener('click', safeExecute(loadEmbeddingModels, '获取 Embedding 模型列表失败'));
     document.getElementById('recall-refresh-llm-models')?.addEventListener('click', safeExecute(loadLLMModels, '获取 LLM 模型列表失败'));
@@ -520,6 +567,9 @@ function createUI() {
     
     // 初始化加载 API 配置
     loadApiConfig();
+    
+    // 初始化加载伏笔分析器配置
+    loadForeshadowingAnalyzerConfig();
     
     // 回车键快捷搜索
     document.getElementById('recall-search-input')?.addEventListener('keypress', (e) => {
@@ -991,6 +1041,102 @@ async function onSaveLLMConfig() {
             alert(`✅ LLM 配置已保存\n\n已更新: ${result.updated_fields.join(', ')}`);
             // 重新加载配置
             loadApiConfig();
+        } else {
+            alert(`❌ 保存失败: ${result.message}`);
+        }
+    } catch (e) {
+        alert(`❌ 保存失败: ${e.message}`);
+    }
+}
+
+/**
+ * 加载伏笔分析器配置
+ */
+async function loadForeshadowingAnalyzerConfig() {
+    const statusEl = document.getElementById('recall-analyzer-status');
+    
+    try {
+        if (!pluginSettings.apiUrl) {
+            if (statusEl) {
+                statusEl.textContent = '未配置';
+                statusEl.className = 'recall-api-status recall-status-error';
+            }
+            return;
+        }
+        
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing/analyzer/config`);
+        const config = await response.json();
+        
+        // GET 请求直接返回配置对象
+        if (config && typeof config === 'object') {
+            // 填充表单
+            const triggerIntervalEl = document.getElementById('recall-trigger-interval');
+            const autoPlantEl = document.getElementById('recall-auto-plant');
+            const autoResolveEl = document.getElementById('recall-auto-resolve');
+            
+            if (triggerIntervalEl) triggerIntervalEl.value = config.trigger_interval || 10;
+            if (autoPlantEl) autoPlantEl.checked = config.auto_plant !== false;
+            if (autoResolveEl) autoResolveEl.checked = config.auto_resolve !== false;
+            
+            if (statusEl) {
+                statusEl.textContent = '已加载';
+                statusEl.className = 'recall-api-status recall-status-ok';
+            }
+            
+            console.log('[Recall] 伏笔分析器配置已加载:', config);
+        } else {
+            if (statusEl) {
+                statusEl.textContent = '加载失败';
+                statusEl.className = 'recall-api-status recall-status-error';
+            }
+        }
+    } catch (e) {
+        console.error('[Recall] 加载伏笔分析器配置失败:', e);
+        if (statusEl) {
+            statusEl.textContent = '连接失败';
+            statusEl.className = 'recall-api-status recall-status-error';
+        }
+    }
+}
+
+/**
+ * 保存伏笔分析器配置
+ */
+async function onSaveForeshadowingAnalyzerConfig() {
+    const triggerInterval = parseInt(document.getElementById('recall-trigger-interval').value) || 10;
+    const autoPlant = document.getElementById('recall-auto-plant').checked;
+    const autoResolve = document.getElementById('recall-auto-resolve').checked;
+    
+    // 验证触发间隔
+    if (triggerInterval < 1 || triggerInterval > 100) {
+        alert('❌ 分析触发间隔必须在 1-100 之间');
+        return;
+    }
+    
+    const configData = {
+        trigger_interval: triggerInterval,
+        auto_plant: autoPlant,
+        auto_resolve: autoResolve
+    };
+    
+    try {
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing/analyzer/config`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(configData)
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            alert(`✅ 伏笔分析器配置已保存\n\n触发间隔: 每 ${triggerInterval} 轮\n自动埋伏笔: ${autoPlant ? '是' : '否'}\n自动解决: ${autoResolve ? '是' : '否'}`);
+            
+            // 更新状态
+            const statusEl = document.getElementById('recall-analyzer-status');
+            if (statusEl) {
+                statusEl.textContent = '已保存';
+                statusEl.className = 'recall-api-status recall-status-ok';
+            }
         } else {
             alert(`❌ 保存失败: ${result.message}`);
         }
