@@ -180,7 +180,7 @@ class RecallEngine:
         # 处理器层（需要先初始化，因为图谱层依赖）
         self.entity_extractor = EntityExtractor()
         self.foreshadowing_tracker = ForeshadowingTracker(
-            storage_path=os.path.join(self.data_root, 'data', 'foreshadowing.json')
+            storage_dir=os.path.join(self.data_root, 'data', 'foreshadowings')
         )
         self.consistency_checker = ConsistencyChecker()
         self.memory_summarizer = MemorySummarizer(llm_client=self.llm_client)
@@ -564,12 +564,14 @@ class RecallEngine:
     def plant_foreshadowing(
         self,
         content: str,
+        user_id: str = "default",
         related_entities: Optional[List[str]] = None,
         importance: float = 0.5
     ) -> Foreshadowing:
         """埋下伏笔"""
         return self.foreshadowing_tracker.plant(
             content=content,
+            user_id=user_id,
             related_entities=related_entities,
             importance=importance
         )
@@ -577,14 +579,15 @@ class RecallEngine:
     def resolve_foreshadowing(
         self,
         foreshadowing_id: str,
-        resolution: str
+        resolution: str,
+        user_id: str = "default"
     ) -> bool:
         """解决伏笔"""
-        return self.foreshadowing_tracker.resolve(foreshadowing_id, resolution)
+        return self.foreshadowing_tracker.resolve(foreshadowing_id, resolution, user_id)
     
-    def get_active_foreshadowings(self) -> List[Foreshadowing]:
+    def get_active_foreshadowings(self, user_id: str = "default") -> List[Foreshadowing]:
         """获取活跃伏笔"""
-        return self.foreshadowing_tracker.get_active()
+        return self.foreshadowing_tracker.get_active(user_id)
     
     # ==================== 实体 API ====================
     

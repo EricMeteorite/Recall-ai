@@ -246,6 +246,7 @@ class ContextRequest(BaseModel):
 class ForeshadowingRequest(BaseModel):
     """伏笔请求"""
     content: str = Field(..., description="伏笔内容")
+    user_id: str = Field(default="default", description="用户ID（角色名）")
     related_entities: Optional[List[str]] = Field(default=None, description="相关实体")
     importance: float = Field(default=0.5, ge=0, le=1, description="重要性")
 
@@ -561,6 +562,7 @@ async def plant_foreshadowing(request: ForeshadowingRequest):
     engine = get_engine()
     fsh = engine.plant_foreshadowing(
         content=request.content,
+        user_id=request.user_id,
         related_entities=request.related_entities,
         importance=request.importance
     )
@@ -575,10 +577,10 @@ async def plant_foreshadowing(request: ForeshadowingRequest):
 
 
 @app.get("/v1/foreshadowing", response_model=List[ForeshadowingItem], tags=["Foreshadowing"])
-async def list_foreshadowing():
+async def list_foreshadowing(user_id: str = Query(default="default", description="用户ID（角色名）")):
     """获取活跃伏笔"""
     engine = get_engine()
-    active = engine.get_active_foreshadowings()
+    active = engine.get_active_foreshadowings(user_id)
     return [
         ForeshadowingItem(
             id=f.id,
@@ -595,11 +597,12 @@ async def list_foreshadowing():
 @app.post("/v1/foreshadowing/{foreshadowing_id}/resolve", tags=["Foreshadowing"])
 async def resolve_foreshadowing(
     foreshadowing_id: str,
-    resolution: str = Body(..., embed=True)
+    resolution: str = Body(..., embed=True),
+    user_id: str = Query(default="default", description="用户ID（角色名）")
 ):
     """解决伏笔"""
     engine = get_engine()
-    success = engine.resolve_foreshadowing(foreshadowing_id, resolution)
+    success = engine.resolve_foreshadowing(foreshadowing_id, resolution, user_id)
     
     if not success:
         raise HTTPException(status_code=404, detail="伏笔不存在")

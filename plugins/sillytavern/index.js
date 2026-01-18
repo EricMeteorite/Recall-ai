@@ -607,6 +607,7 @@ async function onPlantForeshadowing() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 content: content,
+                user_id: currentCharacterId || 'default',
                 importance: 0.5
             })
         });
@@ -615,6 +616,7 @@ async function onPlantForeshadowing() {
         if (result.id) {
             document.getElementById('recall-foreshadowing-input').value = '';
             loadForeshadowings();
+            console.log(`[Recall] 伏笔已埋下 (角色: ${currentCharacterId})`);
         }
     } catch (e) {
         console.error('[Recall] 埋下伏笔失败:', e);
@@ -1163,7 +1165,8 @@ async function loadForeshadowings() {
     if (!isConnected) return;
     
     try {
-        const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing`);
+        const userId = encodeURIComponent(currentCharacterId || 'default');
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing?user_id=${userId}`);
         const data = await response.json();
         displayForeshadowings(data);
     } catch (e) {
@@ -1220,7 +1223,8 @@ function displayForeshadowings(foreshadowings) {
  */
 async function resolveForeshadowing(foreshadowingId) {
     try {
-        const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing/${foreshadowingId}/resolve`, {
+        const userId = encodeURIComponent(currentCharacterId || 'default');
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing/${foreshadowingId}/resolve?user_id=${userId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ resolution: '用户手动标记为已解决' })
@@ -1228,6 +1232,7 @@ async function resolveForeshadowing(foreshadowingId) {
         
         if (response.ok) {
             loadForeshadowings();
+            console.log(`[Recall] 伏笔已解决 (角色: ${currentCharacterId})`);
         } else {
             console.error('[Recall] 解决伏笔失败');
         }
