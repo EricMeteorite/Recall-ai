@@ -546,3 +546,30 @@
     border-color: var(--SmartThemeQuoteColor, #666);
 }
 
+/* ========== 模型选择框 ========== */
+.recall-setting-group select.text_pole {
+    width: 100%;
+    height: auto;
+    padding: 8px 12px;
+    cursor: pointer;
+    appearance: auto;
+}
+
+.recall-setting-group select.text_pole optgroup {
+    font-weight: bold;
+    padding: 8px 0;
+    background: var(--SmartThemeBlurTintColor, #222);
+    color: var(--SmartThemeQuoteColor, #7c7cff);
+}
+
+.recall-setting-group select.text_pole option {
+    padding: 6px 12px;
+    background: var(--SmartThemeBlurTintColor, #1a1a1a);
+    color: var(--SmartThemeBodyColor, #ddd);
+}
+
+.recall-setting-group select.text_pole option:hover,
+.recall-setting-group select.text_pole option:focus {
+    background: var(--SmartThemeQuoteColor, rgba(100,100,200,0.3));
+}
+

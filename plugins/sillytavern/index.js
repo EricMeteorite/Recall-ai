@@ -351,16 +351,35 @@ function createUI() {
                         
                         <div class="recall-setting-group">
                             <label class="recall-setting-title">模型名称</label>
-                            <input type="text" id="recall-embedding-model" class="text_pole" 
-                                   placeholder="BAAI/bge-m3">
-                            <div class="recall-setting-hint">硅基流动推荐: BAAI/bge-m3</div>
+                            <select id="recall-embedding-model" class="text_pole">
+                                <option value="">-- 选择模型 --</option>
+                                <optgroup label="硅基流动 (SiliconFlow)">
+                                    <option value="BAAI/bge-m3">BAAI/bge-m3 (推荐, 1024维)</option>
+                                    <option value="BAAI/bge-large-zh-v1.5">BAAI/bge-large-zh-v1.5 (1024维)</option>
+                                    <option value="BAAI/bge-large-en-v1.5">BAAI/bge-large-en-v1.5 (1024维)</option>
+                                    <option value="netease-youdao/bce-embedding-base_v1">netease-youdao/bce-embedding-base_v1 (768维)</option>
+                                </optgroup>
+                                <optgroup label="OpenAI">
+                                    <option value="text-embedding-3-small">text-embedding-3-small (1536维)</option>
+                                    <option value="text-embedding-3-large">text-embedding-3-large (3072维)</option>
+                                    <option value="text-embedding-ada-002">text-embedding-ada-002 (1536维)</option>
+                                </optgroup>
+                                <optgroup label="Ollama 本地">
+                                    <option value="nomic-embed-text">nomic-embed-text (768维)</option>
+                                    <option value="mxbai-embed-large">mxbai-embed-large (1024维)</option>
+                                    <option value="all-minilm">all-minilm (384维)</option>
+                                </optgroup>
+                                <option value="__custom__">✏️ 自定义模型...</option>
+                            </select>
+                            <input type="text" id="recall-embedding-model-custom" class="text_pole" 
+                                   placeholder="输入自定义模型名称" style="display:none;margin-top:5px;">
                         </div>
                         
                         <div class="recall-setting-group">
                             <label class="recall-setting-title">向量维度</label>
                             <input type="number" id="recall-embedding-dimension" class="text_pole" 
                                    placeholder="1024" value="1024">
-                            <div class="recall-setting-hint">BAAI/bge-m3 维度: 1024</div>
+                            <div class="recall-setting-hint">选择模型后会自动设置推荐维度</div>
                         </div>
                         
                         <div class="recall-setting-actions">
@@ -402,9 +421,35 @@ function createUI() {
                         
                         <div class="recall-setting-group">
                             <label class="recall-setting-title">模型名称</label>
-                            <input type="text" id="recall-llm-model" class="text_pole" 
-                                   placeholder="gpt-3.5-turbo" value="gpt-3.5-turbo">
-                            <div class="recall-setting-hint">示例: gpt-4, claude-3-sonnet, deepseek/deepseek-chat</div>
+                            <select id="recall-llm-model" class="text_pole">
+                                <option value="">-- 选择模型 --</option>
+                                <optgroup label="OpenAI">
+                                    <option value="gpt-4o">gpt-4o (推荐)</option>
+                                    <option value="gpt-4o-mini">gpt-4o-mini</option>
+                                    <option value="gpt-4-turbo">gpt-4-turbo</option>
+                                    <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
+                                </optgroup>
+                                <optgroup label="Claude">
+                                    <option value="claude-3-5-sonnet-20241022">claude-3.5-sonnet</option>
+                                    <option value="claude-3-opus-20240229">claude-3-opus</option>
+                                    <option value="claude-3-haiku-20240307">claude-3-haiku</option>
+                                </optgroup>
+                                <optgroup label="硅基流动 (SiliconFlow)">
+                                    <option value="deepseek-ai/DeepSeek-V3">DeepSeek-V3 (推荐)</option>
+                                    <option value="deepseek-ai/DeepSeek-R1">DeepSeek-R1</option>
+                                    <option value="Qwen/Qwen2.5-72B-Instruct">Qwen2.5-72B</option>
+                                    <option value="Qwen/Qwen2.5-32B-Instruct">Qwen2.5-32B</option>
+                                    <option value="THUDM/glm-4-9b-chat">GLM-4-9B</option>
+                                </optgroup>
+                                <optgroup label="Ollama 本地">
+                                    <option value="llama3.2">llama3.2</option>
+                                    <option value="qwen2.5">qwen2.5</option>
+                                    <option value="mistral">mistral</option>
+                                </optgroup>
+                                <option value="__custom__">✏️ 自定义模型...</option>
+                            </select>
+                            <input type="text" id="recall-llm-model-custom" class="text_pole" 
+                                   placeholder="输入自定义模型名称" style="display:none;margin-top:5px;">
                         </div>
                         
                         <div class="recall-setting-actions">
@@ -492,6 +537,10 @@ function createUI() {
         });
     });
     
+    // 模型选择框事件绑定
+    bindModelSelectEvents('recall-embedding-model', 'recall-embedding-model-custom', 'recall-embedding-dimension');
+    bindModelSelectEvents('recall-llm-model', 'recall-llm-model-custom', null);
+    
     // 初始化加载 API 配置
     loadApiConfig();
     
@@ -511,8 +560,6 @@ function createUI() {
  * 加载 API 配置
  */
 async function loadApiConfig() {
-    if (!isConnected) return;
-    
     try {
         const response = await fetch(`${pluginSettings.apiUrl}/v1/config/full`);
         const config = await response.json();
@@ -522,7 +569,10 @@ async function loadApiConfig() {
             const emb = config.embedding;
             document.getElementById('recall-embedding-api-key').value = emb.api_key || '';
             document.getElementById('recall-embedding-api-base').value = emb.api_base || '';
-            document.getElementById('recall-embedding-model').value = emb.model || '';
+            
+            // 处理模型选择：先尝试选中已有选项，否则显示自定义输入
+            setModelSelectValue('recall-embedding-model', 'recall-embedding-model-custom', emb.model || '');
+            
             document.getElementById('recall-embedding-dimension').value = emb.dimension || '1024';
             
             // 更新状态指示器
@@ -534,7 +584,9 @@ async function loadApiConfig() {
             const llm = config.llm;
             document.getElementById('recall-llm-api-key').value = llm.api_key || '';
             document.getElementById('recall-llm-api-base').value = llm.api_base || '';
-            document.getElementById('recall-llm-model').value = llm.model || 'gpt-3.5-turbo';
+            
+            // 处理模型选择
+            setModelSelectValue('recall-llm-model', 'recall-llm-model-custom', llm.model || '');
             
             // 更新状态指示器
             updateLLMStatus(llm.api_key_status);
@@ -544,6 +596,95 @@ async function loadApiConfig() {
     } catch (e) {
         console.warn('[Recall] 加载 API 配置失败:', e);
     }
+}
+
+/**
+ * 设置模型选择框的值
+ * 如果值在选项中存在则选中，否则切换到自定义输入
+ */
+function setModelSelectValue(selectId, customInputId, value) {
+    const select = document.getElementById(selectId);
+    const customInput = document.getElementById(customInputId);
+    if (!select || !customInput) return;
+    
+    if (!value) {
+        select.value = '';
+        customInput.style.display = 'none';
+        customInput.value = '';
+        return;
+    }
+    
+    // 检查值是否在选项中
+    const options = Array.from(select.options).map(o => o.value);
+    if (options.includes(value)) {
+        select.value = value;
+        customInput.style.display = 'none';
+        customInput.value = '';
+    } else {
+        // 使用自定义输入
+        select.value = '__custom__';
+        customInput.style.display = 'block';
+        customInput.value = value;
+    }
+}
+
+/**
+ * 获取模型选择框的实际值
+ */
+function getModelSelectValue(selectId, customInputId) {
+    const select = document.getElementById(selectId);
+    const customInput = document.getElementById(customInputId);
+    if (!select) return '';
+    
+    if (select.value === '__custom__' && customInput) {
+        return customInput.value.trim();
+    }
+    return select.value;
+}
+
+/**
+ * 绑定模型选择框事件
+ */
+function bindModelSelectEvents(selectId, customInputId, dimensionInputId) {
+    const select = document.getElementById(selectId);
+    const customInput = document.getElementById(customInputId);
+    
+    if (!select || !customInput) return;
+    
+    // 模型维度映射
+    const modelDimensions = {
+        // SiliconFlow
+        'BAAI/bge-m3': 1024,
+        'BAAI/bge-large-zh-v1.5': 1024,
+        'BAAI/bge-large-en-v1.5': 1024,
+        'netease-youdao/bce-embedding-base_v1': 768,
+        // OpenAI
+        'text-embedding-3-small': 1536,
+        'text-embedding-3-large': 3072,
+        'text-embedding-ada-002': 1536,
+        // Ollama
+        'nomic-embed-text': 768,
+        'mxbai-embed-large': 1024,
+        'all-minilm': 384,
+    };
+    
+    select.addEventListener('change', () => {
+        if (select.value === '__custom__') {
+            customInput.style.display = 'block';
+            customInput.focus();
+        } else {
+            customInput.style.display = 'none';
+            customInput.value = '';
+            
+            // 自动设置维度（仅对 Embedding 模型）
+            if (dimensionInputId && modelDimensions[select.value]) {
+                const dimInput = document.getElementById(dimensionInputId);
+                if (dimInput) {
+                    dimInput.value = modelDimensions[select.value];
+                }
+            }
+        }
+    });
 }
 
 /**
@@ -651,7 +792,7 @@ async function onTestLLM() {
 async function onSaveEmbeddingConfig() {
     const embKey = document.getElementById('recall-embedding-api-key').value.trim();
     const embBase = document.getElementById('recall-embedding-api-base').value.trim();
-    const embModel = document.getElementById('recall-embedding-model').value.trim();
+    const embModel = getModelSelectValue('recall-embedding-model', 'recall-embedding-model-custom');
     const embDim = document.getElementById('recall-embedding-dimension').value.trim();
     
     const configData = {};
@@ -696,7 +837,7 @@ async function onSaveEmbeddingConfig() {
 async function onSaveLLMConfig() {
     const llmKey = document.getElementById('recall-llm-api-key').value.trim();
     const llmBase = document.getElementById('recall-llm-api-base').value.trim();
-    const llmModel = document.getElementById('recall-llm-model').value.trim();
+    const llmModel = getModelSelectValue('recall-llm-model', 'recall-llm-model-custom');
     
     const configData = {};
     
@@ -826,10 +967,16 @@ async function checkConnection() {
             updateConnectionStatus(true);
             console.log('[Recall] API 连接成功');
             
-            // 如果是首次连接成功，加载记忆
-            if (!wasConnected && currentCharacterId) {
-                loadMemories();
-                loadForeshadowings();
+            // 如果是首次连接成功
+            if (!wasConnected) {
+                // 加载 API 配置（从服务器获取已配置的值）
+                loadApiConfig();
+                
+                // 加载记忆
+                if (currentCharacterId) {
+                    loadMemories();
+                    loadForeshadowings();
+                }
             }
         } else {
             throw new Error('API 响应异常');
