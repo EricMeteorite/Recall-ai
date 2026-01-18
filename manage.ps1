@@ -37,6 +37,7 @@ function Write-Title {
 
 function Write-Success { param([string]$Text) Write-Host "  [OK] $Text" -ForegroundColor Green }
 function Write-Error2 { param([string]$Text) Write-Host "  [X] $Text" -ForegroundColor Red }
+function Write-Warning2 { param([string]$Text) Write-Host "  [!] $Text" -ForegroundColor Yellow }
 function Write-Info { param([string]$Text) Write-Host "  [i] $Text" -ForegroundColor Yellow }
 function Write-Dim { param([string]$Text) Write-Host "  $Text" -ForegroundColor DarkGray }
 
@@ -244,6 +245,74 @@ function Do-Start {
     if (Test-ServiceRunning) {
         Write-Info "Service is already running"
         return
+    }
+    
+    # Check config file
+    $configFile = Join-Path $SCRIPT_DIR "recall_data\config\api_keys.env"
+    $modeFile = Join-Path $SCRIPT_DIR "recall_data\config\install_mode"
+    $installMode = "full"
+    
+    if (Test-Path $modeFile) {
+        $installMode = Get-Content $modeFile -ErrorAction SilentlyContinue
+    }
+    
+    # If hybrid mode, check API config
+    if ($installMode -eq "hybrid") {
+        $needConfig = $false
+        
+        if (-not (Test-Path $configFile)) {
+            $needConfig = $true
+        } else {
+            # Check if API Key is configured
+            $content = Get-Content $configFile -Raw -ErrorAction SilentlyContinue
+            if ($content -match "EMBEDDING_API_KEY=(.*)") {
+                $apiKey = $matches[1].Trim()
+                if ([string]::IsNullOrEmpty($apiKey) -or $apiKey.StartsWith("your_")) {
+                    $needConfig = $true
+                }
+            } else {
+                $needConfig = $true
+            }
+        }
+        
+        if ($needConfig) {
+            # Ensure config file exists
+            if (-not (Test-Path $configFile)) {
+                $configDir = Split-Path $configFile -Parent
+                if (-not (Test-Path $configDir)) {
+                    New-Item -ItemType Directory -Path $configDir -Force | Out-Null
+                }
+                $defaultConfig = @'
+# ============================================================================
+# Recall-AI 配置文件
+# ============================================================================
+
+# Embedding 配置 (OpenAI 兼容接口)
+# 示例: OpenAI, SiliconFlow, Ollama 等
+EMBEDDING_API_KEY=
+EMBEDDING_API_BASE=
+EMBEDDING_MODEL=
+EMBEDDING_DIMENSION=1024
+RECALL_EMBEDDING_MODE=auto
+
+# LLM 配置 (OpenAI 兼容接口)
+LLM_API_KEY=
+LLM_API_BASE=
+LLM_MODEL=
+'@
+                Set-Content -Path $configFile -Value $defaultConfig -Encoding UTF8
+                Write-Info "Created config file: $configFile"
+            }
+            
+            Write-Host ""
+            Write-Warning2 "Hybrid mode requires Embedding API configuration"
+            Write-Host ""
+            Write-Info "Please edit config file:"
+            Write-Dim "  $configFile"
+            Write-Host ""
+            Write-Info "After configuration, start service again"
+            return
+        }
     }
     
     $startScript = Join-Path $SCRIPT_DIR "start.ps1"

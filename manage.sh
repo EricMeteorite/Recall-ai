@@ -41,6 +41,10 @@ print_error() {
     echo -e "  ${RED}✗${NC} $1"
 }
 
+print_warning() {
+    echo -e "  ${YELLOW}!${NC} $1"
+}
+
 print_info() {
     echo -e "  ${YELLOW}ℹ${NC} $1"
 }
@@ -257,6 +261,65 @@ do_start() {
     if test_service_running; then
         print_info "服务已在运行中"
         return
+    fi
+    
+    # 检查配置文件
+    local config_file="$SCRIPT_DIR/recall_data/config/api_keys.env"
+    local mode_file="$SCRIPT_DIR/recall_data/config/install_mode"
+    local install_mode="full"
+    
+    if [[ -f "$mode_file" ]]; then
+        install_mode=$(cat "$mode_file")
+    fi
+    
+    # 如果是 hybrid 模式，检查 API 配置
+    if [[ "$install_mode" == "hybrid" ]]; then
+        local need_config=false
+        
+        if [[ ! -f "$config_file" ]]; then
+            need_config=true
+        else
+            # 检查是否配置了有效的 API Key
+            local api_key=$(grep -E "^EMBEDDING_API_KEY=" "$config_file" 2>/dev/null | cut -d'=' -f2 | xargs)
+            if [[ -z "$api_key" ]] || [[ "$api_key" == your_* ]]; then
+                need_config=true
+            fi
+        fi
+        
+        if [[ "$need_config" == "true" ]]; then
+            # 确保配置文件存在
+            if [[ ! -f "$config_file" ]]; then
+                mkdir -p "$(dirname "$config_file")"
+                cat > "$config_file" << 'EOF'
+# ============================================================================
+# Recall-AI 配置文件
+# ============================================================================
+
+# Embedding 配置 (OpenAI 兼容接口)
+# 示例: OpenAI, SiliconFlow, Ollama 等
+EMBEDDING_API_KEY=
+EMBEDDING_API_BASE=
+EMBEDDING_MODEL=
+EMBEDDING_DIMENSION=1024
+RECALL_EMBEDDING_MODE=auto
+
+# LLM 配置 (OpenAI 兼容接口)
+LLM_API_KEY=
+LLM_API_BASE=
+LLM_MODEL=
+EOF
+                print_info "已创建配置文件: $config_file"
+            fi
+            
+            echo ""
+            print_warning "Hybrid 模式需要配置 Embedding API"
+            echo ""
+            print_info "请编辑配置文件:"
+            print_dim "  $config_file"
+            echo ""
+            print_info "配置完成后，再次启动服务"
+            return
+        fi
     fi
     
     local start_script="$SCRIPT_DIR/start.sh"

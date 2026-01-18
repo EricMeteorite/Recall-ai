@@ -170,12 +170,17 @@ function Load-ApiKeys {
 # ============================================================================
 
 # ----------------------------------------------------------------------------
-# Embedding 配置 (自定义 OpenAI 兼容接口)
-# Embedding Configuration (Custom OpenAI Compatible API)
+# Embedding 配置 (OpenAI 兼容接口)
+# Embedding Configuration (OpenAI Compatible API)
 # ----------------------------------------------------------------------------
-EMBEDDING_API_KEY=your_embedding_api_key_here
-EMBEDDING_API_BASE=https://api.siliconflow.cn/v1
-EMBEDDING_MODEL=BAAI/bge-m3
+# 示例 (Examples):
+#   OpenAI:      https://api.openai.com/v1
+#   SiliconFlow: https://api.siliconflow.cn/v1
+#   Ollama:      http://localhost:11434/v1
+# ----------------------------------------------------------------------------
+EMBEDDING_API_KEY=
+EMBEDDING_API_BASE=
+EMBEDDING_MODEL=
 EMBEDDING_DIMENSION=1024
 
 # Embedding 模式: auto(自动检测), local(本地), api(远程API)
@@ -183,12 +188,12 @@ EMBEDDING_DIMENSION=1024
 RECALL_EMBEDDING_MODE=auto
 
 # ----------------------------------------------------------------------------
-# LLM 配置 (自定义 OpenAI 兼容接口)
-# LLM Configuration (Custom OpenAI Compatible API)
+# LLM 配置 (OpenAI 兼容接口)
+# LLM Configuration (OpenAI Compatible API)
 # ----------------------------------------------------------------------------
-LLM_API_KEY=your_llm_api_key_here
-LLM_API_BASE=https://api.siliconflow.cn/v1
-LLM_MODEL=Qwen/Qwen2.5-7B-Instruct
+LLM_API_KEY=
+LLM_API_BASE=
+LLM_MODEL=
 '@
         Set-Content -Path $configFile -Value $defaultConfig -Encoding UTF8
         Write-Host "  $([char]0x2192) 已创建配置文件: $configFile" -ForegroundColor Cyan
@@ -260,9 +265,9 @@ function Start-RecallService {
         Write-Host ""
         Write-Host "  设置以下配置项（OpenAI 兼容格式）：" -ForegroundColor Yellow
         Write-Host ""
-        Write-Host "    " -NoNewline; Write-Host 'EMBEDDING_API_KEY=sk-xxx' -ForegroundColor Cyan
-        Write-Host "    " -NoNewline; Write-Host 'EMBEDDING_API_BASE=https://api.siliconflow.cn/v1' -ForegroundColor Cyan
-        Write-Host "    " -NoNewline; Write-Host 'EMBEDDING_MODEL=BAAI/bge-m3' -ForegroundColor Cyan
+        Write-Host "    " -NoNewline; Write-Host 'EMBEDDING_API_KEY=your-api-key' -ForegroundColor Cyan
+        Write-Host "    " -NoNewline; Write-Host 'EMBEDDING_API_BASE=https://your-api-provider/v1' -ForegroundColor Cyan
+        Write-Host "    " -NoNewline; Write-Host 'EMBEDDING_MODEL=your-embedding-model' -ForegroundColor Cyan
         Write-Host "    " -NoNewline; Write-Host 'EMBEDDING_DIMENSION=1024' -ForegroundColor Cyan
         Write-Host ""
         Write-Host "  然后重新运行: " -NoNewline; Write-Host ".\start.ps1" -ForegroundColor Cyan

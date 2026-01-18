@@ -267,12 +267,17 @@ load_api_keys() {
 # ============================================================================
 
 # ----------------------------------------------------------------------------
-# Embedding 配置 (自定义 OpenAI 兼容接口)
-# Embedding Configuration (Custom OpenAI Compatible API)
+# Embedding 配置 (OpenAI 兼容接口)
+# Embedding Configuration (OpenAI Compatible API)
 # ----------------------------------------------------------------------------
-EMBEDDING_API_KEY=your_embedding_api_key_here
-EMBEDDING_API_BASE=https://api.siliconflow.cn/v1
-EMBEDDING_MODEL=BAAI/bge-m3
+# 示例 (Examples):
+#   OpenAI:      https://api.openai.com/v1
+#   SiliconFlow: https://api.siliconflow.cn/v1
+#   Ollama:      http://localhost:11434/v1
+# ----------------------------------------------------------------------------
+EMBEDDING_API_KEY=
+EMBEDDING_API_BASE=
+EMBEDDING_MODEL=
 EMBEDDING_DIMENSION=1024
 
 # Embedding 模式: auto(自动检测), local(本地), api(远程API)
@@ -280,12 +285,12 @@ EMBEDDING_DIMENSION=1024
 RECALL_EMBEDDING_MODE=auto
 
 # ----------------------------------------------------------------------------
-# LLM 配置 (自定义 OpenAI 兼容接口)
-# LLM Configuration (Custom OpenAI Compatible API)
+# LLM 配置 (OpenAI 兼容接口)
+# LLM Configuration (OpenAI Compatible API)
 # ----------------------------------------------------------------------------
-LLM_API_KEY=your_llm_api_key_here
-LLM_API_BASE=https://api.siliconflow.cn/v1
-LLM_MODEL=Qwen/Qwen2.5-7B-Instruct
+LLM_API_KEY=
+LLM_API_BASE=
+LLM_MODEL=
 EOF
         print_info "已创建配置文件: $config_file"
     fi
@@ -358,9 +363,9 @@ do_start() {
         echo -e "  ${YELLOW}请编辑配置文件: ${CYAN}$DATA_PATH/config/api_keys.env${NC}"
         echo ""
         echo -e "  设置以下配置项（OpenAI 兼容格式）:"
-        echo -e "    ${CYAN}EMBEDDING_API_KEY=sk-xxx${NC}"
-        echo -e "    ${CYAN}EMBEDDING_API_BASE=https://api.siliconflow.cn/v1${NC}"
-        echo -e "    ${CYAN}EMBEDDING_MODEL=BAAI/bge-m3${NC}"
+        echo -e "    ${CYAN}EMBEDDING_API_KEY=your-api-key${NC}"
+        echo -e "    ${CYAN}EMBEDDING_API_BASE=https://your-api-provider/v1${NC}"
+        echo -e "    ${CYAN}EMBEDDING_MODEL=your-embedding-model${NC}"
         echo -e "    ${CYAN}EMBEDDING_DIMENSION=1024${NC}"
         echo ""
         echo -e "  然后重新运行: ${CYAN}./start.sh${NC}"
