@@ -382,6 +382,55 @@ class ForeshadowingConfigUpdate(BaseModel):
 _engine: Optional[RecallEngine] = None
 
 
+def _build_foreshadowing_config():
+    """构建伏笔分析器配置（内部辅助函数）
+    
+    Returns:
+        ForeshadowingAnalyzerConfig 或 None
+    """
+    llm_api_key = os.environ.get('LLM_API_KEY')
+    llm_enabled_str = os.environ.get('FORESHADOWING_LLM_ENABLED', 'false').lower()
+    llm_enabled = llm_enabled_str in ('true', '1', 'yes')
+    
+    if llm_api_key and llm_enabled:
+        # LLM 已配置且已启用
+        from .processor.foreshadowing_analyzer import ForeshadowingAnalyzerConfig
+        
+        trigger_interval = int(os.environ.get('FORESHADOWING_TRIGGER_INTERVAL', '10'))
+        auto_plant_str = os.environ.get('FORESHADOWING_AUTO_PLANT', 'true').lower()
+        auto_resolve_str = os.environ.get('FORESHADOWING_AUTO_RESOLVE', 'false').lower()
+        
+        config = ForeshadowingAnalyzerConfig.llm_based(
+            api_key=llm_api_key,
+            model=os.environ.get('LLM_MODEL', 'gpt-4o-mini'),
+            base_url=os.environ.get('LLM_API_BASE'),
+            trigger_interval=trigger_interval,
+            auto_plant=auto_plant_str in ('true', '1', 'yes'),
+            auto_resolve=auto_resolve_str in ('true', '1', 'yes')
+        )
+        print(f"[Recall] 伏笔分析器: LLM 模式已启用")
+        return config
+    else:
+        if llm_api_key and not llm_enabled:
+            print("[Recall] 伏笔分析器: 手动模式 (LLM 已配置但未启用)")
+        else:
+            print("[Recall] 伏笔分析器: 手动模式 (未配置 LLM API)")
+        return None
+
+
+def _create_engine():
+    """创建引擎实例（内部辅助函数）
+    
+    Returns:
+        RecallEngine 实例
+    """
+    embedding_mode = os.environ.get('RECALL_EMBEDDING_MODE', '').lower()
+    foreshadowing_config = _build_foreshadowing_config()
+    
+    lightweight = (embedding_mode == 'none')
+    return RecallEngine(lightweight=lightweight, foreshadowing_config=foreshadowing_config)
+
+
 def get_engine() -> RecallEngine:
     """获取全局引擎实例
     
@@ -395,42 +444,7 @@ def get_engine() -> RecallEngine:
     if _engine is None:
         # 首次启动时加载配置文件
         load_api_keys_from_file()
-        
-        embedding_mode = os.environ.get('RECALL_EMBEDDING_MODE', '').lower()
-        
-        # 检查伏笔分析器配置
-        llm_api_key = os.environ.get('LLM_API_KEY')
-        llm_enabled_str = os.environ.get('FORESHADOWING_LLM_ENABLED', 'false').lower()
-        llm_enabled = llm_enabled_str in ('true', '1', 'yes')
-        
-        foreshadowing_config = None
-        if llm_api_key and llm_enabled:
-            # LLM 已配置且已启用
-            from .processor.foreshadowing_analyzer import ForeshadowingAnalyzerConfig
-            
-            trigger_interval = int(os.environ.get('FORESHADOWING_TRIGGER_INTERVAL', '10'))
-            auto_plant_str = os.environ.get('FORESHADOWING_AUTO_PLANT', 'true').lower()
-            auto_resolve_str = os.environ.get('FORESHADOWING_AUTO_RESOLVE', 'false').lower()
-            
-            foreshadowing_config = ForeshadowingAnalyzerConfig.llm_based(
-                api_key=llm_api_key,
-                model=os.environ.get('LLM_MODEL', 'gpt-4o-mini'),
-                base_url=os.environ.get('LLM_API_BASE'),
-                trigger_interval=trigger_interval,
-                auto_plant=auto_plant_str in ('true', '1', 'yes'),
-                auto_resolve=auto_resolve_str in ('true', '1', 'yes')
-            )
-            print(f"[Recall] 伏笔分析器: LLM 模式已启用")
-        else:
-            if llm_api_key and not llm_enabled:
-                print("[Recall] 伏笔分析器: 手动模式 (LLM 已配置但未启用)")
-            else:
-                print("[Recall] 伏笔分析器: 手动模式 (未配置 LLM API)")
-        
-        if embedding_mode == 'none':
-            _engine = RecallEngine(lightweight=True, foreshadowing_config=foreshadowing_config)
-        else:
-            _engine = RecallEngine(lightweight=False, foreshadowing_config=foreshadowing_config)
+        _engine = _create_engine()
     return _engine
 
 
@@ -449,39 +463,9 @@ def reload_engine():
             pass
         _engine = None
     
-    # 重新加载配置
+    # 重新加载配置并创建引擎
     load_api_keys_from_file()
-    
-    # 重新创建引擎（使用与 get_engine 相同的逻辑）
-    embedding_mode = os.environ.get('RECALL_EMBEDDING_MODE', '').lower()
-    
-    # 检查伏笔分析器配置
-    llm_api_key = os.environ.get('LLM_API_KEY')
-    llm_enabled_str = os.environ.get('FORESHADOWING_LLM_ENABLED', 'false').lower()
-    llm_enabled = llm_enabled_str in ('true', '1', 'yes')
-    
-    foreshadowing_config = None
-    if llm_api_key and llm_enabled:
-        from .processor.foreshadowing_analyzer import ForeshadowingAnalyzerConfig
-        
-        trigger_interval = int(os.environ.get('FORESHADOWING_TRIGGER_INTERVAL', '10'))
-        auto_plant_str = os.environ.get('FORESHADOWING_AUTO_PLANT', 'true').lower()
-        auto_resolve_str = os.environ.get('FORESHADOWING_AUTO_RESOLVE', 'false').lower()
-        
-        foreshadowing_config = ForeshadowingAnalyzerConfig.llm_based(
-            api_key=llm_api_key,
-            model=os.environ.get('LLM_MODEL', 'gpt-4o-mini'),
-            base_url=os.environ.get('LLM_API_BASE'),
-            trigger_interval=trigger_interval,
-            auto_plant=auto_plant_str in ('true', '1', 'yes'),
-            auto_resolve=auto_resolve_str in ('true', '1', 'yes')
-        )
-        print(f"[Recall] 伏笔分析器: LLM 模式已启用")
-    
-    if embedding_mode == 'none':
-        _engine = RecallEngine(lightweight=True, foreshadowing_config=foreshadowing_config)
-    else:
-        _engine = RecallEngine(lightweight=False, foreshadowing_config=foreshadowing_config)
+    _engine = _create_engine()
     
     return _engine
 

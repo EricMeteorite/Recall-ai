@@ -1429,6 +1429,13 @@ async function onSearch() {
         
         const results = await response.json();
         displayMemories(results);
+        
+        // 搜索结果不分页，隐藏"加载更多"按钮
+        hasMoreMemories = false;
+        updateLoadMoreButton();
+        
+        // 更新显示的数量（搜索结果数）
+        updateStats(results.length);
     } catch (e) {
         console.error('[Recall] 搜索失败:', e);
     }
@@ -1837,8 +1844,9 @@ async function loadMemories() {
         // 显示记忆
         displayMemories(data.memories || []);
         
-        // 检查是否有更多
-        hasMoreMemories = data.memories && data.memories.length >= MEMORIES_PER_PAGE;
+        // 检查是否有更多（用 total 和 offset+count 比较，而不是简单判断返回数量）
+        const loadedCount = (data.offset || 0) + (data.count || 0);
+        hasMoreMemories = loadedCount < (data.total || 0);
         updateLoadMoreButton();
         
     } catch (e) {
@@ -2016,13 +2024,18 @@ async function onClearAllMemories() {
 // 用于分页加载的状态
 let currentMemoryOffset = 0;
 let hasMoreMemories = false;
+let isLoadingMore = false;  // 防止重复点击
 const MEMORIES_PER_PAGE = 20;
 
 /**
  * 加载更多记忆
  */
 async function onLoadMoreMemories() {
-    if (!isConnected) return;
+    if (!isConnected || isLoadingMore) return;
+    
+    isLoadingMore = true;
+    const loadMoreBtn = document.getElementById('recall-load-more-btn');
+    if (loadMoreBtn) loadMoreBtn.textContent = '加载中...';
     
     try {
         currentMemoryOffset += MEMORIES_PER_PAGE;
@@ -2033,7 +2046,9 @@ async function onLoadMoreMemories() {
         
         if (data.memories && data.memories.length > 0) {
             appendMemories(data.memories);
-            hasMoreMemories = data.memories.length >= MEMORIES_PER_PAGE;
+            // 检查是否有更多（用 total 和 offset+count 比较）
+            const loadedCount = (data.offset || 0) + (data.count || 0);
+            hasMoreMemories = loadedCount < (data.total || 0);
         } else {
             hasMoreMemories = false;
         }
@@ -2041,6 +2056,11 @@ async function onLoadMoreMemories() {
         updateLoadMoreButton();
     } catch (e) {
         console.error('[Recall] 加载更多记忆失败:', e);
+        // 出错时回滚 offset
+        currentMemoryOffset -= MEMORIES_PER_PAGE;
+    } finally {
+        isLoadingMore = false;
+        if (loadMoreBtn) loadMoreBtn.textContent = '加载更多...';
     }
 }
 
@@ -2058,10 +2078,41 @@ function appendMemories(memories) {
     listEl.querySelectorAll('.recall-delete-memory:not([data-bound])').forEach(btn => {
         btn.setAttribute('data-bound', 'true');
         btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
             const button = e.currentTarget;
             const id = button.dataset.id;
             if (id && confirm('确定删除这条记忆吗？')) {
                 await deleteMemory(id);
+            }
+        });
+    });
+    
+    // 绑定新添加项的展开/收起事件
+    listEl.querySelectorAll('.recall-expand-btn:not([data-bound])').forEach(btn => {
+        btn.setAttribute('data-bound', 'true');
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const item = btn.closest('.recall-memory-item');
+            if (!item) return;
+            
+            const isExpanded = item.dataset.expanded === 'true';
+            const preview = item.querySelector('.recall-memory-preview');
+            const full = item.querySelector('.recall-memory-full');
+            
+            if (isExpanded) {
+                // 收起
+                preview.style.display = '';
+                if (full) full.style.display = 'none';
+                btn.textContent = '📖 展开全文';
+                item.dataset.expanded = 'false';
+                item.classList.remove('expanded');
+            } else {
+                // 展开
+                preview.style.display = 'none';
+                if (full) full.style.display = '';
+                btn.textContent = '📕 收起';
+                item.dataset.expanded = 'true';
+                item.classList.add('expanded');
             }
         });
     });
