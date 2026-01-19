@@ -124,11 +124,13 @@ function Test-ApiHealth {
 function Load-ApiKeys {
     $configFile = Join-Path $ScriptDir "recall_data\config\api_keys.env"
     
-    # 支持的配置项
+    # 支持的配置项（与 server.py SUPPORTED_CONFIG_KEYS 保持一致）
     $supportedKeys = @(
         'EMBEDDING_API_KEY', 'EMBEDDING_API_BASE', 'EMBEDDING_MODEL', 'EMBEDDING_DIMENSION',
         'RECALL_EMBEDDING_MODE',
-        'LLM_API_KEY', 'LLM_API_BASE', 'LLM_MODEL'
+        'LLM_API_KEY', 'LLM_API_BASE', 'LLM_MODEL',
+        'FORESHADOWING_LLM_ENABLED', 'FORESHADOWING_TRIGGER_INTERVAL',
+        'FORESHADOWING_AUTO_PLANT', 'FORESHADOWING_AUTO_RESOLVE'
     )
     
     if (Test-Path $configFile) {
