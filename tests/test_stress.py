@@ -110,7 +110,8 @@ def test_write_performance():
     all_memories = engine.get_all()
     print(f"  - 实际存储: {len(all_memories)} 条")
     
-    return success_count == TOTAL_MEMORIES and len(all_memories) == TOTAL_MEMORIES
+    assert success_count == TOTAL_MEMORIES, f"写入失败: 期望 {TOTAL_MEMORIES}, 实际 {success_count}"
+    assert len(all_memories) == TOTAL_MEMORIES, f"存储不一致: 期望 {TOTAL_MEMORIES}, 实际 {len(all_memories)}"
 
 
 def test_persistence():
@@ -133,11 +134,11 @@ def test_persistence():
     
     if len(all_memories) == TOTAL_MEMORIES:
         print(f"✅ 持久化测试通过! 所有 {TOTAL_MEMORIES} 条记忆完好无损")
-        return True
     else:
         print(f"❌ 持久化测试失败! 期望 {TOTAL_MEMORIES} 条，实际 {len(all_memories)} 条")
         print(f"   丢失了 {TOTAL_MEMORIES - len(all_memories)} 条记忆")
-        return False
+    
+    assert len(all_memories) == TOTAL_MEMORIES, f"持久化失败: 丢失了 {TOTAL_MEMORIES - len(all_memories)} 条记忆"
 
 
 def test_search_performance():
@@ -169,7 +170,7 @@ def test_search_performance():
     elapsed = (time.time() - start) * 1000
     print(f"  构建上下文: {len(context)} 字符, {elapsed:.1f}ms")
     
-    return True
+    assert len(context) > 0, "上下文构建失败: 返回空内容"
 
 
 def test_incremental_add():
@@ -204,10 +205,10 @@ def test_incremental_add():
     expected = TOTAL_MEMORIES + 100
     if final_count == expected:
         print(f"✅ 增量添加测试通过! 总计 {final_count} 条")
-        return True
     else:
         print(f"❌ 增量添加测试失败! 期望 {expected}, 实际 {final_count}")
-        return False
+    
+    assert final_count == expected, f"增量添加失败: 期望 {expected}, 实际 {final_count}"
 
 
 def cleanup():

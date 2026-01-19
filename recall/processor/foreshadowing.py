@@ -224,6 +224,46 @@ class ForeshadowingTracker:
                 lines.append(f"     提示: {len(f.hints)} 条")
         
         return "\n".join(lines)
+    
+    def get_context_for_prompt(
+        self,
+        user_id: str = "default",
+        max_count: int = 5,
+        current_turn: Optional[int] = None
+    ) -> str:
+        """生成用于注入 prompt 的伏笔上下文
+        
+        Args:
+            user_id: 用户ID
+            max_count: 最多返回的伏笔数量
+            current_turn: 当前轮次（用于主动提醒判断）
+        
+        Returns:
+            str: 格式化的伏笔上下文，可直接注入 prompt
+        """
+        active = self.get_active(user_id)
+        if not active:
+            return ""
+        
+        # 按重要性排序，取前 max_count 个
+        active = sorted(active, key=lambda x: -x.importance)[:max_count]
+        
+        lines = ["<foreshadowings>", "【活跃伏笔 - AI需要在适当时机推进或解决这些伏笔】"]
+        
+        for i, f in enumerate(active, 1):
+            status = "埋下" if f.status == ForeshadowingStatus.PLANTED else "发展中"
+            lines.append(f"{i}. [{status}] {f.content}")
+            if f.hints:
+                lines.append(f"   已有提示: {', '.join(f.hints[-3:])}")  # 只显示最近3条提示
+            
+            # 主动提醒逻辑：如果伏笔很重要且长时间未发展，提醒AI
+            if current_turn and f.importance >= 0.7:
+                age = (time.time() - f.planted_at) / 3600  # 小时
+                if age > 2 and f.status == ForeshadowingStatus.PLANTED:
+                    lines.append(f"   ⚠️ 这个重要伏笔已埋下较长时间，考虑推进或给出提示")
+        
+        lines.append("</foreshadowings>")
+        return "\n".join(lines)
 
 
 class ForeshadowingTrackerLite:

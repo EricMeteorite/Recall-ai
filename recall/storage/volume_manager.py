@@ -133,6 +133,44 @@ class VolumeManager:
     def get_total_turns(self) -> int:
         """获取总轮次数"""
         return self.manifest.get('total_turns', 0)
+    
+    def get_turn_by_memory_id(self, memory_id: str) -> Optional[dict]:
+        """通过 memory_id 获取原始轮次数据
+        
+        扫描所有加载的卷查找匹配的 memory_id
+        注意：这是 O(n) 操作，适用于兜底场景
+        """
+        for volume in self.loaded_volumes.values():
+            for turn_data in volume.cached_turns.values():
+                if turn_data.get('memory_id') == memory_id:
+                    return turn_data
+        return None
+    
+    def search_content(self, query: str, max_results: int = 50) -> List[dict]:
+        """在所有存档中搜索包含查询内容的轮次
+        
+        这是"终极兜底"功能，确保任何原文都能被找到
+        
+        Args:
+            query: 搜索查询
+            max_results: 最大返回数量
+        
+        Returns:
+            List[dict]: 匹配的轮次数据列表
+        """
+        results = []
+        query_lower = query.lower()
+        
+        # 先在已加载的卷中搜索
+        for volume in self.loaded_volumes.values():
+            for turn_data in volume.cached_turns.values():
+                content = turn_data.get('content', '')
+                if query_lower in content.lower():
+                    results.append(turn_data)
+                    if len(results) >= max_results:
+                        return results
+        
+        return results
 
 
 class VolumeData:

@@ -69,15 +69,65 @@ class ScopedMemory:
         })
     
     def search(self, query: str, limit: int = 10) -> List[Dict[str, Any]]:
-        """简单搜索记忆"""
+        """智能搜索记忆 - 使用关键词匹配
+        
+        搜索策略：
+        1. 完全匹配查询字符串（最高分）
+        2. 匹配查询中的所有关键词
+        3. 匹配部分关键词
+        4. 匹配实体名称
+        """
         results = []
         query_lower = query.lower()
         
+        # 提取查询中的关键词（简单分词）
+        import re
+        # 中文按单字符分割，英文按空格分割
+        keywords = set()
+        # 提取中文词
+        chinese_chars = re.findall(r'[\u4e00-\u9fff]+', query_lower)
+        for chars in chinese_chars:
+            if len(chars) >= 2:
+                keywords.add(chars)
+                # 也添加两字词组合
+                for i in range(len(chars) - 1):
+                    keywords.add(chars[i:i+2])
+        # 提取英文词
+        english_words = re.findall(r'[a-z]+', query_lower)
+        keywords.update(w for w in english_words if len(w) > 2)
+        
+        # 过滤掉常见停用词
+        stopwords = {'的', '了', '是', '在', '有', '和', '与', '或', '但', '如果', '这', '那'}
+        keywords = keywords - stopwords
+        
         for memory in self._memories:
             content = memory.get('content', '')
-            if query_lower in content.lower():
-                results.append(memory)
+            content_lower = content.lower()
+            entities = memory.get('metadata', {}).get('entities', [])
+            
+            score = 0
+            
+            # 完全匹配
+            if query_lower in content_lower:
+                score += 1.0
+            
+            # 关键词匹配
+            if keywords:
+                matched_keywords = sum(1 for kw in keywords if kw in content_lower)
+                score += matched_keywords / len(keywords) * 0.8
+            
+            # 实体匹配
+            for entity in entities:
+                if entity.lower() in query_lower or query_lower in entity.lower():
+                    score += 0.3
+            
+            if score > 0:
+                result = memory.copy()
+                result['score'] = score
+                results.append(result)
         
+        # 按分数排序
+        results.sort(key=lambda x: -x.get('score', 0))
         return results[:limit]
     
     def get_all(self, limit: int = None) -> List[Dict[str, Any]]:

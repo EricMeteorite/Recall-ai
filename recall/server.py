@@ -253,6 +253,8 @@ class ContextRequest(BaseModel):
     user_id: str = Field(default="default", description="用户ID")
     max_tokens: int = Field(default=2000, description="最大token数")
     include_recent: int = Field(default=5, description="包含的最近对话数")
+    include_core_facts: bool = Field(default=True, description="是否包含核心事实摘要")
+    auto_extract_context: bool = Field(default=True, description="是否自动从查询提取持久条件")
 
 
 class ForeshadowingRequest(BaseModel):
@@ -261,6 +263,38 @@ class ForeshadowingRequest(BaseModel):
     user_id: str = Field(default="default", description="用户ID（角色名）")
     related_entities: Optional[List[str]] = Field(default=None, description="相关实体")
     importance: float = Field(default=0.5, ge=0, le=1, description="重要性")
+
+
+# ==================== 持久条件模型 ====================
+
+class PersistentContextRequest(BaseModel):
+    """添加持久条件请求"""
+    content: str = Field(..., description="条件内容")
+    context_type: str = Field(default="custom", description="条件类型：user_identity, user_goal, user_preference, environment, project, character_trait, world_setting, relationship, assumption, constraint, custom")
+    user_id: str = Field(default="default", description="用户ID")
+    keywords: Optional[List[str]] = Field(default=None, description="关键词")
+
+
+class PersistentContextItem(BaseModel):
+    """持久条件项"""
+    id: str
+    content: str
+    context_type: str
+    confidence: float
+    is_active: bool
+    use_count: int
+    created_at: float
+    keywords: List[str] = []
+
+
+class PersistentContextStats(BaseModel):
+    """持久条件统计"""
+    total: int
+    active: int
+    by_type: Dict[str, int]
+    avg_confidence: float
+    oldest_days: float
+    limits: Dict[str, int]
 
 
 class ForeshadowingItem(BaseModel):
@@ -636,9 +670,152 @@ async def build_context(request: ContextRequest):
         query=request.query,
         user_id=request.user_id,
         max_tokens=request.max_tokens,
-        include_recent=request.include_recent
+        include_recent=request.include_recent,
+        include_core_facts=request.include_core_facts,
+        auto_extract_context=request.auto_extract_context
     )
     return {"context": context}
+
+
+# ==================== 持久条件 API ====================
+
+@app.post("/v1/persistent-contexts", response_model=PersistentContextItem, tags=["Persistent Contexts"])
+async def add_persistent_context(request: PersistentContextRequest):
+    """添加持久条件
+    
+    持久条件是已确立的背景设定，会在所有后续对话中自动包含。
+    例如：用户身份、技术环境、角色设定等。
+    """
+    from .processor.context_tracker import ContextType
+    
+    engine = get_engine()
+    
+    # 转换类型
+    try:
+        ctx_type = ContextType(request.context_type)
+    except ValueError:
+        ctx_type = ContextType.CUSTOM
+    
+    ctx = engine.add_persistent_context(
+        content=request.content,
+        context_type=ctx_type,
+        user_id=request.user_id,
+        keywords=request.keywords
+    )
+    
+    # add_persistent_context 返回 PersistentContext 对象
+    return PersistentContextItem(
+        id=ctx.id,
+        content=ctx.content,
+        context_type=ctx.context_type.value,
+        confidence=ctx.confidence,
+        is_active=ctx.is_active,
+        use_count=ctx.use_count,
+        created_at=ctx.created_at,
+        keywords=ctx.keywords
+    )
+
+
+@app.get("/v1/persistent-contexts", response_model=List[PersistentContextItem], tags=["Persistent Contexts"])
+async def list_persistent_contexts(
+    user_id: str = Query(default="default", description="用户ID"),
+    context_type: Optional[str] = Query(default=None, description="按类型过滤")
+):
+    """获取所有活跃的持久条件"""
+    engine = get_engine()
+    contexts = engine.get_persistent_contexts(user_id)
+    
+    # 按类型过滤
+    if context_type:
+        contexts = [c for c in contexts if c['context_type'] == context_type]
+    
+    return [
+        PersistentContextItem(
+            id=c['id'],
+            content=c['content'],
+            context_type=c['context_type'],
+            confidence=c['confidence'],
+            is_active=c['is_active'],
+            use_count=c['use_count'],
+            created_at=c['created_at'],
+            keywords=c.get('keywords', [])
+        )
+        for c in contexts
+    ]
+
+
+# 注意：固定路径必须在参数路径之前定义，否则 /stats 会被当作 {context_id}
+
+@app.get("/v1/persistent-contexts/stats", response_model=PersistentContextStats, tags=["Persistent Contexts"])
+async def get_persistent_context_stats(
+    user_id: str = Query(default="default", description="用户ID")
+):
+    """获取持久条件统计信息"""
+    engine = get_engine()
+    stats = engine.context_tracker.get_stats(user_id)
+    return PersistentContextStats(**stats)
+
+
+@app.post("/v1/persistent-contexts/consolidate", tags=["Persistent Contexts"])
+async def consolidate_contexts(
+    user_id: str = Query(default="default", description="用户ID"),
+    force: bool = Query(default=False, description="是否强制执行（不管数量是否超过阈值）")
+):
+    """压缩合并持久条件
+    
+    当持久条件数量过多时，智能合并相似的条件。
+    如果配置了LLM，会使用LLM进行智能压缩。
+    """
+    engine = get_engine()
+    result = engine.consolidate_persistent_contexts(user_id, force)
+    return result
+
+
+@app.post("/v1/persistent-contexts/extract", tags=["Persistent Contexts"])
+async def extract_contexts_from_text(
+    text: str = Body(..., embed=True, description="要分析的文本"),
+    user_id: str = Query(default="default", description="用户ID")
+):
+    """从文本中自动提取持久条件
+    
+    使用 LLM（如果可用）或规则从文本中提取应该持久化的条件。
+    """
+    engine = get_engine()
+    contexts = engine.extract_contexts_from_text(text, user_id)
+    return {
+        "extracted": len(contexts),
+        "contexts": contexts
+    }
+
+
+@app.delete("/v1/persistent-contexts/{context_id}", tags=["Persistent Contexts"])
+async def remove_persistent_context(
+    context_id: str,
+    user_id: str = Query(default="default", description="用户ID")
+):
+    """停用持久条件"""
+    engine = get_engine()
+    success = engine.remove_persistent_context(context_id, user_id)
+    
+    if not success:
+        raise HTTPException(status_code=404, detail="持久条件不存在")
+    
+    return {"success": True, "message": "持久条件已停用"}
+
+
+@app.post("/v1/persistent-contexts/{context_id}/used", tags=["Persistent Contexts"])
+async def mark_context_used(
+    context_id: str,
+    user_id: str = Query(default="default", description="用户ID")
+):
+    """标记持久条件已使用
+    
+    调用此接口可以更新条件的使用时间和使用次数，
+    这对于置信度衰减机制很重要。
+    """
+    engine = get_engine()
+    engine.context_tracker.mark_used(context_id, user_id)
+    return {"success": True, "message": "已标记使用"}
 
 
 # ==================== 伏笔 API ====================

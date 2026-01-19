@@ -10,7 +10,8 @@ from .foreshadowing_analyzer import (
 )
 from .consistency import ConsistencyChecker, ConsistencyResult, Violation
 from .memory_summarizer import MemorySummarizer, MemoryItem
-from .scenario import ScenarioDetector
+from .scenario import ScenarioDetector, ScenarioType, ScenarioInfo
+from .context_tracker import ContextTracker, PersistentContext, ContextType
 
 __all__ = [
     'EntityExtractor',
@@ -28,4 +29,9 @@ __all__ = [
     'MemorySummarizer',
     'MemoryItem',
     'ScenarioDetector',
+    'ScenarioType',
+    'ScenarioInfo',
+    'ContextTracker',
+    'PersistentContext',
+    'ContextType',
 ]

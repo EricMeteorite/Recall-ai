@@ -71,7 +71,8 @@ class EightLayerRetriever:
         entity_index: Optional[Any] = None,
         ngram_index: Optional[Any] = None,
         vector_index: Optional[Any] = None,
-        llm_client: Optional[Any] = None
+        llm_client: Optional[Any] = None,
+        content_store: Optional[Callable[[str], Optional[str]]] = None
     ):
         self.bloom_filter = bloom_filter
         self.inverted_index = inverted_index
@@ -79,6 +80,11 @@ class EightLayerRetriever:
         self.ngram_index = ngram_index
         self.vector_index = vector_index
         self.llm_client = llm_client
+        # 内容存储回调：通过 ID 查询内容
+        self.content_store = content_store
+        
+        # 内部内容缓存（用于索引时存储内容）
+        self._content_cache: Dict[str, str] = {}
         
         # 统计
         self.stats: List[LayerStats] = []
@@ -98,6 +104,22 @@ class EightLayerRetriever:
             'l7_top_k': 10,       # 重排序返回数量
             'l8_top_k': 5,        # LLM过滤返回数量
         }
+    
+    def cache_content(self, doc_id: str, content: str):
+        """缓存文档内容（在添加索引时调用）"""
+        self._content_cache[doc_id] = content
+    
+    def get_content(self, doc_id: str) -> str:
+        """获取文档内容"""
+        # 优先从缓存获取
+        if doc_id in self._content_cache:
+            return self._content_cache[doc_id]
+        # 否则从外部存储获取
+        if self.content_store:
+            content = self.content_store(doc_id)
+            if content:
+                return content
+        return ""
     
     def retrieve(
         self,
@@ -177,14 +199,31 @@ class EightLayerRetriever:
             # 合并向量结果
             for doc_id, score in vector_results:
                 candidates.add(doc_id)
+                # 获取实际内容
+                content = self.get_content(doc_id)
                 results.append(RetrievalResult(
                     id=doc_id,
-                    content="",  # 稍后填充
+                    content=content,
                     score=score,
                     source_layer=RetrievalLayer.L5_VECTOR_COARSE
                 ))
             
             self._record_stats(RetrievalLayer.L5_VECTOR_COARSE, input_count, len(results), start)
+        
+        # 关键：将 L2-L4 收集的候选 ID 也转换为结果
+        # 这确保了轻量模式（无向量索引）也能返回结果
+        seen_ids = {r.id for r in results}
+        for doc_id in candidates:
+            if doc_id not in seen_ids:
+                content = self.get_content(doc_id)
+                if content:  # 只添加有内容的结果
+                    results.append(RetrievalResult(
+                        id=doc_id,
+                        content=content,
+                        score=0.5,  # 关键词/实体匹配的基础分数
+                        source_layer=RetrievalLayer.L4_NGRAM_INDEX
+                    ))
+                    seen_ids.add(doc_id)
         
         # L6: 向量精排
         if self.config['l6_enabled'] and vector_enabled and results:
@@ -221,6 +260,30 @@ class EightLayerRetriever:
             results = results[:self.config['l8_top_k']]
             
             self._record_stats(RetrievalLayer.L8_LLM_FILTER, input_count, len(results), start)
+        
+        # 终极兜底：如果所有层都没找到结果，使用 N-gram 原文搜索
+        # 这确保了"100%不遗忘"——只要原文中包含查询内容就能找到
+        if not results and self.ngram_index:
+            start = time.time()
+            # 调用 raw_search 直接搜索原文
+            if hasattr(self.ngram_index, 'raw_search'):
+                fallback_ids = self.ngram_index.raw_search(query, max_results=top_k)
+            else:
+                fallback_ids = self.ngram_index.search(query)
+            
+            for doc_id in fallback_ids[:top_k]:
+                content = self.get_content(doc_id)
+                if content:
+                    results.append(RetrievalResult(
+                        id=doc_id,
+                        content=content,
+                        score=0.3,  # 兜底搜索的基础分数
+                        source_layer=RetrievalLayer.L4_NGRAM_INDEX,
+                        metadata={'fallback': True}  # 标记为兜底结果
+                    ))
+            
+            if results:
+                self._record_stats(RetrievalLayer.L4_NGRAM_INDEX, 0, len(results), start)
         
         return results[:top_k]
     

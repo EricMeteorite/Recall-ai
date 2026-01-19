@@ -19,7 +19,9 @@
         apiUrl: 'http://127.0.0.1:18888',
         autoInject: true,
         maxMemories: 10,
-        injectPosition: 'before_system',
+        maxContextTokens: 2000,     // 记忆注入的最大token数，根据你的AI模型调整
+        injectPosition: 'in_chat',  // 'in_chat' 或 'before_system'
+        injectDepth: 1,             // 注入深度，0=最新位置，1=倒数第一条后
         showPanel: true,
         language: 'zh-CN',
         filterThinking: true,  // 过滤AI思考过程
@@ -188,6 +190,7 @@ function createUI() {
                 <!-- 标签页导航 -->
                 <div class="recall-tabs">
                     <button class="recall-tab active" data-tab="memories">📚 记忆</button>
+                    <button class="recall-tab" data-tab="contexts">📌 条件</button>
                     <button class="recall-tab" data-tab="foreshadowing">🎭 伏笔</button>
                     <button class="recall-tab" data-tab="settings">⚙️ 设置</button>
                 </div>
@@ -231,6 +234,49 @@ function createUI() {
                         <button id="recall-clear-all-btn" class="menu_button menu_button_icon recall-danger-btn">
                             <i class="fa-solid fa-trash"></i>
                             <span>清空当前角色记忆</span>
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- 持久条件标签页 -->
+                <div id="recall-tab-contexts" class="recall-tab-content">
+                    <div class="recall-stats-row">
+                        <span>📌 持久条件: <strong id="recall-context-count">0</strong></span>
+                        <div class="recall-stats-actions">
+                            <button id="recall-refresh-contexts-btn" class="recall-icon-btn" title="刷新">🔄</button>
+                            <button id="recall-consolidate-contexts-btn" class="recall-icon-btn" title="压缩合并">📦</button>
+                        </div>
+                    </div>
+                    
+                    <div class="recall-setting-hint" style="margin-bottom:10px;">
+                        持久条件是已确立的背景设定，会自动注入到每次对话中。
+                        如：用户身份、技术环境、角色设定等。
+                    </div>
+                    
+                    <div id="recall-context-list" class="recall-context-list">
+                        <div class="recall-empty-state">
+                            <div class="recall-empty-icon">📌</div>
+                            <p>暂无持久条件</p>
+                            <small>对话中自动提取或手动添加</small>
+                        </div>
+                    </div>
+                    
+                    <div class="recall-add-bar">
+                        <select id="recall-context-type-select" class="text_pole" style="width:auto;min-width:100px;">
+                            <option value="user_identity">👤 身份</option>
+                            <option value="user_goal">🎯 目标</option>
+                            <option value="user_preference">❤️ 偏好</option>
+                            <option value="environment">💻 环境</option>
+                            <option value="project">📁 项目</option>
+                            <option value="character_trait">🎭 角色</option>
+                            <option value="world_setting">🌍 世界观</option>
+                            <option value="relationship">🤝 关系</option>
+                            <option value="constraint">⚠️ 约束</option>
+                            <option value="custom">📝 自定义</option>
+                        </select>
+                        <input type="text" id="recall-context-input" placeholder="添加持久条件..." class="text_pole" style="flex:1;">
+                        <button id="recall-add-context-btn" class="menu_button menu_button_icon" title="添加">
+                            <i class="fa-solid fa-plus"></i>
                         </button>
                     </div>
                 </div>
@@ -311,6 +357,29 @@ function createUI() {
                             <label class="recall-setting-title">最大注入记忆数</label>
                             <input type="number" id="recall-max-memories" value="${pluginSettings.maxMemories}" 
                                    min="1" max="50" class="text_pole">
+                        </div>
+                        
+                        <div class="recall-setting-group">
+                            <label class="recall-setting-title">记忆上下文Token预算</label>
+                            <input type="number" id="recall-max-context-tokens" value="${pluginSettings.maxContextTokens || 2000}" 
+                                   min="500" max="32000" step="500" class="text_pole">
+                            <div class="recall-setting-hint">根据你的AI模型调整。4K模型建议1500，8K建议3000，128K可设更高</div>
+                        </div>
+                        
+                        <div class="recall-setting-group">
+                            <label class="recall-setting-title">注入位置</label>
+                            <select id="recall-inject-position" class="text_pole">
+                                <option value="in_chat" ${pluginSettings.injectPosition === 'in_chat' ? 'selected' : ''}>在聊天历史中 (推荐)</option>
+                                <option value="before_system" ${pluginSettings.injectPosition === 'before_system' ? 'selected' : ''}>在系统提示区域</option>
+                            </select>
+                            <div class="recall-setting-hint">推荐"在聊天历史中"，记忆会更自然地融入对话</div>
+                        </div>
+                        
+                        <div class="recall-setting-group">
+                            <label class="recall-setting-title">注入深度</label>
+                            <input type="number" id="recall-inject-depth" value="${pluginSettings.injectDepth || 1}" 
+                                   min="0" max="10" class="text_pole">
+                            <div class="recall-setting-hint">0=最新位置，1=倒数第一条消息后，数字越大位置越靠前</div>
                         </div>
                         
                         <div class="recall-setting-actions">
@@ -522,6 +591,13 @@ function createUI() {
                 content.classList.remove('active');
             });
             document.getElementById(`recall-tab-${tabName}`)?.classList.add('active');
+            
+            // 根据标签页加载对应数据
+            if (tabName === 'contexts' && isConnected) {
+                loadPersistentContexts();
+            } else if (tabName === 'foreshadowing' && isConnected) {
+                loadForeshadowings();
+            }
         });
     });
     
@@ -537,6 +613,14 @@ function createUI() {
     document.getElementById('recall-clear-all-btn')?.addEventListener('click', safeExecute(onClearAllMemories, '清空记忆失败'));
     document.getElementById('recall-refresh-btn')?.addEventListener('click', safeExecute(loadMemories, '刷新失败'));
     document.getElementById('recall-load-more-btn')?.addEventListener('click', safeExecute(onLoadMoreMemories, '加载更多失败'));
+    
+    // 持久条件相关事件绑定
+    document.getElementById('recall-add-context-btn')?.addEventListener('click', safeExecute(onAddPersistentContext, '添加持久条件失败'));
+    document.getElementById('recall-refresh-contexts-btn')?.addEventListener('click', safeExecute(loadPersistentContexts, '刷新持久条件失败'));
+    document.getElementById('recall-consolidate-contexts-btn')?.addEventListener('click', safeExecute(consolidatePersistentContexts, '压缩持久条件失败'));
+    document.getElementById('recall-context-input')?.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') safeExecute(onAddPersistentContext, '添加持久条件失败')();
+    });
     
     // API 配置相关事件绑定
     document.getElementById('recall-test-embedding')?.addEventListener('click', safeExecute(onTestEmbedding, '测试 Embedding 失败'));
@@ -1239,6 +1323,7 @@ function initializeCurrentCharacter() {
         if (isConnected) {
             loadMemories();
             loadForeshadowings();
+            loadPersistentContexts();
         }
     } catch (e) {
         console.warn('[Recall] 初始化角色失败:', e);
@@ -1306,6 +1391,9 @@ function onSaveSettings() {
     pluginSettings.chunkSize = parseInt(document.getElementById('recall-chunk-size')?.value) || 2000;
     pluginSettings.previewLength = parseInt(document.getElementById('recall-preview-length')?.value) || 200;
     pluginSettings.maxMemories = parseInt(document.getElementById('recall-max-memories')?.value) || 10;
+    pluginSettings.maxContextTokens = parseInt(document.getElementById('recall-max-context-tokens')?.value) || 2000;
+    pluginSettings.injectPosition = document.getElementById('recall-inject-position')?.value || 'in_chat';
+    pluginSettings.injectDepth = parseInt(document.getElementById('recall-inject-depth')?.value) || 1;
     
     saveSettings();
     checkConnection();
@@ -1400,6 +1488,19 @@ async function onPlantForeshadowing() {
     } catch (e) {
         console.error('[Recall] 埋下伏笔失败:', e);
     }
+}
+
+/**
+ * 添加持久条件
+ */
+async function onAddPersistentContext() {
+    const content = document.getElementById('recall-context-input')?.value;
+    const contextType = document.getElementById('recall-context-type-select')?.value || 'custom';
+    
+    if (!content || !isConnected) return;
+    
+    await addPersistentContext(content, contextType);
+    document.getElementById('recall-context-input').value = '';
 }
 
 /**
@@ -1633,10 +1734,12 @@ function onChatChanged() {
     
     loadMemories();
     loadForeshadowings();
+    loadPersistentContexts();
 }
 
 /**
  * 生成前 - 注入记忆上下文
+ * 使用 SillyTavern 的 setExtensionPrompt API 将记忆注入到 AI 提示词中
  */
 async function onBeforeGeneration() {
     if (!pluginSettings.enabled || !pluginSettings.autoInject || !isConnected) {
@@ -1653,13 +1756,60 @@ async function onBeforeGeneration() {
         const recentMessages = chat.slice(-3).map(m => m.mes).join(' ');
         const memoryContext = await getMemoryContext(recentMessages);
         
-        if (memoryContext) {
-            // 通过扩展设置注入记忆
-            console.log('[Recall] 已准备记忆上下文，长度:', memoryContext.length);
+        if (memoryContext && memoryContext.trim().length > 0) {
+            // 使用 SillyTavern 的 setExtensionPrompt API 注入记忆
+            // position: 0 = IN_PROMPT (在系统提示后), 1 = IN_CHAT (在聊天历史中)
+            // depth: 注入深度，0 表示最近的消息位置
+            // scan: 是否参与世界信息扫描
+            // role: 0 = SYSTEM, 1 = USER, 2 = ASSISTANT
+            
+            const position = getInjectionPosition();
+            const depth = getInjectionDepth();
+            
+            context.setExtensionPrompt(
+                'recall_memory',      // 唯一标识符
+                memoryContext,         // 要注入的文本
+                position,              // 注入位置
+                depth,                 // 注入深度
+                false,                 // 不参与 WI 扫描
+                0                      // SYSTEM 角色
+            );
+            
+            console.log('[Recall] 记忆已注入到提示词，长度:', memoryContext.length, '位置:', position, '深度:', depth);
+        } else {
+            // 如果没有记忆，清除之前的注入
+            context.setExtensionPrompt('recall_memory', '', 0, 0, false, 0);
         }
     } catch (e) {
         console.warn('[Recall] 注入记忆上下文失败:', e);
     }
+}
+
+/**
+ * 根据设置获取注入位置
+ * @returns {number} 注入位置常量
+ */
+function getInjectionPosition() {
+    switch (pluginSettings.injectPosition) {
+        case 'in_chat':
+            return 1;  // IN_CHAT - 在聊天历史中
+        case 'before_system':
+        case 'after_system':
+        default:
+            return 0;  // IN_PROMPT - 在系统提示区域
+    }
+}
+
+/**
+ * 根据设置获取注入深度
+ * @returns {number} 注入深度
+ */
+function getInjectionDepth() {
+    // depth 表示从最新消息算起的位置
+    // 0 = 最新位置（在最后一条消息之后）
+    // 1 = 倒数第二条消息后
+    // 建议使用 1-4 的深度来确保记忆在相关上下文附近
+    return pluginSettings.injectDepth || 1;
 }
 
 /**
@@ -2005,6 +2155,159 @@ async function loadForeshadowings() {
 }
 
 /**
+ * 加载持久条件列表
+ */
+async function loadPersistentContexts() {
+    if (!isConnected) return;
+    
+    try {
+        const userId = encodeURIComponent(currentCharacterId || 'default');
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/persistent-contexts?user_id=${userId}`);
+        const data = await response.json();
+        displayPersistentContexts(data);
+        
+        // 更新计数
+        const countEl = document.getElementById('recall-context-count');
+        if (countEl) countEl.textContent = data.length;
+    } catch (e) {
+        console.error('[Recall] 加载持久条件失败:', e);
+    }
+}
+
+/**
+ * 显示持久条件列表
+ */
+function displayPersistentContexts(contexts) {
+    const listEl = document.getElementById('recall-context-list');
+    if (!listEl) return;
+    
+    if (!contexts || contexts.length === 0) {
+        listEl.innerHTML = `
+            <div class="recall-empty-state">
+                <div class="recall-empty-icon">📌</div>
+                <p>暂无持久条件</p>
+                <small>对话中自动提取或手动添加</small>
+            </div>
+        `;
+        return;
+    }
+    
+    const typeNames = {
+        'user_identity': '👤 身份',
+        'user_goal': '🎯 目标',
+        'user_preference': '❤️ 偏好',
+        'environment': '💻 环境',
+        'project': '📁 项目',
+        'character_trait': '🎭 角色',
+        'world_setting': '🌍 世界观',
+        'relationship': '🤝 关系',
+        'assumption': '💭 假设',
+        'constraint': '⚠️ 约束',
+        'custom': '📝 自定义'
+    };
+    
+    listEl.innerHTML = contexts.map(ctx => `
+        <div class="recall-context-item" data-id="${ctx.id}">
+            <div class="recall-context-header">
+                <span class="recall-context-type-badge ${ctx.context_type}">${typeNames[ctx.context_type] || ctx.context_type}</span>
+                <span class="recall-context-confidence">置信度: ${(ctx.confidence * 100).toFixed(0)}%</span>
+            </div>
+            <p class="recall-context-content">${escapeHtml(ctx.content)}</p>
+            <div class="recall-context-footer">
+                <span>使用 ${ctx.use_count} 次</span>
+                <button class="recall-delete-btn recall-remove-context" data-id="${ctx.id}">✕ 移除</button>
+            </div>
+        </div>
+    `).join('');
+    
+    // 绑定移除按钮事件
+    listEl.querySelectorAll('.recall-remove-context').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            const button = e.currentTarget;
+            const id = button.dataset.id;
+            if (id && confirm('确定要移除这个持久条件吗？')) {
+                await removePersistentContext(id);
+            }
+        });
+    });
+}
+
+/**
+ * 添加持久条件
+ */
+async function addPersistentContext(content, contextType) {
+    if (!isConnected || !content.trim()) return;
+    
+    try {
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/persistent-contexts`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                content: content.trim(),
+                context_type: contextType,
+                user_id: currentCharacterId || 'default'
+            })
+        });
+        
+        if (response.ok) {
+            loadPersistentContexts();
+            console.log(`[Recall] 持久条件已添加 (角色: ${currentCharacterId})`);
+        } else {
+            console.error('[Recall] 添加持久条件失败');
+        }
+    } catch (e) {
+        console.error('[Recall] 添加持久条件失败:', e);
+    }
+}
+
+/**
+ * 移除持久条件
+ */
+async function removePersistentContext(contextId) {
+    try {
+        const userId = encodeURIComponent(currentCharacterId || 'default');
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/persistent-contexts/${contextId}?user_id=${userId}`, {
+            method: 'DELETE'
+        });
+        
+        if (response.ok) {
+            loadPersistentContexts();
+            console.log(`[Recall] 持久条件已移除 (角色: ${currentCharacterId})`);
+        } else {
+            console.error('[Recall] 移除持久条件失败');
+        }
+    } catch (e) {
+        console.error('[Recall] 移除持久条件失败:', e);
+    }
+}
+
+/**
+ * 压缩合并持久条件
+ */
+async function consolidatePersistentContexts() {
+    if (!isConnected) return;
+    
+    try {
+        const userId = encodeURIComponent(currentCharacterId || 'default');
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/persistent-contexts/consolidate?user_id=${userId}&force=true`, {
+            method: 'POST'
+        });
+        
+        if (response.ok) {
+            const result = await response.json();
+            loadPersistentContexts();
+            if (result.reduced > 0) {
+                console.log(`[Recall] 持久条件已压缩，减少了 ${result.reduced} 个`);
+            } else {
+                console.log('[Recall] 无需压缩');
+            }
+        }
+    } catch (e) {
+        console.error('[Recall] 压缩持久条件失败:', e);
+    }
+}
+
+/**
  * 显示伏笔列表
  */
 function displayForeshadowings(foreshadowings) {
@@ -2086,7 +2389,7 @@ async function getMemoryContext(query) {
             body: JSON.stringify({
                 query: query,
                 user_id: currentCharacterId || 'default',
-                max_tokens: 1000,
+                max_tokens: pluginSettings.maxContextTokens || 2000,
                 include_recent: 3
             })
         });
@@ -2114,6 +2417,7 @@ window.RecallPlugin = {
     getMemoryContext: safeExecute(getMemoryContext, '获取记忆上下文失败'),
     loadMemories: safeExecute(loadMemories, '加载记忆失败'),
     loadForeshadowings: safeExecute(loadForeshadowings, '加载伏笔失败'),
+    loadPersistentContexts: safeExecute(loadPersistentContexts, '加载持久条件失败'),
     isConnected: () => isConnected,
     isInitialized: () => isInitialized,
     getSettings: () => ({ ...pluginSettings })

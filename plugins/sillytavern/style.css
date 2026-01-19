@@ -181,7 +181,8 @@
 
 /* 记忆项 */
 .recall-memory-item,
-.recall-foreshadowing-item {
+.recall-foreshadowing-item,
+.recall-context-item {
     position: relative;
     background: var(--SmartThemeBlurTintColor, rgba(0,0,0,0.2));
     border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.1));
@@ -192,7 +193,8 @@
 }
 
 .recall-memory-item:hover,
-.recall-foreshadowing-item:hover {
+.recall-foreshadowing-item:hover,
+.recall-context-item:hover {
     border-color: var(--SmartThemeQuoteColor, rgba(100,100,200,0.5));
     background: var(--SmartThemeBlurTintColor, rgba(0,0,0,0.3));
 }
@@ -288,7 +290,8 @@
 }
 
 .recall-memory-item:hover .recall-delete-btn,
-.recall-foreshadowing-item:hover .recall-delete-btn {
+.recall-foreshadowing-item:hover .recall-delete-btn,
+.recall-context-item:hover .recall-delete-btn {
     opacity: 1;
 }
 
@@ -636,3 +639,65 @@
     user-select: none;
 }
 
+/* ========== 持久条件样式 ========== */
+.recall-context-list {
+    max-height: 300px;
+    overflow-y: auto;
+    margin-bottom: 10px;
+}
+
+.recall-context-item {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.recall-context-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.recall-context-type-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    background: var(--SmartThemeQuoteColor, rgba(100,100,200,0.3));
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: 500;
+}
+
+.recall-context-type-badge.user_identity { background: rgba(76, 175, 80, 0.3); }
+.recall-context-type-badge.user_goal { background: rgba(255, 152, 0, 0.3); }
+.recall-context-type-badge.user_preference { background: rgba(233, 30, 99, 0.3); }
+.recall-context-type-badge.environment { background: rgba(33, 150, 243, 0.3); }
+.recall-context-type-badge.project { background: rgba(121, 85, 72, 0.3); }
+.recall-context-type-badge.character_trait { background: rgba(156, 39, 176, 0.3); }
+.recall-context-type-badge.world_setting { background: rgba(0, 188, 212, 0.3); }
+.recall-context-type-badge.relationship { background: rgba(255, 87, 34, 0.3); }
+.recall-context-type-badge.assumption { background: rgba(63, 81, 181, 0.3); }
+.recall-context-type-badge.constraint { background: rgba(244, 67, 54, 0.3); }
+.recall-context-type-badge.custom { background: rgba(158, 158, 158, 0.3); }
+
+.recall-context-confidence {
+    font-size: 10px;
+    color: var(--SmartThemeBodyColor, #999);
+    opacity: 0.7;
+}
+
+.recall-context-content {
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--SmartThemeBodyColor, #ddd);
+}
+
+.recall-context-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 10px;
+    color: var(--SmartThemeBodyColor, #888);
+    opacity: 0.7;
+}

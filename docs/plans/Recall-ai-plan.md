@@ -26,7 +26,7 @@
 > - ✅ 完整的本地存储层（4层架构）
 > - ✅ 8层检索系统（100%不遗忘）
 > - ✅ 伏笔追踪系统（手动管理）
-> - 🔧 伏笔自动检测（LLM 辅助，待实现）
+> - ✅ 伏笔自动检测（LLM 辅助分析）
 > - ✅ 知识图谱（轻量本地版，无需Neo4j）
 > - ✅ 记忆智能总结（对标 mem0）
 > - ✅ 多用户/多角色支持
@@ -5869,10 +5869,10 @@ EnvironmentIsolation.setup()
 | 需求 | 实现方案 | 状态 | 位置 |
 |------|---------|------|------|
 | **上万轮 RP** | 分卷存储 + O(1)定位 + 预加载 + 并发锁 | ✅ | 第二节 VolumeManager |
-| **伏笔不遗忘** | 手动管理 + 主动提醒（LLM 自动检测待实现） | 🔧 | 第四节 ForeshadowingTracker |
+| **伏笔不遗忘** | 手动管理 + LLM 自动检测 + 主动提醒 | ✅ | 第四节 ForeshadowingTracker + ForeshadowingAnalyzer |
 | **几百万字规模** | 分卷架构 + 懒加载 + 增量索引 | ✅ | 第二节分卷设计 |
 | **上千文件代码** | 多语言解析器 + 符号表 + 依赖图 | ❌ | 第五节 CodeIndexer（可选，v3.1） |
-| **规范100%遵守** | L0注入 + 规则编译 + 属性检查 | 🔧 | L0注入✅ 规则编译简化（RP场景足够） |
+| **规范100%遵守** | L0注入 + 规则编译 + 属性检查 | 🔧 | L0注入✅ 一致性检查✅ 规则编译器待v3.1 |
 | **零配置即插即用** | pip install + API key 即可使用 | ✅ | 第七节初始化 |
 | **100%不遗忘** | Archive原文保存 + 8层检索 + N-gram兜底 | ✅ | 第三节8层检索 |
 | **面向大众友好** | ST插件市场安装 + 3步完成 + 全中文 | ✅ | 第十三节ST插件 |
@@ -5899,6 +5899,72 @@ EnvironmentIsolation.setup()
 | **跨平台支持** | Windows/Mac/Linux 统一行为 | ✅ | 使用 os.path.abspath 处理相对路径 |
 | **配置文件隔离** | 配置存储在 `./recall_data/config.json` | ✅ | RecallInit 类 |
 
+### 🆕 计划外新增功能（3项）⭐
+
+> 📌 以下功能**超出原计划需求**，是开发过程中新增的增强功能。
+
+| 需求 | 实现方案 | 状态 | 位置 |
+|------|---------|------|------|
+| **⭐ 持久条件系统** | ContextTracker + 11种条件类型 + 自动提取/压缩 | ✅ | `recall/processor/context_tracker.py` |
+| **⭐ 配置热更新** | reload API + 连接测试 + 自动维度检测 | ✅ | `plugins/sillytavern-extension/server.py` |
+| **⭐ 伏笔分析器增强** | LLM自动检测 + get_context_for_prompt主动提醒 | ✅ | `recall/processor/foreshadowing_analyzer.py` |
+
+---
+
+#### ⭐ 1. 持久条件系统 (ContextTracker) - 详细说明
+
+**实现位置**：`recall/processor/context_tracker.py`
+
+| 功能 | 说明 |
+|------|------|
+| **11种条件类型** | 用户身份、用户目标、环境设定、项目上下文、时间约束、角色特征、世界观设定、关系网络、情绪状态、技能能力、物品道具 |
+| **自动提取** | 从对话中自动识别应该持久化的条件（LLM辅助） |
+| **智能压缩** | 当条件过多时自动合并相似条件，避免上下文膨胀 |
+| **置信度衰减** | 长期未使用的条件置信度自动下降 |
+| **增长控制** | 每种类型最多5条，总共最多30条，防止无限增长 |
+
+**API 端点**：
+- `POST /v1/context` - 添加持久条件
+- `GET /v1/context` - 获取活跃条件
+- `DELETE /v1/context/{id}` - 删除条件
+- `POST /v1/context/extract` - 从文本自动提取
+- `POST /v1/context/consolidate` - 压缩冗余条件
+
+#### ⭐ 2. 配置热更新系统
+
+**实现位置**：`plugins/sillytavern-extension/server.py`
+
+| 功能 | 说明 |
+|------|------|
+| **无需重启更新配置** | 修改 `api_keys.env` 后调用 reload 即可生效 |
+| **API 连接测试** | 一键测试 Embedding/LLM API 是否可用 |
+| **自动维度检测** | 自动检测 Embedding 模型的向量维度 |
+| **模型列表获取** | 获取 API 可用的模型列表 |
+
+**API 端点**：
+- `POST /v1/config/reload` - 重新加载配置
+- `GET /v1/config/test` - 测试 Embedding 连接
+- `GET /v1/config/test/llm` - 测试 LLM 连接
+- `GET /v1/config/models` - 获取可用模型列表
+
+#### ⭐ 3. 伏笔分析器增强
+
+**实现位置**：`recall/processor/foreshadowing_analyzer.py`
+
+| 功能 | 说明 |
+|------|------|
+| **LLM 自动检测** | 使用 LLM 自动识别对话中的伏笔 |
+| **手动/自动模式切换** | 支持在运行时切换分析模式 |
+| **可配置触发间隔** | 每 N 轮对话触发一次自动分析 |
+| **主动提醒** | 在 build_context 中注入活跃伏笔，提醒 AI 推进 |
+| **get_context_for_prompt** | 生成用于注入 prompt 的伏笔上下文 |
+
+**API 端点**：
+- `GET /v1/foreshadowing/analyzer/config` - 获取分析器配置
+- `PUT /v1/foreshadowing/analyzer/config` - 更新分析器配置
+- `POST /v1/foreshadowing/analyze/turn` - 分析单轮对话
+- `POST /v1/foreshadowing/analyze/trigger` - 手动触发分析
+
 ---
 
 ## 十二点六、与竞品对比（Recall 的独特优势）
@@ -5914,6 +5980,7 @@ EnvironmentIsolation.setup()
 | **伏笔追踪** | ❌ 无 | ✅ 手动管理+LLM辅助检测 | **Recall** |
 | **规范遵守检查** | ❌ 无 | ✅ L0注入+一致性校验 | **Recall** |
 | **RP/小说场景优化** | ❌ 通用 | ✅ 专门优化 | **Recall** |
+| **持久条件系统** | ❌ 无 | ✅ 11种条件类型+自动提取 | **Recall** |
 | 云端托管 | ✅ 可选 | ❌ 纯本地 | mem0 (便捷) |
 | 部署复杂度 | 需要配置 | pip install | **Recall** |
 | 中文支持 | 一般 | ✅ jieba+spaCy | **Recall** |
