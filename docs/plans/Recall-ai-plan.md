@@ -5905,7 +5905,7 @@ EnvironmentIsolation.setup()
 
 | 需求 | 实现方案 | 状态 | 位置 |
 |------|---------|------|------|
-| **⭐ 持久条件系统** | ContextTracker + 11种条件类型 + 自动提取/压缩 | ✅ | `recall/processor/context_tracker.py` |
+| **⭐ 持久条件系统** | ContextTracker + 15种条件类型 + 自动提取/压缩 | ✅ | `recall/processor/context_tracker.py` |
 | **⭐ 配置热更新** | reload API + 连接测试 + 自动维度检测 | ✅ | `plugins/sillytavern-extension/server.py` |
 | **⭐ 伏笔分析器增强** | LLM自动检测 + get_context_for_prompt主动提醒 | ✅ | `recall/processor/foreshadowing_analyzer.py` |
 
@@ -5917,18 +5917,20 @@ EnvironmentIsolation.setup()
 
 | 功能 | 说明 |
 |------|------|
-| **11种条件类型** | 用户身份、用户目标、环境设定、项目上下文、时间约束、角色特征、世界观设定、关系网络、情绪状态、技能能力、物品道具 |
+| **15种条件类型** | 用户身份、用户目标、用户偏好、技术环境、项目信息、时间约束、角色特征、世界观设定、关系设定、情绪状态、技能能力、物品道具、假设前提、约束条件、自定义 |
 | **自动提取** | 从对话中自动识别应该持久化的条件（LLM辅助） |
 | **智能压缩** | 当条件过多时自动合并相似条件，避免上下文膨胀 |
 | **置信度衰减** | 长期未使用的条件置信度自动下降 |
 | **增长控制** | 每种类型最多5条，总共最多30条，防止无限增长 |
 
 **API 端点**：
-- `POST /v1/context` - 添加持久条件
-- `GET /v1/context` - 获取活跃条件
-- `DELETE /v1/context/{id}` - 删除条件
-- `POST /v1/context/extract` - 从文本自动提取
-- `POST /v1/context/consolidate` - 压缩冗余条件
+- `POST /v1/persistent-contexts` - 添加持久条件
+- `GET /v1/persistent-contexts` - 获取活跃条件
+- `DELETE /v1/persistent-contexts/{context_id}` - 删除条件
+- `POST /v1/persistent-contexts/extract` - 从文本自动提取
+- `POST /v1/persistent-contexts/consolidate` - 压缩冗余条件
+- `GET /v1/persistent-contexts/stats` - 获取统计信息
+- `POST /v1/persistent-contexts/{context_id}/used` - 标记已使用
 
 #### ⭐ 2. 配置热更新系统
 
@@ -5980,7 +5982,7 @@ EnvironmentIsolation.setup()
 | **伏笔追踪** | ❌ 无 | ✅ 手动管理+LLM辅助检测 | **Recall** |
 | **规范遵守检查** | ❌ 无 | ✅ L0注入+一致性校验 | **Recall** |
 | **RP/小说场景优化** | ❌ 通用 | ✅ 专门优化 | **Recall** |
-| **持久条件系统** | ❌ 无 | ✅ 11种条件类型+自动提取 | **Recall** |
+| **持久条件系统** | ❌ 无 | ✅ 15种条件类型+自动提取 | **Recall** |
 | 云端托管 | ✅ 可选 | ❌ 纯本地 | mem0 (便捷) |
 | 部署复杂度 | 需要配置 | pip install | **Recall** |
 | 中文支持 | 一般 | ✅ jieba+spaCy | **Recall** |

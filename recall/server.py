@@ -34,6 +34,10 @@ SUPPORTED_CONFIG_KEYS = {
     'FORESHADOWING_TRIGGER_INTERVAL',
     'FORESHADOWING_AUTO_PLANT',
     'FORESHADOWING_AUTO_RESOLVE',
+    # 智能去重配置（持久条件和伏笔系统）
+    'DEDUP_EMBEDDING_ENABLED',
+    'DEDUP_HIGH_THRESHOLD',
+    'DEDUP_LOW_THRESHOLD',
 }
 
 
@@ -96,6 +100,23 @@ FORESHADOWING_AUTO_PLANT=true
 # 自动解决伏笔 (true/false) - 建议保持 false，让用户手动确认
 # Automatically resolve detected foreshadowing (recommend false)
 FORESHADOWING_AUTO_RESOLVE=false
+
+# ----------------------------------------------------------------------------
+# 智能去重配置（持久条件和伏笔系统）
+# Smart Deduplication Configuration (Persistent Context & Foreshadowing)
+# ----------------------------------------------------------------------------
+# 是否启用 Embedding 语义去重 (true/false)
+# 启用后使用向量相似度判断重复，更智能；禁用则使用简单词重叠
+# Enable Embedding-based semantic deduplication
+DEDUP_EMBEDDING_ENABLED=true
+
+# 高相似度阈值：超过此值直接合并（0.0-1.0，推荐0.85）
+# High similarity threshold: auto-merge when exceeded (recommend 0.85)
+DEDUP_HIGH_THRESHOLD=0.85
+
+# 低相似度阈值：低于此值视为不相似（0.0-1.0，推荐0.70）
+# Low similarity threshold: considered different when below (recommend 0.70)
+DEDUP_LOW_THRESHOLD=0.70
 '''
 
 
@@ -228,6 +249,7 @@ class AddMemoryResponse(BaseModel):
     success: bool
     entities: List[str] = []
     message: str = ""
+    consistency_warnings: List[str] = []  # 一致性检查警告
 
 
 class SearchRequest(BaseModel):
@@ -255,6 +277,31 @@ class ContextRequest(BaseModel):
     include_recent: int = Field(default=5, description="包含的最近对话数")
     include_core_facts: bool = Field(default=True, description="是否包含核心事实摘要")
     auto_extract_context: bool = Field(default=True, description="是否自动从查询提取持久条件")
+
+
+# ==================== L0 核心设定模型 ====================
+
+class CoreSettingsRequest(BaseModel):
+    """L0核心设定请求"""
+    character_card: Optional[str] = Field(default=None, description="角色卡（≤2000字）")
+    world_setting: Optional[str] = Field(default=None, description="世界观（≤1000字）")
+    writing_style: Optional[str] = Field(default=None, description="写作风格要求")
+    code_standards: Optional[str] = Field(default=None, description="代码规范")
+    project_structure: Optional[str] = Field(default=None, description="项目结构说明")
+    naming_conventions: Optional[str] = Field(default=None, description="命名规范")
+    absolute_rules: Optional[List[str]] = Field(default=None, description="绝对不能违反的规则")
+
+
+class CoreSettingsResponse(BaseModel):
+    """L0核心设定响应"""
+    character_card: str = ""
+    world_setting: str = ""
+    writing_style: str = ""
+    code_standards: str = ""
+    project_structure: str = ""
+    naming_conventions: str = ""
+    user_preferences: Dict[str, Any] = {}
+    absolute_rules: List[str] = []
 
 
 class ForeshadowingRequest(BaseModel):
@@ -509,7 +556,8 @@ async def add_memory(request: AddMemoryRequest):
         id=result.id,
         success=result.success,
         entities=result.entities,
-        message=result.message
+        message=result.message,
+        consistency_warnings=result.consistency_warnings
     )
 
 
@@ -658,6 +706,62 @@ async def update_memory(
         raise HTTPException(status_code=404, detail="记忆不存在或更新失败")
     
     return {"success": True, "message": "更新成功"}
+
+
+# ==================== L0 核心设定 API ====================
+
+@app.get("/v1/core-settings", response_model=CoreSettingsResponse, tags=["Core Settings"])
+async def get_core_settings():
+    """获取L0核心设定"""
+    engine = get_engine()
+    settings = engine.core_settings
+    return CoreSettingsResponse(
+        character_card=settings.character_card,
+        world_setting=settings.world_setting,
+        writing_style=settings.writing_style,
+        code_standards=settings.code_standards,
+        project_structure=settings.project_structure,
+        naming_conventions=settings.naming_conventions,
+        user_preferences=settings.user_preferences,
+        absolute_rules=settings.absolute_rules
+    )
+
+
+@app.put("/v1/core-settings", response_model=CoreSettingsResponse, tags=["Core Settings"])
+async def update_core_settings(request: CoreSettingsRequest):
+    """更新L0核心设定（部分更新）"""
+    engine = get_engine()
+    settings = engine.core_settings
+    
+    # 只更新提供的字段
+    if request.character_card is not None:
+        settings.character_card = request.character_card
+    if request.world_setting is not None:
+        settings.world_setting = request.world_setting
+    if request.writing_style is not None:
+        settings.writing_style = request.writing_style
+    if request.code_standards is not None:
+        settings.code_standards = request.code_standards
+    if request.project_structure is not None:
+        settings.project_structure = request.project_structure
+    if request.naming_conventions is not None:
+        settings.naming_conventions = request.naming_conventions
+    if request.absolute_rules is not None:
+        settings.absolute_rules = request.absolute_rules
+    
+    # 保存更新
+    settings.save()
+    
+    return CoreSettingsResponse(
+        character_card=settings.character_card,
+        world_setting=settings.world_setting,
+        writing_style=settings.writing_style,
+        code_standards=settings.code_standards,
+        project_structure=settings.project_structure,
+        naming_conventions=settings.naming_conventions,
+        user_preferences=settings.user_preferences,
+        absolute_rules=settings.absolute_rules
+    )
 
 
 # ==================== 上下文构建 API ====================

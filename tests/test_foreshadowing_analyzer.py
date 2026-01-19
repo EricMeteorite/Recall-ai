@@ -425,9 +425,9 @@ class TestBackwardCompatibility:
     
     def test_analyzer_with_existing_foreshadowings(self, tracker):
         """分析器可以与已有伏笔一起工作"""
-        # 先添加一些伏笔
-        tracker.plant("已有伏笔1", "user1", importance=0.8)
-        tracker.plant("已有伏笔2", "user1", importance=0.5)
+        # 先添加一些伏笔（使用明显不同的内容以避免语义去重）
+        tracker.plant("神秘信件藏在书架后面", "user1", importance=0.8)
+        tracker.plant("窗外的黑影是谁派来的", "user1", importance=0.5)
         
         # 创建分析器
         analyzer = ForeshadowingAnalyzer(

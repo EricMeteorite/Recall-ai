@@ -139,9 +139,10 @@ class EightLayerRetriever:
         if self.config['l1_enabled'] and self.bloom_filter and keywords:
             start = time.time()
             # 布隆过滤器用于快速排除不存在的关键词
+            # 使用 in 运算符检查（BloomFilter 实现了 __contains__）
             filtered_keywords = [
                 kw for kw in keywords 
-                if self.bloom_filter.might_contain(kw)
+                if kw in self.bloom_filter
             ]
             self._record_stats(RetrievalLayer.L1_BLOOM_FILTER, len(keywords), len(filtered_keywords), start)
         
@@ -225,13 +226,14 @@ class EightLayerRetriever:
                     ))
                     seen_ids.add(doc_id)
         
-        # L6: 向量精排
+        # L6: 向量精排（完整实现 - 重新计算精确向量距离）
         if self.config['l6_enabled'] and vector_enabled and results:
             start = time.time()
             input_count = len(results)
             
-            # 精确计算分数
-            results = sorted(results, key=lambda r: -r.score)[:self.config['l6_top_k']]
+            # 完整实现：重新计算查询与候选文档的精确余弦相似度
+            results = self._vector_fine_ranking(query, results)
+            results = results[:self.config['l6_top_k']]
             
             for r in results:
                 r.source_layer = RetrievalLayer.L6_VECTOR_FINE
@@ -286,6 +288,65 @@ class EightLayerRetriever:
                 self._record_stats(RetrievalLayer.L4_NGRAM_INDEX, 0, len(results), start)
         
         return results[:top_k]
+    
+    def _vector_fine_ranking(
+        self,
+        query: str,
+        results: List[RetrievalResult]
+    ) -> List[RetrievalResult]:
+        """L6 向量精排 - 重新计算精确的余弦相似度
+        
+        对 L5 粗筛的候选结果，使用查询向量和文档向量计算精确相似度。
+        这比 L5 的近似最近邻搜索更精确。
+        
+        Args:
+            query: 查询文本
+            results: L5 粗筛后的候选结果
+        
+        Returns:
+            按精确相似度重新排序的结果
+        """
+        if not self.vector_index or not results:
+            # 没有向量索引，回退到简单排序
+            return sorted(results, key=lambda r: -r.score)
+        
+        try:
+            import numpy as np
+            
+            # 1. 获取查询向量
+            query_embedding = self.vector_index.encode(query)
+            query_embedding = query_embedding / np.linalg.norm(query_embedding)  # 归一化
+            
+            # 2. 对每个候选文档计算精确相似度
+            for result in results:
+                content = result.content
+                if not content:
+                    continue
+                
+                try:
+                    # 计算文档向量
+                    doc_embedding = self.vector_index.encode(content)
+                    doc_embedding = doc_embedding / np.linalg.norm(doc_embedding)  # 归一化
+                    
+                    # 计算余弦相似度（归一化后的内积）
+                    cosine_sim = float(np.dot(query_embedding, doc_embedding))
+                    
+                    # 更新分数（保留原始分数的一部分作为参考）
+                    # 新分数 = 0.7 * 精确相似度 + 0.3 * 原始分数
+                    result.score = 0.7 * cosine_sim + 0.3 * result.score
+                    result.metadata['l6_cosine_sim'] = cosine_sim
+                    
+                except Exception as e:
+                    # 单个文档编码失败，保持原分数
+                    result.metadata['l6_error'] = str(e)
+            
+            # 3. 按新分数排序
+            return sorted(results, key=lambda r: -r.score)
+            
+        except Exception as e:
+            # 整体失败，回退到简单排序
+            print(f"[EightLayerRetriever] L6 精排失败，回退到简单排序: {e}")
+            return sorted(results, key=lambda r: -r.score)
     
     def _rerank(
         self,

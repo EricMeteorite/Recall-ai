@@ -10,10 +10,10 @@ from .version import __version__
 # 注意：RecallInit 和 LightweightConfig 保留用于未来扩展
 from .init import RecallInit  # noqa: F401 - 保留用于 CLI 等场景
 from .config import LightweightConfig  # noqa: F401 - 保留用于配置迁移
-from .models import Entity, Turn, Event, EntityType, EventType
+from .models import Entity, EntityType
 from .storage import (
-    VolumeManager, CoreSettings, ConsolidatedMemory, ConsolidatedEntity,
-    WorkingMemory, MultiTenantStorage, MemoryScope
+    VolumeManager, ConsolidatedMemory, ConsolidatedEntity,
+    MultiTenantStorage, MemoryScope, CoreSettings
 )
 from .index import EntityIndex, InvertedIndex, VectorIndex, OptimizedNgramIndex
 from .graph import KnowledgeGraph, RelationExtractor
@@ -24,10 +24,10 @@ from .processor import (
     ContextTracker, ContextType
 )
 from .processor.foreshadowing import Foreshadowing
-from .retrieval import EightLayerRetriever, ContextBuilder, ParallelRetriever
+from .retrieval import EightLayerRetriever, ContextBuilder
 from .utils import (
     LLMClient, WarmupManager, PerformanceMonitor,
-    EnvironmentManager, AutoMaintainer
+    EnvironmentManager
 )
 from .utils.perf_monitor import MetricType
 from .embedding import EmbeddingConfig
@@ -41,6 +41,7 @@ class AddResult:
     success: bool
     entities: List[str] = field(default_factory=list)
     message: str = ""
+    consistency_warnings: List[str] = field(default_factory=list)  # 一致性警告
 
 
 @dataclass
@@ -197,8 +198,16 @@ class RecallEngine:
         
         # 处理器层（需要先初始化，因为图谱层依赖）
         self.entity_extractor = EntityExtractor()
+        
+        # 获取Embedding后端（用于语义去重）
+        embedding_backend_for_trackers = None
+        if self._vector_index and self._vector_index.enabled:
+            embedding_backend_for_trackers = self._vector_index.embedding_backend
+        
+        # 伏笔追踪器（支持语义去重）
         self.foreshadowing_tracker = ForeshadowingTracker(
-            storage_dir=os.path.join(self.data_root, 'data', 'foreshadowings')
+            storage_dir=os.path.join(self.data_root, 'data', 'foreshadowings'),
+            embedding_backend=embedding_backend_for_trackers
         )
         
         # 伏笔分析器（可选功能，默认手动模式）
@@ -212,13 +221,20 @@ class RecallEngine:
         self.scenario_detector = ScenarioDetector()
         
         # 持久上下文追踪器（追踪持久性前提条件）
+        # 使用同一个embedding_backend用于语义去重
         self.context_tracker = ContextTracker(
             storage_dir=os.path.join(self.data_root, 'data', 'contexts'),
-            llm_client=self.llm_client
+            llm_client=self.llm_client,
+            embedding_backend=embedding_backend_for_trackers
         )
         
         # 长期记忆层（L1 ConsolidatedMemory）
         self.consolidated_memory = ConsolidatedMemory(
+            data_path=os.path.join(self.data_root, 'data')
+        )
+        
+        # L0 核心设定（角色卡、世界观、规则等）
+        self.core_settings = CoreSettings.load(
             data_path=os.path.join(self.data_root, 'data')
         )
         
@@ -232,6 +248,7 @@ class RecallEngine:
         
         # 检索层 - 提供内容回调
         self.retriever = EightLayerRetriever(
+            bloom_filter=self._ngram_index.bloom_filter if self._ngram_index else None,
             inverted_index=self._inverted_index,
             entity_index=self._entity_index,
             ngram_index=self._ngram_index,
@@ -286,7 +303,9 @@ class RecallEngine:
             data_path=self.data_root,
             embedding_config=self.embedding_config
         )
-        self._ngram_index = OptimizedNgramIndex()
+        # N-gram 索引（支持持久化）
+        ngram_data_path = os.path.join(self.data_root, 'index', 'ngram')
+        self._ngram_index = OptimizedNgramIndex(data_path=ngram_data_path)
     
     def _rebuild_content_cache(self):
         """重建内容缓存（从持久化存储恢复）"""
@@ -364,6 +383,7 @@ class RecallEngine:
             AddResult: 添加结果
         """
         start_time = time.time()
+        consistency_warnings = []  # 收集一致性警告
         
         try:
             # 1. 提取实体
@@ -381,9 +401,11 @@ class RecallEngine:
                     [{'content': m.content} for m in existing_memories]
                 )
                 if not consistency.is_consistent:
-                    # 记录但不阻止
+                    # 收集警告并记录
                     for v in consistency.violations:
-                        print(f"[Recall] 一致性警告: {v.description}")
+                        warning_msg = v.description
+                        consistency_warnings.append(warning_msg)
+                        print(f"[Recall] 一致性警告: {warning_msg}")
             
             # 4. 生成ID并存储
             memory_id = f"mem_{uuid.uuid4().hex[:12]}"
@@ -494,7 +516,8 @@ class RecallEngine:
                 id=memory_id,
                 success=True,
                 entities=entity_names,
-                message="记忆添加成功"
+                message="记忆添加成功",
+                consistency_warnings=consistency_warnings
             )
         
         except Exception as e:
@@ -702,6 +725,14 @@ class RecallEngine:
         # ========== 0. 场景检测（决定检索策略）==========
         scenario = self.scenario_detector.detect(query)
         retrieval_strategy = scenario.suggested_retrieval_strategy
+        
+        # ========== 0.5 L0 核心设定注入（角色卡/世界观/规则 - 最高优先级）==========
+        if hasattr(self, 'core_settings') and self.core_settings:
+            # 根据场景类型获取对应的核心设定
+            scenario_type = 'roleplay' if scenario.type.value in ['roleplay', 'novel_writing', 'worldbuilding'] else 'coding' if scenario.type.value == 'coding' else 'general'
+            injection_text = self.core_settings.get_injection_text(scenario_type)
+            if injection_text:
+                parts.append(f"【核心设定】\n{injection_text}")
         
         # ========== 1. 持久条件层（已确立的背景设定）==========
         # 这是最重要的层 - 用户说"我是大学生想创业"，后续所有对话都应基于此
@@ -1277,7 +1308,15 @@ class RecallEngine:
     
     def close(self):
         """关闭引擎"""
-        # 保存并关闭索引
+        # 1. 持久化 VolumeManager（确保所有数据保存）
+        if self.volume_manager:
+            self.volume_manager.flush()
+        
+        # 2. 保存 N-gram 索引（原文存储）
+        if self._ngram_index:
+            self._ngram_index.save()
+        
+        # 3. 保存并关闭向量索引
         if self._vector_index:
             self._vector_index.close()
         

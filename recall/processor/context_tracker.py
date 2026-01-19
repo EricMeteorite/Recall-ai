@@ -9,14 +9,20 @@
 - PersistentContext: 持久性上下文/条件
 - 不同于伏笔（未解决的线索），这是已确立的背景设定
 - 不同于普通记忆（需要检索），这是每次对话都应该自动包含的前提
+
+智能去重机制（v3.0.1 新增）：
+- 第一级：Embedding 向量余弦相似度快速筛选
+- 第二级：LLM 提取时顺带判断是否与已有条件重复
+- 第三级：定期批量整理合并
 """
 
 import os
 import json
 import time
 import re
+import numpy as np
 from dataclasses import dataclass, field, asdict
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from enum import Enum
 
 
@@ -30,11 +36,15 @@ class ContextType(Enum):
     # 环境相关
     ENVIRONMENT = "environment"          # 技术环境（如：Windows开发、Ubuntu部署）
     PROJECT = "project"                  # 项目信息（如：正在开发Recall-ai）
+    TIME_CONSTRAINT = "time_constraint"  # 时间约束（如：截止日期、特定时间段）
     
     # 角色扮演相关
     CHARACTER_TRAIT = "character_trait"  # 角色特征（如：角色性格设定）
     WORLD_SETTING = "world_setting"      # 世界观设定（如：魔法世界）
     RELATIONSHIP = "relationship"        # 关系设定（如：用户是角色的朋友）
+    EMOTIONAL_STATE = "emotional_state"  # 情绪状态（如：角色当前心情）
+    SKILL_ABILITY = "skill_ability"      # 技能能力（如：角色会什么技能）
+    ITEM_PROP = "item_prop"              # 物品道具（如：角色携带的物品）
     
     # 通用
     ASSUMPTION = "assumption"            # 假设前提
@@ -65,14 +75,41 @@ class PersistentContext:
     related_entities: List[str] = field(default_factory=list)
     keywords: List[str] = field(default_factory=list)
     
+    # 智能去重 - Embedding 向量缓存（可选字段，向后兼容）
+    # 存储为 list 以便 JSON 序列化，使用时转换为 numpy array
+    _embedding: Optional[List[float]] = field(default=None, repr=False)
+    
+    @property
+    def embedding(self) -> Optional[np.ndarray]:
+        """获取 embedding 向量（numpy array）"""
+        if self._embedding is not None:
+            return np.array(self._embedding, dtype='float32')
+        return None
+    
+    @embedding.setter
+    def embedding(self, value):
+        """设置 embedding 向量"""
+        if value is not None:
+            if isinstance(value, np.ndarray):
+                self._embedding = value.tolist()
+            else:
+                self._embedding = list(value)
+        else:
+            self._embedding = None
+    
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)
         d['context_type'] = self.context_type.value
+        # _embedding 字段在 asdict 中会自动包含
         return d
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'PersistentContext':
+        data = data.copy()  # 避免修改原始数据
         data['context_type'] = ContextType(data['context_type'])
+        # 兼容旧数据（没有 _embedding 字段）
+        if '_embedding' not in data:
+            data['_embedding'] = None
         return cls(**data)
 
 
@@ -81,10 +118,15 @@ class ContextTracker:
     
     增长控制策略：
     1. 每个类型最多保留 max_per_type 个条件（默认5个）
-    2. 相似内容自动合并（增加置信度而非新增）
+    2. 相似内容自动合并（增加置信度而非新增）- 使用 Embedding 语义相似度
     3. 置信度衰减：长期未被引用的条件置信度下降
     4. 超出数量时，淘汰置信度最低的
     5. 有LLM时，可以智能压缩多个条件
+    
+    智能去重机制：
+    - 第一级：Embedding 向量余弦相似度（>0.85 直接合并，0.70-0.85 可能相似）
+    - 第二级：LLM 提取时判断是否与已有条件重复
+    - 第三级：定期批量整理合并
     """
     
     # 配置常量
@@ -93,12 +135,37 @@ class ContextTracker:
     DECAY_DAYS = 7            # 7天未使用开始衰减
     DECAY_RATE = 0.1          # 每次衰减10%置信度
     MIN_CONFIDENCE = 0.2      # 最低置信度，低于此自动删除
-    SIMILARITY_THRESHOLD = 0.6  # 相似度阈值（用于合并判断）
+    SIMILARITY_THRESHOLD = 0.6  # 词重叠相似度阈值（后备方案）
     
-    def __init__(self, storage_dir: str, llm_client: Optional[Any] = None):
+    # 智能去重配置（从环境变量读取，支持热更新）
+    @staticmethod
+    def _get_dedup_config() -> Dict[str, Any]:
+        """获取去重配置（每次调用时读取，支持热更新）
+        
+        Returns:
+            Dict with keys: enabled, high_threshold, low_threshold
+        """
+        return {
+            'enabled': os.environ.get('DEDUP_EMBEDDING_ENABLED', 'true').lower() in ('true', '1', 'yes'),
+            'high_threshold': float(os.environ.get('DEDUP_HIGH_THRESHOLD', '0.85')),
+            'low_threshold': float(os.environ.get('DEDUP_LOW_THRESHOLD', '0.70'))
+        }
+    
+    def __init__(self, storage_dir: str, llm_client: Optional[Any] = None, 
+                 embedding_backend: Optional[Any] = None):
+        """初始化持久上下文追踪器
+        
+        Args:
+            storage_dir: 存储目录
+            llm_client: LLM 客户端（用于智能提取和压缩）
+            embedding_backend: Embedding 后端（用于智能去重），如果为 None 会尝试自动获取
+        """
         self.storage_dir = storage_dir
         self.llm_client = llm_client
         self.contexts: Dict[str, List[PersistentContext]] = {}  # user_id -> contexts
+        
+        # Embedding 后端（用于智能去重）
+        self.embedding_backend = embedding_backend
         
         os.makedirs(storage_dir, exist_ok=True)
         self._load_all()
@@ -138,13 +205,17 @@ class ContextTracker:
 - "我是一个大学毕业生，想创业" → 后续所有建议都应基于这个身份
 - "我在Windows上开发，但要部署到Ubuntu" → 后续所有代码建议都应考虑这个环境
 - "这个角色是一个冷酷的剑士" → 后续角色行为都应符合这个设定
+- "截止日期是下周五" → 所有建议都应考虑这个时间约束
+- "角色目前处于愤怒状态" → 后续对话应体现这个情绪
+- "角色会治愈魔法" → 后续可以使用这个技能
+- "角色携带一把魔法剑" → 后续可以使用这个道具
 
 对话内容：
 {content}
 
 请以JSON格式返回提取的条件（如果没有则返回空数组）：
 [
-  {{"type": "user_identity|user_goal|environment|project|character_trait|world_setting|relationship|assumption|constraint", "content": "条件内容", "keywords": ["关键词1", "关键词2"]}}
+  {{"type": "user_identity|user_goal|user_preference|environment|project|time_constraint|character_trait|world_setting|relationship|emotional_state|skill_ability|item_prop|assumption|constraint|custom", "content": "条件内容", "keywords": ["关键词1", "关键词2"]}}
 ]
 
 只返回JSON，不要其他解释。"""
@@ -176,8 +247,53 @@ class ContextTracker:
         with open(filepath, 'w', encoding='utf-8') as f:
             json.dump([c.to_dict() for c in contexts], f, ensure_ascii=False, indent=2)
     
-    def _compute_similarity(self, text1: str, text2: str) -> float:
-        """计算两个文本的相似度（简单实现：词重叠）"""
+    def _get_embedding(self, text: str) -> Optional[List[float]]:
+        """获取文本的Embedding向量
+        
+        使用embedding_backend获取向量，失败时返回None
+        """
+        if not self.embedding_backend:
+            return None
+        
+        try:
+            # embedding_backend.embed() 返回 List[List[float]]
+            embeddings = self.embedding_backend.embed([text])
+            if embeddings and len(embeddings) > 0:
+                return embeddings[0]
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug(f"获取Embedding失败: {e}")
+        
+        return None
+    
+    def _compute_embedding_similarity(self, emb1: List[float], emb2: List[float]) -> float:
+        """计算两个Embedding向量的余弦相似度
+        
+        使用numpy高效计算，范围 [-1, 1]，通常正常文本相似度在 [0, 1]
+        """
+        if emb1 is None or emb2 is None:
+            return 0.0
+        if len(emb1) == 0 or len(emb2) == 0:
+            return 0.0
+        
+        vec1 = np.array(emb1)
+        vec2 = np.array(emb2)
+        
+        # 余弦相似度 = dot(a, b) / (norm(a) * norm(b))
+        dot_product = np.dot(vec1, vec2)
+        norm1 = np.linalg.norm(vec1)
+        norm2 = np.linalg.norm(vec2)
+        
+        if norm1 == 0 or norm2 == 0:
+            return 0.0
+        
+        return float(dot_product / (norm1 * norm2))
+    
+    def _compute_word_similarity(self, text1: str, text2: str) -> float:
+        """计算两个文本的词重叠相似度（后备方案）
+        
+        基于Jaccard相似度，支持中英文
+        """
         words1 = set(text1.lower().split())
         words2 = set(text2.lower().split())
         
@@ -193,10 +309,71 @@ class ContextTracker:
         union = words1 | words2
         return len(intersection) / len(union) if union else 0.0
     
-    def _find_similar(self, content: str, user_id: str, context_type: ContextType) -> Optional[PersistentContext]:
-        """查找相似的已有条件"""
+    def _compute_similarity(self, text1: str, text2: str, 
+                           emb1: Optional[List[float]] = None, 
+                           emb2: Optional[List[float]] = None) -> Tuple[float, str]:
+        """计算两个文本的语义相似度
+        
+        三级策略：
+        1. 如果两边都有Embedding，使用余弦相似度（最准确）
+        2. 如果只有一边有Embedding，尝试获取另一边的
+        3. 后备：使用词重叠（兼容旧数据）
+        
+        Args:
+            text1: 第一个文本
+            text2: 第二个文本
+            emb1: text1的Embedding向量（可选）
+            emb2: text2的Embedding向量（可选）
+            
+        Returns:
+            Tuple[float, str]: (相似度, 使用的方法 "embedding"/"word")
+        """
+        dedup_config = self._get_dedup_config()
+        
+        # 如果启用了Embedding去重
+        if dedup_config['enabled']:
+            # 尝试获取缺失的Embedding
+            if emb1 is None:
+                emb1 = self._get_embedding(text1)
+            if emb2 is None:
+                emb2 = self._get_embedding(text2)
+            
+            # 如果两边都有Embedding，使用余弦相似度
+            if emb1 is not None and emb2 is not None:
+                sim = self._compute_embedding_similarity(emb1, emb2)
+                return (sim, "embedding")
+        
+        # 后备：词重叠
+        sim = self._compute_word_similarity(text1, text2)
+        return (sim, "word")
+    
+    def _find_similar(self, content: str, user_id: str, context_type: ContextType,
+                     new_embedding: Optional[List[float]] = None) -> Tuple[Optional[PersistentContext], float, str]:
+        """查找语义相似的已有条件
+        
+        使用三级策略：
+        1. 完全相同：直接返回
+        2. Embedding相似度 >= HIGH_THRESHOLD：高度相似，可自动合并
+        3. Embedding相似度 < LOW_THRESHOLD：明显不同，跳过
+        4. 中间区域：返回但标记，可能需要LLM判断
+        
+        Args:
+            content: 新条件内容
+            user_id: 用户ID
+            context_type: 条件类型
+            new_embedding: 新条件的Embedding向量（可选，如果提供则避免重复计算）
+            
+        Returns:
+            Tuple[Optional[PersistentContext], float, str]: 
+                (相似条件或None, 相似度, 方法 "exact"/"embedding"/"word")
+        """
         if user_id not in self.contexts:
-            return None
+            return (None, 0.0, "none")
+        
+        dedup_config = self._get_dedup_config()
+        best_match: Optional[PersistentContext] = None
+        best_sim = 0.0
+        best_method = "none"
         
         for existing in self.contexts[user_id]:
             if existing.context_type != context_type:
@@ -204,16 +381,45 @@ class ContextTracker:
             if not existing.is_active:
                 continue
             
-            # 完全相同
-            if existing.content.lower() == content.lower():
-                return existing
+            # 1. 完全相同（快速路径）
+            if existing.content.lower().strip() == content.lower().strip():
+                return (existing, 1.0, "exact")
             
-            # 相似度检查
-            sim = self._compute_similarity(existing.content, content)
-            if sim >= self.SIMILARITY_THRESHOLD:
-                return existing
+            # 2. 计算相似度
+            sim, method = self._compute_similarity(
+                existing.content, content,
+                emb1=existing.embedding,  # 使用已存储的Embedding
+                emb2=new_embedding
+            )
+            
+            # 使用动态阈值（Embedding方法用配置的阈值，词重叠用固定阈值）
+            if method == "embedding":
+                threshold = dedup_config['high_threshold']
+            else:
+                threshold = self.SIMILARITY_THRESHOLD
+            
+            # 记录最佳匹配
+            if sim > best_sim:
+                best_sim = sim
+                best_match = existing
+                best_method = method
         
-        return None
+        # 判断是否达到合并阈值
+        if best_match:
+            if best_method == "embedding":
+                if best_sim >= dedup_config['high_threshold']:
+                    return (best_match, best_sim, best_method)
+                elif best_sim < dedup_config['low_threshold']:
+                    return (None, best_sim, best_method)  # 明显不同
+                else:
+                    # 中间区域，返回匹配但需要进一步判断
+                    return (best_match, best_sim, best_method + "_uncertain")
+            else:
+                # 词重叠方法，使用固定阈值
+                if best_sim >= self.SIMILARITY_THRESHOLD:
+                    return (best_match, best_sim, best_method)
+        
+        return (None, best_sim, best_method)
     
     def _enforce_limits(self, user_id: str):
         """强制执行数量限制"""
@@ -264,32 +470,69 @@ class ContextTracker:
             related_entities: List[str] = None) -> PersistentContext:
         """添加持久上下文
         
-        智能处理：
-        1. 如果有相似条件，合并（增加置信度）而非新增
-        2. 超出数量限制时，淘汰置信度最低的
+        智能处理（三级去重策略）：
+        1. 计算新内容的Embedding（如果启用）
+        2. 查找语义相似的已有条件
+        3. 高相似度：自动合并（增加置信度）
+        4. 中等相似度：谨慎合并（如果内容更详细则更新）
+        5. 低相似度或无匹配：创建新条件
+        6. 超出数量限制时，淘汰置信度最低的
         
         注意：如果该类型已达到上限且新条件置信度不够高，
         新条件可能会被立即淘汰（但仍会返回该对象，is_active=False）
         """
         import uuid
+        import logging
+        logger = logging.getLogger(__name__)
         
         if user_id not in self.contexts:
             self.contexts[user_id] = []
         
-        # 检查是否有相似的已有条件
-        similar = self._find_similar(content, user_id, context_type)
+        # 1. 预计算新内容的Embedding（避免重复计算）
+        new_embedding = self._get_embedding(content)
+        
+        # 2. 检查是否有语义相似的已有条件
+        similar, sim_score, sim_method = self._find_similar(
+            content, user_id, context_type, new_embedding=new_embedding
+        )
+        
         if similar:
-            # 合并：增加置信度，更新时间
-            similar.confidence = min(1.0, similar.confidence + 0.1)
-            similar.use_count += 1
-            similar.last_used = time.time()
-            # 如果新内容更长/更详细，用新内容替换
-            if len(content) > len(similar.content):
-                similar.content = content
+            # 记录合并日志
+            logger.debug(f"[ContextTracker] 发现相似条件 (方法={sim_method}, 相似度={sim_score:.3f}): "
+                        f"'{content[:30]}...' ≈ '{similar.content[:30]}...'")
+            
+            # 合并策略
+            if sim_method == "exact":
+                # 完全相同，只更新使用信息
+                similar.use_count += 1
+                similar.last_used = time.time()
+            elif sim_method.endswith("_uncertain"):
+                # 中等相似度，谨慎合并
+                similar.confidence = min(1.0, similar.confidence + 0.05)  # 较小增量
+                similar.use_count += 1
+                similar.last_used = time.time()
+                # 如果新内容明显更长/更详细，用新内容替换
+                if len(content) > len(similar.content) * 1.2:
+                    similar.content = content
+                    # 更新Embedding
+                    if new_embedding:
+                        similar.embedding = new_embedding
+            else:
+                # 高度相似，正常合并
+                similar.confidence = min(1.0, similar.confidence + 0.1)
+                similar.use_count += 1
+                similar.last_used = time.time()
+                # 如果新内容更长/更详细，用新内容替换
+                if len(content) > len(similar.content):
+                    similar.content = content
+                    # 更新Embedding
+                    if new_embedding:
+                        similar.embedding = new_embedding
+            
             self._save_user(user_id)
             return similar
         
-        # 创建新条件
+        # 3. 创建新条件
         ctx = PersistentContext(
             id=f"ctx_{uuid.uuid4().hex[:12]}",
             content=content,
@@ -300,16 +543,20 @@ class ContextTracker:
             related_entities=related_entities or []
         )
         
+        # 存储Embedding（如果有）
+        if new_embedding:
+            ctx.embedding = new_embedding
+        
         self.contexts[user_id].append(ctx)
         
-        # 强制执行数量限制
+        # 4. 强制执行数量限制
         self._enforce_limits(user_id)
         
         # 检查新条件是否被淘汰了
         if ctx not in self.contexts[user_id]:
             # 条件被淘汰了（因为置信度不够高），标记为不活跃
             ctx.is_active = False
-            print(f"[ContextTracker] 新条件因数量限制被淘汰: {content[:50]}...")
+            logger.debug(f"[ContextTracker] 新条件因数量限制被淘汰: {content[:50]}...")
         
         self._save_user(user_id)
         return ctx
@@ -490,9 +737,13 @@ class ContextTracker:
             ContextType.USER_PREFERENCE: "用户偏好",
             ContextType.ENVIRONMENT: "技术环境",
             ContextType.PROJECT: "项目信息",
+            ContextType.TIME_CONSTRAINT: "时间约束",
             ContextType.CHARACTER_TRAIT: "角色特征",
             ContextType.WORLD_SETTING: "世界观",
             ContextType.RELATIONSHIP: "关系设定",
+            ContextType.EMOTIONAL_STATE: "情绪状态",
+            ContextType.SKILL_ABILITY: "技能能力",
+            ContextType.ITEM_PROP: "物品道具",
             ContextType.ASSUMPTION: "假设前提",
             ContextType.CONSTRAINT: "约束条件",
             ContextType.CUSTOM: "其他",

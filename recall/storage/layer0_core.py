@@ -3,7 +3,7 @@
 import os
 import json
 from dataclasses import dataclass, field, asdict
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 
 @dataclass
@@ -24,6 +24,9 @@ class CoreSettings:
     user_preferences: Dict[str, Any] = field(default_factory=dict)
     absolute_rules: List[str] = field(default_factory=list)  # 绝对不能违反的规则
     
+    # 内部使用：存储data_path以便save()时无需传参
+    _data_path: Optional[str] = field(default=None, repr=False)
+    
     @classmethod
     def load(cls, data_path: str) -> 'CoreSettings':
         """从文件加载核心设定"""
@@ -31,16 +34,35 @@ class CoreSettings:
         if os.path.exists(config_file):
             with open(config_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-                return cls(**data)
-        return cls()  # 返回默认空设定
+                # 移除可能存在的旧的 _data_path
+                data.pop('_data_path', None)
+                instance = cls(**data)
+                instance._data_path = data_path
+                return instance
+        instance = cls()  # 返回默认空设定
+        instance._data_path = data_path
+        return instance
     
-    def save(self, data_path: str):
-        """保存核心设定"""
-        config_dir = os.path.join(data_path, 'L0_core')
+    def save(self, data_path: Optional[str] = None):
+        """保存核心设定
+        
+        Args:
+            data_path: 可选，如果不提供则使用 load() 时保存的路径
+        """
+        path = data_path or self._data_path
+        if not path:
+            raise ValueError("data_path 未指定，请在 save() 时传入或确保通过 load() 加载")
+        
+        config_dir = os.path.join(path, 'L0_core')
         os.makedirs(config_dir, exist_ok=True)
         config_file = os.path.join(config_dir, 'core.json')
+        
+        # 保存时排除 _data_path 字段
+        data = asdict(self)
+        data.pop('_data_path', None)
+        
         with open(config_file, 'w', encoding='utf-8') as f:
-            json.dump(asdict(self), f, ensure_ascii=False, indent=2)
+            json.dump(data, f, ensure_ascii=False, indent=2)
     
     def get_injection_text(self, scenario: str) -> str:
         """根据场景返回需要注入的核心设定"""

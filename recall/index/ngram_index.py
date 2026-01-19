@@ -1,6 +1,8 @@
 """优化的N-gram索引 - 支持名词短语索引 + 原文全文兜底搜索"""
 
+import os
 import re
+import json
 from typing import List, Dict, Set, Optional
 
 
@@ -13,7 +15,12 @@ class OptimizedNgramIndex:
     3. 两层搜索：先查名词短语索引，无结果时扫描原文
     """
     
-    def __init__(self):
+    def __init__(self, data_path: str = None):
+        # 数据目录
+        self.data_path = data_path
+        self._index_file = f"{data_path}/ngram_index.json" if data_path else None
+        self._raw_content_file = f"{data_path}/ngram_raw_content.jsonl" if data_path else None
+        
         # 主索引：名词短语 → [memory_ids]
         self.noun_phrases: Dict[str, List[str]] = {}
         
@@ -22,6 +29,10 @@ class OptimizedNgramIndex:
         
         # 可选的布隆过滤器
         self._bloom_filter = None
+        
+        # 从磁盘加载已有数据
+        if data_path:
+            self._load()
     
     @property
     def bloom_filter(self):
@@ -36,7 +47,7 @@ class OptimizedNgramIndex:
         return self._bloom_filter
     
     def add(self, turn: str, content: str):
-        """添加索引（名词短语索引 + 原文存储）
+        """添加索引（名词短语索引 + 原文存储 + 增量持久化）
         
         Args:
             turn: memory_id（如 mem_xxx）
@@ -44,6 +55,9 @@ class OptimizedNgramIndex:
         """
         # 1. 存储原文（用于兜底搜索）
         self._raw_content[turn] = content
+        
+        # 1.5 增量持久化原文（避免重启丢失）
+        self.append_raw_content(turn, content)
         
         # 2. 提取并索引名词短语（主索引）
         phrases = self._extract_noun_phrases(content)
@@ -58,6 +72,21 @@ class OptimizedNgramIndex:
             if phrase not in self.noun_phrases:
                 self.noun_phrases[phrase] = []
             self.noun_phrases[phrase].append(turn)
+        
+        # 3. 定期保存名词短语索引（每 100 条保存一次）
+        if len(self._raw_content) % 100 == 0:
+            self._save_noun_phrases()
+    
+    def _save_noun_phrases(self):
+        """只保存名词短语索引（轻量级操作）"""
+        if not self._index_file:
+            return
+        try:
+            os.makedirs(os.path.dirname(self._index_file), exist_ok=True)
+            with open(self._index_file, 'w', encoding='utf-8') as f:
+                json.dump(self.noun_phrases, f, ensure_ascii=False)
+        except Exception as e:
+            print(f"[NgramIndex] 保存名词短语索引失败: {e}")
     
     def _extract_noun_phrases(self, content: str) -> List[str]:
         """提取名词短语（而非所有n-gram）"""
@@ -85,16 +114,9 @@ class OptimizedNgramIndex:
         
         candidate_turns: Set[str] = set()
         for phrase in phrases:
-            # 先用布隆过滤器快速排除
-            if isinstance(self.bloom_filter, set):
-                if phrase not in self.bloom_filter:
-                    continue
-            else:
-                try:
-                    if not self.bloom_filter.might_contain(phrase):
-                        continue
-                except AttributeError:
-                    pass
+            # 先用布隆过滤器快速排除（使用 in 运算符）
+            if phrase not in self.bloom_filter:
+                continue
             
             if phrase in self.noun_phrases:
                 candidate_turns.update(self.noun_phrases[phrase])
@@ -171,3 +193,71 @@ class OptimizedNgramIndex:
     def get_raw_content(self, memory_id: str) -> Optional[str]:
         """获取原文内容"""
         return self._raw_content.get(memory_id)
+    
+    # ========== 持久化方法 ==========
+    
+    def _load(self):
+        """从磁盘加载索引数据"""
+        # 加载名词短语索引
+        if self._index_file and os.path.exists(self._index_file):
+            try:
+                with open(self._index_file, 'r', encoding='utf-8') as f:
+                    self.noun_phrases = json.load(f)
+                print(f"[NgramIndex] 已加载 {len(self.noun_phrases)} 个名词短语索引")
+            except Exception as e:
+                print(f"[NgramIndex] 加载索引失败: {e}")
+        
+        # 加载原文内容（JSONL 格式，支持增量写入）
+        if self._raw_content_file and os.path.exists(self._raw_content_file):
+            try:
+                with open(self._raw_content_file, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line:
+                            try:
+                                item = json.loads(line)
+                                self._raw_content[item['id']] = item['content']
+                            except json.JSONDecodeError:
+                                continue
+                print(f"[NgramIndex] 已加载 {len(self._raw_content)} 条原文内容")
+            except Exception as e:
+                print(f"[NgramIndex] 加载原文失败: {e}")
+    
+    def save(self):
+        """保存索引数据到磁盘"""
+        if not self.data_path:
+            return
+        
+        os.makedirs(self.data_path, exist_ok=True)
+        
+        # 保存名词短语索引
+        if self._index_file:
+            try:
+                with open(self._index_file, 'w', encoding='utf-8') as f:
+                    json.dump(self.noun_phrases, f, ensure_ascii=False)
+            except Exception as e:
+                print(f"[NgramIndex] 保存索引失败: {e}")
+        
+        # 保存原文内容（完全重写，避免重复）
+        if self._raw_content_file:
+            try:
+                with open(self._raw_content_file, 'w', encoding='utf-8') as f:
+                    for memory_id, content in self._raw_content.items():
+                        f.write(json.dumps({'id': memory_id, 'content': content}, ensure_ascii=False) + '\n')
+            except Exception as e:
+                print(f"[NgramIndex] 保存原文失败: {e}")
+    
+    def append_raw_content(self, memory_id: str, content: str):
+        """增量追加原文（高效写入，不用每次全量保存）"""
+        if self._raw_content_file:
+            try:
+                # 确保目录存在
+                os.makedirs(os.path.dirname(self._raw_content_file), exist_ok=True)
+                with open(self._raw_content_file, 'a', encoding='utf-8') as f:
+                    f.write(json.dumps({'id': memory_id, 'content': content}, ensure_ascii=False) + '\n')
+            except Exception as e:
+                print(f"[NgramIndex] 追加原文失败: {e}")
+    
+    def __len__(self) -> int:
+        """返回索引的原文数量"""
+        return len(self._raw_content)

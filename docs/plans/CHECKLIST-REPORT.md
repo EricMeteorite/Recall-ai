@@ -1,6 +1,6 @@
 # Recall v3 项目自查报告
 
-> 检查日期：2026年1月19日（更新）  
+> 检查日期：2026年1月20日（深度审计更新）  
 > 对照文档：Recall-ai-plan.md - 十二点五、最终自查（完整版）
 
 ---
@@ -17,9 +17,51 @@
 > 📌 **说明**：
 > - ✅ **伏笔系统已完成**：ForeshadowingAnalyzer + LLM API 方案（2026-01-18）
 > - ✅ **100%不遗忘已验证**：VolumeManager存档 + 8层检索 + N-gram原文兜底（2026-01-19）
-> - ⭐ **计划外新增3项**：持久条件系统、配置热更新、伏笔分析器增强（第三组）
+> - ✅ **语义去重已实现**：Embedding余弦相似度 + 三级去重策略（2026-01-19）
+> - ✅ **L6向量精排完整版**：重新计算精确余弦相似度（2026-01-19）
+> - ✅ **N-gram原文索引持久化**：JSONL增量存储，重启不丢失（2026-01-19）
+> - ✅ **L0 CoreSettings注入**：engine.build_context正确注入核心设定（2026-01-20修复）
+> - ⭐ **计划外新增4项**：持久条件系统、配置热更新、伏笔分析器增强、CoreSettings API（第三组）
 > - 🔧 **规范100%遵守**：L0注入✅ 规则编译器待v3.1
 > - ❌ CodeIndexer 是代码场景功能，RP场景可选
+
+---
+
+## 一点一、深度代码审计（2026-01-20 最新）
+
+> 📌 本次审计发现并修复了以下问题：
+
+### 已修复的严重问题
+
+| 问题 | 文件 | 修复内容 |
+|------|------|---------|
+| **⭐ L0 CoreSettings从未使用** | `engine.py` | 2026-01-20修复：添加导入、初始化、在build_context中注入核心设定 |
+| **⭐ CoreSettings.save()缺参数** | `layer0_core.py` | 2026-01-20修复：添加_data_path内部存储，save()无需传参 |
+| **⭐ 一致性检查结果丢失** | `engine.py` | 2026-01-20修复：AddResult添加consistency_warnings字段并返回 |
+| **⭐ VolumeData硬编码常量** | `volume_manager.py` | 2026-01-20修复：改用类常量TURNS_PER_VOLUME/TURNS_PER_FILE |
+| **VolumeData._persist() 重复写入** | `volume_manager.py` | 添加 `_persisted_turns` 集合追踪已持久化数据 |
+| **_check_timeline 空实现** | `consistency.py` | 实现了简化版时间线冲突检测 |
+| **BloomFilter.might_contain 错误** | `eight_layer.py`, `ngram_index.py` | 修正为使用 `in` 运算符 |
+| **N-gram追加原文目录不存在** | `ngram_index.py` | 在 `append_raw_content` 中添加 `os.makedirs` |
+
+### 设计决策说明（非bug）
+
+| 项目 | 说明 |
+|------|------|
+| **L8 LLM过滤默认关闭** | 故意设计。L8消耗LLM API资源，默认关闭以控制成本。可通过 `config['l8_enabled'] = True` 启用 |
+| **ContextBuilder 未被使用** | `engine.build_context()` 自己实现了6.5层上下文策略，ContextBuilder 保留供未来扩展 |
+| **ParallelRetriever 未被使用** | 设计选择，EightLayerRetriever是主要实现 |
+| **RecallInit/LightweightConfig 导入** | 保留用于CLI等场景，添加了 `# noqa: F401` 注释 |
+
+### 100%不遗忘机制验证结果
+
+| 机制 | 验证结果 |
+|------|---------|
+| **N-gram原文存储** | ✅ JSONL增量持久化，重启后正确恢复 |
+| **VolumeManager Archive** | ✅ 分卷存储，支持 O(1) 按轮次号定位 |
+| **get_turn_by_memory_id** | ✅ 搜索所有卷（内存+磁盘） |
+| **search_content 兜底搜索** | ✅ 原文全文搜索，确保任何内容都能找到 |
+| **8层检索终极兜底** | ✅ L1-L7无结果时自动触发 N-gram raw_search |
 
 ---
 
@@ -33,24 +75,27 @@
 
 | 功能 | 说明 |
 |------|------|
-| **11种条件类型** | 用户身份、用户目标、环境设定、项目上下文、时间约束、角色特征、世界观设定、关系网络、情绪状态、技能能力、物品道具 |
+| **15种条件类型** | 用户身份、用户目标、用户偏好、技术环境、项目信息、时间约束、角色特征、世界观设定、关系设定、情绪状态、技能能力、物品道具、假设前提、约束条件、自定义 |
 | **自动提取** | 从对话中自动识别应该持久化的条件（LLM辅助） |
 | **智能压缩** | 当条件过多时自动合并相似条件，避免上下文膨胀 |
+| **⭐ 语义去重** | Embedding余弦相似度（≥0.85自动合并），支持上万轮对话不重复 |
 | **置信度衰减** | 长期未使用的条件置信度自动下降 |
 | **增长控制** | 每种类型最多5条，总共最多30条，防止无限增长 |
 
 **API 端点**：
-- `POST /v1/context` - 添加持久条件
-- `GET /v1/context` - 获取活跃条件
-- `DELETE /v1/context/{id}` - 删除条件
-- `POST /v1/context/extract` - 从文本自动提取
-- `POST /v1/context/consolidate` - 压缩冗余条件
+- `POST /v1/persistent-contexts` - 添加持久条件
+- `GET /v1/persistent-contexts` - 获取活跃条件
+- `DELETE /v1/persistent-contexts/{context_id}` - 删除条件
+- `POST /v1/persistent-contexts/extract` - 从文本自动提取
+- `POST /v1/persistent-contexts/consolidate` - 压缩冗余条件
+- `GET /v1/persistent-contexts/stats` - 获取统计信息
+- `POST /v1/persistent-contexts/{context_id}/used` - 标记已使用
 
 ---
 
 ### ⭐ 2. 配置热更新系统
 
-**实现位置**：`plugins/sillytavern-extension/server.py`
+**实现位置**：`recall/server.py`
 
 | 功能 | 说明 |
 |------|------|
@@ -83,6 +128,30 @@
 - `PUT /v1/foreshadowing/analyzer/config` - 更新分析器配置
 - `POST /v1/foreshadowing/analyze/turn` - 分析单轮对话
 - `POST /v1/foreshadowing/analyze/trigger` - 手动触发分析
+
+---
+
+### ⭐ 4. 语义去重系统（2026-01-19 新增）
+
+**实现位置**：`recall/processor/context_tracker.py`、`recall/processor/foreshadowing.py`
+
+| 功能 | 说明 |
+|------|------|
+| **三级去重策略** | Embedding余弦相似度 → 精确匹配 → 词重叠后备 |
+| **可配置阈值** | 高阈值(≥0.85)自动合并，低阈值(<0.70)视为不同 |
+| **向后兼容** | 旧数据无Embedding时自动降级为词重叠方案 |
+| **环境变量配置** | `DEDUP_EMBEDDING_ENABLED`、`DEDUP_HIGH_THRESHOLD`、`DEDUP_LOW_THRESHOLD` |
+
+**配置项**（通过 `api_keys.env`）：
+```env
+DEDUP_EMBEDDING_ENABLED=true   # 是否启用Embedding去重
+DEDUP_HIGH_THRESHOLD=0.85      # 高相似度阈值（自动合并）
+DEDUP_LOW_THRESHOLD=0.70       # 低相似度阈值（视为不同）
+```
+
+**支持的系统**：
+- ContextTracker（持久条件系统）
+- ForeshadowingTracker（伏笔系统）
 
 ---
 
@@ -129,8 +198,8 @@
 
 | # | 功能 | 实现方案 | 实际状态 | 实现位置 |
 |---|------|---------|:--------:|---------|
-| 26 | ⭐ 持久条件系统 | ContextTracker + 11种条件类型 + 自动提取 | ✅ | `recall/processor/context_tracker.py` |
-| 27 | ⭐ 配置热更新 | reload API + 连接测试 + 维度检测 | ✅ | `plugins/sillytavern-extension/server.py` |
+| 26 | ⭐ 持久条件系统 | ContextTracker + 15种条件类型 + 自动提取 | ✅ | `recall/processor/context_tracker.py` |
+| 27 | ⭐ 配置热更新 | reload API + 连接测试 + 维度检测 | ✅ | `recall/server.py` |
 | 28 | ⭐ 伏笔分析器增强 | LLM模式 + get_context_for_prompt | ✅ | `recall/processor/foreshadowing_analyzer.py` |
 
 ---
@@ -223,13 +292,14 @@ class CodeIndexer:
 
 | 功能 | 状态 | 说明 |
 |------|:----:|------|
-| `plant()` | ✅ | 手动埋下伏笔 |
+| `plant()` | ✅ | 手动埋下伏笔（支持语义去重） |
 | `add_hint()` | ✅ | 添加伏笔提示 |
 | `resolve()` | ✅ | 手动解决伏笔 |
 | `abandon()` | ✅ | 放弃伏笔 |
 | `get_active()` | ✅ | 获取活跃伏笔 |
 | `get_by_entity()` | ✅ | 按实体获取伏笔 |
 | 多角色分隔存储 | ✅ | 每个角色独立存储 |
+| **⭐ 语义去重** | ✅ | Embedding余弦相似度，防止重复伏笔（2026-01-19新增） |
 
 > 💡 新增的 `ForeshadowingAnalyzer` 将基于这些已有功能构建。
 

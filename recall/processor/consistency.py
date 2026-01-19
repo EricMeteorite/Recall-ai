@@ -132,20 +132,51 @@ class ConsistencyChecker:
         new_content: str,
         existing_memories: List[Dict[str, Any]]
     ) -> List[Violation]:
-        """检查时间线一致性"""
+        """检查时间线一致性
+        
+        注意：当前为简化实现，只检测明显的时间顺序问题。
+        完整的时间线推理需要更复杂的NLP或LLM支持，计划在v3.1实现。
+        """
         violations = []
         
-        # 提取日期
+        # 提取新内容中的日期
         new_dates = self.date_pattern.findall(new_content)
+        if not new_dates:
+            return violations
         
+        # 时间副词检测（声称过去发生但与已知事实冲突）
+        past_indicators = ['之前', '以前', '去年', '上个月', '昨天', '曾经']
+        future_indicators = ['之后', '以后', '明年', '下个月', '明天', '将来']
+        
+        new_has_past = any(ind in new_content for ind in past_indicators)
+        new_has_future = any(ind in new_content for ind in future_indicators)
+        
+        # 检查与已有记忆的时间冲突
         for memory in existing_memories:
             memory_content = memory.get('content', memory.get('text', ''))
             memory_dates = self.date_pattern.findall(memory_content)
             
-            # 简单的时间线检查：如果新内容声称发生在过去的事件
-            # 实际应该发生在记忆之后，则可能有问题
-            # 这里是简化版本
+            if not memory_dates:
+                continue
             
+            # 简单冲突检测：同一日期不同时态描述
+            for new_date in new_dates:
+                for mem_date in memory_dates:
+                    if new_date == mem_date:
+                        # 同一日期，检查是否有时态冲突
+                        mem_has_past = any(ind in memory_content for ind in past_indicators)
+                        mem_has_future = any(ind in memory_content for ind in future_indicators)
+                        
+                        # 冲突：同一日期，一个说过去一个说将来
+                        if (new_has_past and mem_has_future) or (new_has_future and mem_has_past):
+                            violations.append(Violation(
+                                type=ViolationType.TIMELINE_CONFLICT,
+                                description=f"时间线冲突：日期 {'-'.join(new_date)} 的时态描述不一致",
+                                evidence=[new_content[:100], memory_content[:100]],
+                                severity=0.5,
+                                suggested_resolution="请确认该日期是过去还是将来"
+                            ))
+        
         return violations
     
     def record_fact(

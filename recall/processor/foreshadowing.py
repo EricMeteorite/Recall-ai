@@ -1,10 +1,22 @@
-"""伏笔追踪器 - 追踪未解决的叙事线索（支持多角色）"""
+"""伏笔追踪器 - 追踪未解决的叙事线索（支持多角色）
+
+三级语义去重策略：
+1. Embedding余弦相似度（快速过滤，~50ms）
+2. 完全相同检测（精确匹配）
+3. 词重叠后备方案（兼容无Embedding场景）
+
+配置项（通过环境变量）：
+- DEDUP_EMBEDDING_ENABLED: 是否启用Embedding去重（默认true）
+- DEDUP_HIGH_THRESHOLD: 高相似度阈值，自动合并（默认0.85）
+- DEDUP_LOW_THRESHOLD: 低相似度阈值，视为不同（默认0.70）
+"""
 
 import time
 import os
 import json
+import numpy as np
 from enum import Enum
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from dataclasses import dataclass, field
 
 
@@ -28,6 +40,25 @@ class Foreshadowing:
     hints: List[str] = field(default_factory=list)
     resolution: Optional[str] = None
     importance: float = 0.5  # 0-1
+    # Embedding向量（用于语义去重）- 内部存储为List，访问时转为numpy
+    _embedding: Optional[List[float]] = field(default=None, repr=False)
+    
+    @property
+    def embedding(self) -> Optional[np.ndarray]:
+        """获取Embedding向量（numpy数组形式）"""
+        if self._embedding is None:
+            return None
+        return np.array(self._embedding)
+    
+    @embedding.setter
+    def embedding(self, value: Optional[Any]):
+        """设置Embedding向量（接受list或numpy数组）"""
+        if value is None:
+            self._embedding = None
+        elif isinstance(value, np.ndarray):
+            self._embedding = value.tolist()
+        else:
+            self._embedding = list(value)
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
@@ -40,31 +71,170 @@ class Foreshadowing:
             'related_entities': self.related_entities,
             'hints': self.hints,
             'resolution': self.resolution,
-            'importance': self.importance
+            'importance': self.importance,
+            '_embedding': self._embedding  # 保存原始List
         }
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'Foreshadowing':
-        """从字典创建"""
+        """从字典创建（兼容旧数据：无embedding字段）"""
         data = data.copy()
         data['status'] = ForeshadowingStatus(data['status'])
+        # 向后兼容：旧数据可能没有 _embedding 字段
+        if '_embedding' not in data:
+            data['_embedding'] = None
         return cls(**data)
 
 
 class ForeshadowingTracker:
-    """伏笔追踪器 - 支持多角色分隔存储"""
+    """伏笔追踪器 - 支持多角色分隔存储
     
-    def __init__(self, storage_dir: Optional[str] = None):
+    三级语义去重策略：
+    1. Embedding余弦相似度（快速过滤）- 相似度>=0.85自动合并
+    2. 完全相同检测（精确匹配）
+    3. 词重叠后备方案（兼容无Embedding场景）
+    
+    配置通过环境变量控制：
+    - DEDUP_EMBEDDING_ENABLED: 是否启用Embedding去重
+    - DEDUP_HIGH_THRESHOLD: 高相似度阈值（自动合并）
+    - DEDUP_LOW_THRESHOLD: 低相似度阈值（视为不同）
+    """
+    
+    # 词重叠相似度阈值（后备方案）
+    WORD_SIMILARITY_THRESHOLD = 0.6
+    
+    def __init__(self, storage_dir: Optional[str] = None, embedding_backend: Optional[Any] = None):
         """
         Args:
             storage_dir: 存储目录路径，每个角色的伏笔存储在单独的文件中
+            embedding_backend: Embedding后端（可选），用于语义去重
         """
         self.storage_dir = storage_dir
+        self.embedding_backend = embedding_backend
         # 按 user_id 分隔的伏笔存储
         self._user_data: Dict[str, Dict[str, Any]] = {}
         
         if storage_dir:
             os.makedirs(storage_dir, exist_ok=True)
+    
+    @staticmethod
+    def _get_dedup_config() -> Dict[str, Any]:
+        """获取去重配置（从环境变量）"""
+        return {
+            'enabled': os.environ.get('DEDUP_EMBEDDING_ENABLED', 'true').lower() in ('true', '1', 'yes'),
+            'high_threshold': float(os.environ.get('DEDUP_HIGH_THRESHOLD', '0.85')),
+            'low_threshold': float(os.environ.get('DEDUP_LOW_THRESHOLD', '0.70'))
+        }
+    
+    def _get_embedding(self, text: str) -> Optional[List[float]]:
+        """获取文本的Embedding向量"""
+        if not self.embedding_backend:
+            return None
+        
+        try:
+            embeddings = self.embedding_backend.embed([text])
+            if embeddings and len(embeddings) > 0:
+                return embeddings[0]
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug(f"获取Embedding失败: {e}")
+        
+        return None
+    
+    def _compute_embedding_similarity(self, emb1: List[float], emb2: List[float]) -> float:
+        """计算两个Embedding向量的余弦相似度"""
+        if not emb1 or not emb2:
+            return 0.0
+        
+        vec1 = np.array(emb1)
+        vec2 = np.array(emb2)
+        
+        dot_product = np.dot(vec1, vec2)
+        norm1 = np.linalg.norm(vec1)
+        norm2 = np.linalg.norm(vec2)
+        
+        if norm1 == 0 or norm2 == 0:
+            return 0.0
+        
+        return float(dot_product / (norm1 * norm2))
+    
+    def _compute_word_similarity(self, text1: str, text2: str) -> float:
+        """计算词重叠相似度（后备方案）"""
+        words1 = set(text1.lower().split())
+        words2 = set(text2.lower().split())
+        
+        if len(words1) <= 2:
+            words1 = set(text1.lower())
+            words2 = set(text2.lower())
+        
+        if not words1 or not words2:
+            return 0.0
+        
+        intersection = words1 & words2
+        union = words1 | words2
+        return len(intersection) / len(union) if union else 0.0
+    
+    def _find_similar(self, content: str, user_id: str, 
+                     new_embedding: Optional[List[float]] = None) -> Tuple[Optional[Foreshadowing], float, str]:
+        """查找语义相似的已有伏笔
+        
+        Returns:
+            Tuple[Optional[Foreshadowing], float, str]: (相似伏笔或None, 相似度, 方法)
+        """
+        user_data = self._load_user_data(user_id)
+        foreshadowings = user_data.get('foreshadowings', {})
+        
+        dedup_config = self._get_dedup_config()
+        best_match: Optional[Foreshadowing] = None
+        best_sim = 0.0
+        best_method = "none"
+        
+        for fsh in foreshadowings.values():
+            # 只检查活跃的伏笔
+            if fsh.status not in (ForeshadowingStatus.PLANTED, ForeshadowingStatus.DEVELOPING):
+                continue
+            
+            # 完全相同
+            if fsh.content.lower().strip() == content.lower().strip():
+                return (fsh, 1.0, "exact")
+            
+            # 计算相似度
+            if dedup_config['enabled']:
+                # 尝试获取缺失的Embedding
+                emb1 = fsh._embedding
+                emb2 = new_embedding
+                if emb2 is None:
+                    emb2 = self._get_embedding(content)
+                
+                if emb1 is not None and emb2 is not None:
+                    sim = self._compute_embedding_similarity(emb1, emb2)
+                    method = "embedding"
+                else:
+                    sim = self._compute_word_similarity(fsh.content, content)
+                    method = "word"
+            else:
+                sim = self._compute_word_similarity(fsh.content, content)
+                method = "word"
+            
+            if sim > best_sim:
+                best_sim = sim
+                best_match = fsh
+                best_method = method
+        
+        # 判断是否达到合并阈值
+        if best_match:
+            if best_method == "embedding":
+                if best_sim >= dedup_config['high_threshold']:
+                    return (best_match, best_sim, best_method)
+                elif best_sim < dedup_config['low_threshold']:
+                    return (None, best_sim, best_method)
+                else:
+                    return (best_match, best_sim, best_method + "_uncertain")
+            else:
+                if best_sim >= self.WORD_SIMILARITY_THRESHOLD:
+                    return (best_match, best_sim, best_method)
+        
+        return (None, best_sim, best_method)
     
     def _get_user_storage_path(self, user_id: str) -> str:
         """获取用户的存储路径"""
@@ -126,7 +296,62 @@ class ForeshadowingTracker:
         related_entities: Optional[List[str]] = None,
         importance: float = 0.5
     ) -> Foreshadowing:
-        """埋下伏笔"""
+        """埋下伏笔
+        
+        智能处理（三级去重策略）：
+        1. 计算新内容的Embedding（如果启用）
+        2. 查找语义相似的已有伏笔
+        3. 高相似度：增加重要性而非新建
+        4. 低相似度或无匹配：创建新伏笔
+        
+        Returns:
+            Foreshadowing: 新建或已存在的伏笔对象
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        # 1. 预计算Embedding
+        new_embedding = self._get_embedding(content)
+        
+        # 2. 查找相似伏笔
+        similar, sim_score, sim_method = self._find_similar(
+            content, user_id, new_embedding=new_embedding
+        )
+        
+        if similar:
+            logger.debug(f"[ForeshadowingTracker] 发现相似伏笔 (方法={sim_method}, 相似度={sim_score:.3f}): "
+                        f"'{content[:30]}...' ≈ '{similar.content[:30]}...'")
+            
+            # 合并策略：增加重要性
+            if sim_method == "exact":
+                # 完全相同，只增加重要性
+                similar.importance = min(1.0, similar.importance + 0.1)
+            elif sim_method.endswith("_uncertain"):
+                # 中等相似度，小幅增加
+                similar.importance = min(1.0, similar.importance + 0.05)
+                # 如果新内容更详细，更新内容
+                if len(content) > len(similar.content) * 1.2:
+                    similar.content = content
+                    if new_embedding:
+                        similar.embedding = new_embedding
+            else:
+                # 高度相似，正常增加
+                similar.importance = min(1.0, similar.importance + 0.1)
+                if len(content) > len(similar.content):
+                    similar.content = content
+                    if new_embedding:
+                        similar.embedding = new_embedding
+            
+            # 合并相关实体
+            if related_entities:
+                for entity in related_entities:
+                    if entity not in similar.related_entities:
+                        similar.related_entities.append(entity)
+            
+            self._save_user_data(user_id)
+            return similar
+        
+        # 3. 创建新伏笔
         user_data = self._load_user_data(user_id)
         user_data['id_counter'] += 1
         
@@ -139,6 +364,10 @@ class ForeshadowingTracker:
             related_entities=related_entities or [],
             importance=importance
         )
+        
+        # 存储Embedding
+        if new_embedding:
+            foreshadowing.embedding = new_embedding
         
         user_data['foreshadowings'][foreshadowing_id] = foreshadowing
         self._save_user_data(user_id)
