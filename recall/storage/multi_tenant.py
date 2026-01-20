@@ -140,6 +140,27 @@ class ScopedMemory:
             return self._memories.copy()
         return self._memories[-limit:]
     
+    def get_paginated(self, offset: int = 0, limit: int = 20) -> List[Dict[str, Any]]:
+        """分页获取记忆（高效版本，不复制整个列表）
+        
+        Args:
+            offset: 偏移量（跳过的记录数）
+            limit: 每页数量
+        
+        Returns:
+            List[Dict]: 分页后的记忆列表
+        """
+        # 直接切片，不需要复制整个列表
+        return self._memories[offset:offset + limit]
+    
+    def count(self) -> int:
+        """获取记忆总数（O(1)操作）
+        
+        Returns:
+            int: 记忆总数
+        """
+        return len(self._memories)
+    
     def get_recent(self, limit: int = 5) -> List[Dict[str, Any]]:
         """获取最近的记忆"""
         return self._memories[-limit:]

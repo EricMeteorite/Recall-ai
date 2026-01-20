@@ -640,6 +640,39 @@ class RecallEngine:
         scope = self.storage.get_scope(user_id)
         return scope.get_all(limit=limit)
     
+    def get_paginated(
+        self,
+        user_id: str = "default",
+        offset: int = 0,
+        limit: int = 20
+    ) -> tuple:
+        """分页获取记忆（高效版本）
+        
+        Args:
+            user_id: 用户ID
+            offset: 偏移量
+            limit: 每页数量
+        
+        Returns:
+            tuple: (memories, total_count)
+        """
+        scope = self.storage.get_scope(user_id)
+        total = scope.count()
+        memories = scope.get_paginated(offset=offset, limit=limit)
+        return memories, total
+    
+    def count_memories(self, user_id: str = "default") -> int:
+        """获取记忆总数（O(1)操作）
+        
+        Args:
+            user_id: 用户ID
+        
+        Returns:
+            int: 记忆总数
+        """
+        scope = self.storage.get_scope(user_id)
+        return scope.count()
+    
     def get(
         self,
         memory_id: str,

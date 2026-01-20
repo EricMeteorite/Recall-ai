@@ -16,7 +16,7 @@
     // 插件配置
     const defaultSettings = {
         enabled: true,
-        apiUrl: 'http://127.0.0.1:18888',
+        apiUrl: '',  // 留空，首次使用时智能检测
         autoInject: true,
         maxMemories: 10,
         maxContextTokens: 2000,     // 记忆注入的最大token数，根据你的AI模型调整
@@ -29,6 +29,28 @@
         autoChunkLongText: true,  // 自动分段长文本
         chunkSize: 2000        // 分段大小（字符数）
     };
+    
+    /**
+     * 智能检测 Recall API 地址
+     * 优先级：
+     * 1. 与当前页面同源（如果 ST 和 Recall 在同一服务器）
+     * 2. localhost:18888（本地开发）
+     * 3. 127.0.0.1:18888（本地开发备用）
+     */
+    function detectApiUrl() {
+        const currentHost = window.location.hostname;
+        const currentProtocol = window.location.protocol;
+        
+        // 如果是通过域名访问（不是 localhost/127.0.0.1）
+        // 假设 Recall 服务也部署在同一台服务器，端口 18888
+        if (currentHost && currentHost !== 'localhost' && currentHost !== '127.0.0.1') {
+            // 优先使用 http（Recall 默认不启用 https）
+            return `http://${currentHost}:18888`;
+        }
+        
+        // 本地开发环境
+        return 'http://127.0.0.1:18888';
+    }
     
     /**
      * 过滤掉AI回复中的思考过程
@@ -138,11 +160,26 @@ function loadSettings() {
     try {
         const saved = localStorage.getItem('recall_settings');
         if (saved) {
-            pluginSettings = { ...defaultSettings, ...JSON.parse(saved) };
+            const parsed = JSON.parse(saved);
+            pluginSettings = { ...defaultSettings, ...parsed };
+            
+            // 如果保存的设置没有 apiUrl 或是空的，自动检测
+            if (!pluginSettings.apiUrl) {
+                pluginSettings.apiUrl = detectApiUrl();
+                saveSettings();  // 保存检测到的地址
+                console.log('[Recall] 自动检测到 API 地址:', pluginSettings.apiUrl);
+            }
+        } else {
+            // 首次使用，自动检测 API 地址
+            pluginSettings = { ...defaultSettings };
+            pluginSettings.apiUrl = detectApiUrl();
+            saveSettings();
+            console.log('[Recall] 首次使用，自动设置 API 地址:', pluginSettings.apiUrl);
         }
     } catch (e) {
         console.warn('[Recall] 加载设置失败，使用默认值:', e.message);
         pluginSettings = { ...defaultSettings };
+        pluginSettings.apiUrl = detectApiUrl();
     }
 }
 
@@ -360,7 +397,8 @@ function createUI() {
                         <div class="recall-setting-group">
                             <label class="recall-setting-title">API 地址</label>
                             <input type="text" id="recall-api-url" value="${pluginSettings.apiUrl}" 
-                                   placeholder="http://127.0.0.1:18888" class="text_pole">
+                                   placeholder="自动检测或手动输入" class="text_pole">
+                            <div class="recall-setting-hint">💡 远程访问时需修改为服务器地址（如 http://你的域名:18888）</div>
                         </div>
                         
                         <div class="recall-setting-group">
@@ -1646,8 +1684,27 @@ function initializeCurrentCharacter() {
  * 检查API连接
  */
 async function checkConnection() {
+    console.log('[Recall] 正在连接:', pluginSettings.apiUrl);
+    
+    // 检查是否有混合内容问题 (HTTPS 页面请求 HTTP API)
+    const isPageHttps = window.location.protocol === 'https:';
+    const isApiHttp = pluginSettings.apiUrl.startsWith('http://');
+    if (isPageHttps && isApiHttp) {
+        console.warn('[Recall] ⚠️ 检测到混合内容问题：当前页面是 HTTPS，但 API 地址是 HTTP');
+        console.warn('[Recall] 浏览器可能会阻止此请求。请考虑：1) 使用 Nginx 反代并启用 HTTPS；2) 使用 HTTP 访问 SillyTavern');
+    }
+    
     try {
-        const response = await fetch(`${pluginSettings.apiUrl}/health`);
+        // 添加超时控制（5秒）
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+        
+        const response = await fetch(`${pluginSettings.apiUrl}/health`, {
+            signal: controller.signal,
+            mode: 'cors'
+        });
+        clearTimeout(timeoutId);
+        
         if (response.ok) {
             const wasConnected = isConnected;
             isConnected = true;
@@ -1666,12 +1723,39 @@ async function checkConnection() {
                 }
             }
         } else {
-            throw new Error('API 响应异常');
+            throw new Error(`API 响应异常: ${response.status}`);
         }
     } catch (e) {
         isConnected = false;
         updateConnectionStatus(false);
-        console.warn('[Recall] API 连接失败:', e.message);
+        
+        let errMsg = e.message;
+        let helpTip = '';
+        
+        if (e.name === 'AbortError') {
+            errMsg = '连接超时（5秒）';
+            helpTip = '请检查 Recall 服务是否启动';
+        } else if (e.name === 'TypeError' && e.message.includes('Failed to fetch')) {
+            errMsg = '无法连接';
+            // 提供针对性的帮助信息
+            const currentHost = window.location.hostname;
+            if (isPageHttps && isApiHttp) {
+                helpTip = `浏览器阻止了混合内容请求。建议：使用 http://${currentHost} 访问 SillyTavern`;
+            } else if (pluginSettings.apiUrl.includes('127.0.0.1') || pluginSettings.apiUrl.includes('localhost')) {
+                if (currentHost !== 'localhost' && currentHost !== '127.0.0.1') {
+                    helpTip = `当前从 ${currentHost} 访问，但 API 指向本地。请到设置中修改 API 地址为 http://${currentHost}:18888`;
+                } else {
+                    helpTip = '请确认 Recall 服务已启动（python -m recall.server）';
+                }
+            } else {
+                helpTip = '请检查 Recall 服务是否启动，以及网络连接是否正常';
+            }
+        }
+        
+        console.error(`[Recall] API 连接失败 (${pluginSettings.apiUrl}): ${errMsg}`);
+        if (helpTip) {
+            console.warn(`[Recall] 💡 提示: ${helpTip}`);
+        }
     }
 }
 
@@ -1695,7 +1779,11 @@ function updateConnectionStatus(connected) {
  */
 function onSaveSettings() {
     pluginSettings.enabled = document.getElementById('recall-enabled')?.checked ?? true;
-    pluginSettings.apiUrl = document.getElementById('recall-api-url')?.value ?? defaultSettings.apiUrl;
+    
+    // 处理 API URL：如果用户清空了，自动检测
+    const inputUrl = document.getElementById('recall-api-url')?.value?.trim();
+    pluginSettings.apiUrl = inputUrl || detectApiUrl();
+    
     pluginSettings.autoInject = document.getElementById('recall-auto-inject')?.checked ?? true;
     pluginSettings.filterThinking = document.getElementById('recall-filter-thinking')?.checked ?? true;
     pluginSettings.autoChunkLongText = document.getElementById('recall-auto-chunk')?.checked ?? true;
@@ -1707,6 +1795,11 @@ function onSaveSettings() {
     pluginSettings.injectDepth = parseInt(document.getElementById('recall-inject-depth')?.value) || 1;
     
     saveSettings();
+    
+    // 更新输入框显示检测到的地址
+    const apiUrlInput = document.getElementById('recall-api-url');
+    if (apiUrlInput) apiUrlInput.value = pluginSettings.apiUrl;
+    
     checkConnection();
     
     alert('设置已保存');
@@ -2527,8 +2620,20 @@ async function loadForeshadowings() {
     if (!isConnected) return;
     
     try {
+        // 添加超时控制（8秒）
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 8000);
+        
         const userId = encodeURIComponent(currentCharacterId || 'default');
-        const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing?user_id=${userId}`);
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing?user_id=${userId}`, {
+            signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        
         const data = await response.json();
         displayForeshadowings(data);
         
@@ -2539,7 +2644,8 @@ async function loadForeshadowings() {
             countEl.textContent = activeCount;
         }
     } catch (e) {
-        console.error('[Recall] 加载伏笔失败:', e);
+        const errMsg = e.name === 'AbortError' ? '请求超时' : e.message;
+        console.error('[Recall] 加载伏笔失败:', errMsg);
     }
 }
 
@@ -2550,8 +2656,20 @@ async function loadPersistentContexts() {
     if (!isConnected) return;
     
     try {
+        // 添加超时控制（8秒）
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 8000);
+        
         const userId = encodeURIComponent(currentCharacterId || 'default');
-        const response = await fetch(`${pluginSettings.apiUrl}/v1/persistent-contexts?user_id=${userId}`);
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/persistent-contexts?user_id=${userId}`, {
+            signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        
         const data = await response.json();
         displayPersistentContexts(data);
         
@@ -2559,7 +2677,8 @@ async function loadPersistentContexts() {
         const countEl = document.getElementById('recall-context-count');
         if (countEl) countEl.textContent = data.length;
     } catch (e) {
-        console.error('[Recall] 加载持久条件失败:', e);
+        const errMsg = e.name === 'AbortError' ? '请求超时' : e.message;
+        console.error('[Recall] 加载持久条件失败:', errMsg);
     }
 }
 

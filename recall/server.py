@@ -586,12 +586,12 @@ async def list_memories(
     """
     engine = get_engine()
     
-    # 先获取总数（不限制数量）
-    all_memories = engine.get_all(user_id=user_id, limit=None)
-    total_count = len(all_memories)
-    
-    # 应用分页
-    memories = all_memories[offset:offset + limit]
+    # 使用高效的分页方法，避免加载全部数据
+    memories, total_count = engine.get_paginated(
+        user_id=user_id,
+        offset=offset,
+        limit=limit
+    )
     
     return {
         "memories": memories, 
@@ -656,9 +656,8 @@ async def clear_memories(
     
     engine = get_engine()
     
-    # 先获取数量
-    memories = engine.get_all(user_id=user_id, limit=10000)
-    count = len(memories)
+    # 使用高效的计数方法获取数量
+    count = engine.count_memories(user_id=user_id)
     
     if count == 0:
         return {"success": True, "message": "该角色没有记忆数据", "deleted_count": 0}
