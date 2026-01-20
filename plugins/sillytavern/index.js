@@ -192,6 +192,7 @@ function createUI() {
                     <button class="recall-tab active" data-tab="memories">📚 记忆</button>
                     <button class="recall-tab" data-tab="contexts">📌 条件</button>
                     <button class="recall-tab" data-tab="foreshadowing">🎭 伏笔</button>
+                    <button class="recall-tab" data-tab="core-settings">📋 设定</button>
                     <button class="recall-tab" data-tab="settings">⚙️ 设置</button>
                 </div>
                 
@@ -283,6 +284,14 @@ function createUI() {
                 
                 <!-- 伏笔标签页 -->
                 <div id="recall-tab-foreshadowing" class="recall-tab-content">
+                    <div class="recall-stats-row">
+                        <span>🎭 活跃伏笔: <strong id="recall-foreshadowing-count">0</strong></span>
+                        <div class="recall-stats-actions">
+                            <button id="recall-refresh-foreshadowing-btn" class="recall-icon-btn" title="刷新">🔄</button>
+                            <button id="recall-analyze-foreshadowing-btn" class="recall-icon-btn" title="手动分析">🔍</button>
+                        </div>
+                    </div>
+                    
                     <div id="recall-foreshadowing-list" class="recall-foreshadowing-list">
                         <div class="recall-empty-state">
                             <div class="recall-empty-icon">🎭</div>
@@ -295,6 +304,65 @@ function createUI() {
                         <input type="text" id="recall-foreshadowing-input" placeholder="🎭 埋下新伏笔..." class="text_pole">
                         <button id="recall-foreshadowing-btn" class="menu_button menu_button_icon" title="埋下">
                             <i class="fa-solid fa-seedling"></i>
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- 核心设定标签页（L0 Core Settings） -->
+                <div id="recall-tab-core-settings" class="recall-tab-content">
+                    <div class="recall-setting-hint" style="margin-bottom:10px;">
+                        📋 核心设定是最高优先级的规则，会被注入到每次对话的上下文中。
+                    </div>
+                    
+                    <div class="recall-settings-section">
+                        <div class="recall-settings-section-title">🎭 角色卡设定</div>
+                        <textarea id="recall-core-character" class="text_pole recall-textarea" 
+                            placeholder="角色的核心设定、性格特征、背景故事等...
+例如：
+角色名: 小明
+性格: 开朗、乐于助人
+背景: 在现代都市生活的大学生" rows="5"></textarea>
+                    </div>
+                    
+                    <div class="recall-settings-section">
+                        <div class="recall-settings-section-title">🌍 世界观设定</div>
+                        <textarea id="recall-core-world" class="text_pole recall-textarea" 
+                            placeholder="故事发生的世界背景、时代设定、特殊规则等...
+例如：
+时代: 2024年现代都市
+地点: 某大学校园
+特殊设定: 无魔法、无超能力的普通世界" rows="4"></textarea>
+                    </div>
+                    
+                    <div class="recall-settings-section">
+                        <div class="recall-settings-section-title">✍️ 写作风格</div>
+                        <textarea id="recall-core-style" class="text_pole recall-textarea" 
+                            placeholder="期望的写作风格、语气、文风等...
+例如：
+风格: 轻松幽默
+语气: 亲切自然
+长度: 每次回复100-300字" rows="3"></textarea>
+                    </div>
+                    
+                    <div class="recall-settings-section">
+                        <div class="recall-settings-section-title">⚠️ 绝对规则</div>
+                        <div class="recall-setting-hint">每行一条规则，AI必须遵守</div>
+                        <textarea id="recall-core-rules" class="text_pole recall-textarea" 
+                            placeholder="绝对不能违反的规则，每行一条
+例如：
+角色不会主动伤害无辜的人
+角色说话时不会使用脏话
+保持角色设定的一致性" rows="4"></textarea>
+                    </div>
+                    
+                    <div class="recall-setting-actions" style="margin-top:10px;">
+                        <button id="recall-load-core-settings" class="menu_button">
+                            <i class="fa-solid fa-refresh"></i>
+                            <span>刷新</span>
+                        </button>
+                        <button id="recall-save-core-settings" class="menu_button menu_button_icon">
+                            <i class="fa-solid fa-save"></i>
+                            <span>保存设定</span>
                         </button>
                     </div>
                 </div>
@@ -557,6 +625,33 @@ function createUI() {
                         </div>
                     </div>
                     
+                    <!-- 系统管理 -->
+                    <div class="recall-settings-section recall-api-section">
+                        <div class="recall-settings-section-title">
+                            🛠️ 系统管理
+                        </div>
+                        
+                        <div class="recall-setting-actions" style="flex-wrap:wrap;gap:5px;">
+                            <button id="recall-reload-config" class="menu_button" title="热更新后端配置">
+                                <i class="fa-solid fa-rotate"></i>
+                                <span>热更新配置</span>
+                            </button>
+                            <button id="recall-consolidate-memories" class="menu_button" title="整合记忆">
+                                <i class="fa-solid fa-compress"></i>
+                                <span>整合记忆</span>
+                            </button>
+                            <button id="recall-show-stats" class="menu_button" title="查看统计">
+                                <i class="fa-solid fa-chart-bar"></i>
+                                <span>系统统计</span>
+                            </button>
+                        </div>
+                        
+                        <div id="recall-stats-display" class="recall-stats-display" style="display:none;margin-top:10px;padding:10px;background:#1a1a1a;border-radius:5px;">
+                            <div class="recall-stats-title">📊 系统统计</div>
+                            <div id="recall-stats-content"></div>
+                        </div>
+                    </div>
+                    
                     <div class="recall-info-box">
                         <div class="recall-info-title">💡 使用提示</div>
                         <ul>
@@ -597,6 +692,8 @@ function createUI() {
                 loadPersistentContexts();
             } else if (tabName === 'foreshadowing' && isConnected) {
                 loadForeshadowings();
+            } else if (tabName === 'core-settings' && isConnected) {
+                loadCoreSettings();
             }
         });
     });
@@ -631,6 +728,19 @@ function createUI() {
     // 伏笔分析器配置事件绑定
     document.getElementById('recall-load-analyzer-config')?.addEventListener('click', safeExecute(loadForeshadowingAnalyzerConfig, '加载伏笔分析器配置失败'));
     document.getElementById('recall-save-analyzer-config')?.addEventListener('click', safeExecute(onSaveForeshadowingAnalyzerConfig, '保存伏笔分析器配置失败'));
+    
+    // 伏笔标签页的新按钮
+    document.getElementById('recall-refresh-foreshadowing-btn')?.addEventListener('click', safeExecute(loadForeshadowings, '刷新伏笔失败'));
+    document.getElementById('recall-analyze-foreshadowing-btn')?.addEventListener('click', safeExecute(triggerForeshadowingAnalysis, '触发伏笔分析失败'));
+    
+    // 核心设定相关事件绑定
+    document.getElementById('recall-load-core-settings')?.addEventListener('click', safeExecute(loadCoreSettings, '加载核心设定失败'));
+    document.getElementById('recall-save-core-settings')?.addEventListener('click', safeExecute(saveCoreSettings, '保存核心设定失败'));
+    
+    // 系统管理相关事件绑定
+    document.getElementById('recall-reload-config')?.addEventListener('click', safeExecute(reloadServerConfig, '热更新配置失败'));
+    document.getElementById('recall-consolidate-memories')?.addEventListener('click', safeExecute(consolidateMemories, '整合记忆失败'));
+    document.getElementById('recall-show-stats')?.addEventListener('click', safeExecute(showSystemStats, '获取统计信息失败'));
     
     // 刷新模型列表按钮事件绑定
     document.getElementById('recall-refresh-embedding-models')?.addEventListener('click', safeExecute(loadEmbeddingModels, '获取 Embedding 模型列表失败'));
@@ -1249,6 +1359,237 @@ async function onSaveForeshadowingAnalyzerConfig() {
     }
 }
 
+// ==================== 核心设定 (Core Settings) 功能 ====================
+
+/**
+ * 加载核心设定
+ */
+async function loadCoreSettings() {
+    try {
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/core-settings`);
+        if (response.ok) {
+            const data = await response.json();
+            
+            // 填充表单
+            document.getElementById('recall-core-character').value = data.character_card || '';
+            document.getElementById('recall-core-world').value = data.world_setting || '';
+            document.getElementById('recall-core-style').value = data.writing_style || '';
+            
+            // 绝对规则是数组，转换为文本（每行一条）
+            const rulesArray = data.absolute_rules || [];
+            document.getElementById('recall-core-rules').value = rulesArray.join('\n');
+            
+            console.log('[Recall] 核心设定已加载');
+        } else {
+            console.error('[Recall] 加载核心设定失败:', response.status);
+        }
+    } catch (e) {
+        console.error('[Recall] 加载核心设定失败:', e);
+    }
+}
+
+/**
+ * 保存核心设定
+ */
+async function saveCoreSettings() {
+    const characterCard = document.getElementById('recall-core-character').value.trim();
+    const worldSetting = document.getElementById('recall-core-world').value.trim();
+    const writingStyle = document.getElementById('recall-core-style').value.trim();
+    const rulesText = document.getElementById('recall-core-rules').value.trim();
+    
+    // 解析绝对规则（每行一条，过滤空行）
+    const absoluteRules = rulesText
+        .split('\n')
+        .map(line => line.trim())
+        .filter(line => line.length > 0);
+    
+    const settingsData = {
+        character_card: characterCard || null,
+        world_setting: worldSetting || null,
+        writing_style: writingStyle || null,
+        absolute_rules: absoluteRules.length > 0 ? absoluteRules : null
+    };
+    
+    try {
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/core-settings`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(settingsData)
+        });
+        
+        if (response.ok) {
+            const result = await response.json();
+            alert(`✅ 核心设定已保存\n\n角色卡: ${result.character_card ? '已设置' : '未设置'}\n世界观: ${result.world_setting ? '已设置' : '未设置'}\n写作风格: ${result.writing_style ? '已设置' : '未设置'}\n绝对规则: ${(result.absolute_rules || []).length} 条`);
+            console.log('[Recall] 核心设定已保存');
+        } else {
+            const error = await response.json().catch(() => ({}));
+            alert(`❌ 保存核心设定失败: ${error.detail || '未知错误'}`);
+        }
+    } catch (e) {
+        alert(`❌ 保存核心设定失败: ${e.message}`);
+    }
+}
+
+// ==================== 伏笔分析触发 ====================
+
+/**
+ * 手动触发伏笔分析
+ */
+async function triggerForeshadowingAnalysis() {
+    const userId = encodeURIComponent(currentCharacterId || 'default');
+    
+    try {
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing/analyze/trigger?user_id=${userId}`, {
+            method: 'POST'
+        });
+        
+        if (response.ok) {
+            const result = await response.json();
+            
+            let message = '🔍 伏笔分析完成\n\n';
+            
+            if (result.triggered) {
+                if (result.new_foreshadowings && result.new_foreshadowings.length > 0) {
+                    message += `✨ 发现 ${result.new_foreshadowings.length} 个新伏笔\n`;
+                    result.new_foreshadowings.forEach((f, i) => {
+                        message += `  ${i + 1}. ${f.content || f}\n`;
+                    });
+                } else {
+                    message += '未发现新伏笔\n';
+                }
+                
+                if (result.potentially_resolved && result.potentially_resolved.length > 0) {
+                    message += `\n🎯 可能已解决的伏笔: ${result.potentially_resolved.length} 个\n`;
+                }
+            } else {
+                message += '分析器未触发（可能 LLM 未配置或无足够对话内容）';
+                if (result.error) {
+                    message += `\n错误: ${result.error}`;
+                }
+            }
+            
+            alert(message);
+            
+            // 刷新伏笔列表
+            loadForeshadowings();
+        } else {
+            const error = await response.json().catch(() => ({}));
+            alert(`❌ 触发伏笔分析失败: ${error.detail || '未知错误'}`);
+        }
+    } catch (e) {
+        alert(`❌ 触发伏笔分析失败: ${e.message}`);
+    }
+}
+
+// ==================== 系统管理功能 ====================
+
+/**
+ * 热更新服务端配置
+ */
+async function reloadServerConfig() {
+    try {
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/config/reload`, {
+            method: 'POST'
+        });
+        
+        if (response.ok) {
+            const result = await response.json();
+            alert(`✅ 配置已热更新\n\n${result.message || '配置重新加载成功'}`);
+            
+            // 重新加载前端配置
+            loadApiConfig();
+        } else {
+            const error = await response.json().catch(() => ({}));
+            alert(`❌ 热更新失败: ${error.detail || '未知错误'}`);
+        }
+    } catch (e) {
+        alert(`❌ 热更新失败: ${e.message}`);
+    }
+}
+
+/**
+ * 整合记忆
+ */
+async function consolidateMemories() {
+    const userId = encodeURIComponent(currentCharacterId || 'default');
+    
+    if (!confirm('确定要整合当前角色的记忆吗？\n\n这将触发记忆整合流程，可能需要一些时间。')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/consolidate?user_id=${userId}`, {
+            method: 'POST'
+        });
+        
+        if (response.ok) {
+            const result = await response.json();
+            alert(`✅ 记忆整合完成\n\n${result.message || '整合成功'}`);
+            
+            // 刷新记忆列表
+            loadMemories();
+        } else {
+            const error = await response.json().catch(() => ({}));
+            alert(`❌ 整合失败: ${error.detail || '未知错误'}`);
+        }
+    } catch (e) {
+        alert(`❌ 整合失败: ${e.message}`);
+    }
+}
+
+/**
+ * 显示系统统计
+ */
+async function showSystemStats() {
+    const statsDisplay = document.getElementById('recall-stats-display');
+    const statsContent = document.getElementById('recall-stats-content');
+    
+    if (!statsDisplay || !statsContent) return;
+    
+    // 切换显示状态
+    if (statsDisplay.style.display === 'none') {
+        statsDisplay.style.display = 'block';
+        statsContent.innerHTML = '<div style="text-align:center;padding:10px;">⏳ 加载中...</div>';
+        
+        try {
+            const response = await fetch(`${pluginSettings.apiUrl}/v1/stats`);
+            
+            if (response.ok) {
+                const stats = await response.json();
+                
+                let html = '<div class="recall-stats-grid">';
+                
+                // 全局统计
+                const globalStats = stats.global || {};
+                html += `<div class="recall-stat-item"><span class="recall-stat-label">总记忆数</span><span class="recall-stat-value">${globalStats.total_memories || 0}</span></div>`;
+                html += `<div class="recall-stat-item"><span class="recall-stat-label">活跃伏笔</span><span class="recall-stat-value">${globalStats.active_foreshadowings || 0}</span></div>`;
+                html += `<div class="recall-stat-item"><span class="recall-stat-label">实体数</span><span class="recall-stat-value">${globalStats.consolidated_entities || 0}</span></div>`;
+                html += `<div class="recall-stat-item"><span class="recall-stat-label">作用域</span><span class="recall-stat-value">${globalStats.total_scopes || 1}</span></div>`;
+                
+                // 模式信息
+                if (stats.lightweight !== undefined) {
+                    html += `<div class="recall-stat-item"><span class="recall-stat-label">运行模式</span><span class="recall-stat-value">${stats.lightweight ? '轻量' : '完整'}</span></div>`;
+                }
+                
+                // 索引状态
+                const indexStats = stats.indexes || {};
+                const indexCount = [indexStats.entity_index, indexStats.inverted_index, indexStats.vector_index, indexStats.ngram_index].filter(Boolean).length;
+                html += `<div class="recall-stat-item"><span class="recall-stat-label">活跃索引</span><span class="recall-stat-value">${indexCount}/4</span></div>`;
+                
+                html += '</div>';
+                
+                statsContent.innerHTML = html;
+            } else {
+                statsContent.innerHTML = '<div style="color:#ff6b6b;">❌ 获取统计信息失败</div>';
+            }
+        } catch (e) {
+            statsContent.innerHTML = `<div style="color:#ff6b6b;">❌ ${e.message}</div>`;
+        }
+    } else {
+        statsDisplay.style.display = 'none';
+    }
+}
+
 /**
  * 安全注册事件处理器
  */
@@ -1512,47 +1853,31 @@ async function onAddPersistentContext() {
 
 /**
  * 通知伏笔分析器处理新的一轮对话
+ * 【非阻塞】: 使用 fire-and-forget 模式，不等待服务器响应
+ * 服务器会在后台异步执行 LLM 分析，不阻塞 UI
  * @param {string} content 消息内容
  * @param {string} role 角色 ('user' 或 'assistant')
  */
-async function notifyForeshadowingAnalyzer(content, role) {
-    try {
-        const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing/analyze/turn`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                content: content,
-                role: role,
-                user_id: currentCharacterId || 'default'
-            })
-        });
-        
-        const result = await response.json();
-        
-        if (result.triggered) {
-            console.log('[Recall] 伏笔分析已触发');
-            
-            // 如果有新伏笔被自动埋下
-            if (result.new_foreshadowings && result.new_foreshadowings.length > 0) {
-                console.log(`[Recall] 自动检测到 ${result.new_foreshadowings.length} 个新伏笔`);
-                loadForeshadowings(); // 刷新伏笔列表
-            }
-            
-            // 如果有伏笔可能被解决
-            if (result.potentially_resolved && result.potentially_resolved.length > 0) {
-                console.log(`[Recall] 检测到 ${result.potentially_resolved.length} 个伏笔可能已被回收`);
-                loadForeshadowings(); // 刷新伏笔列表
-            }
-            
-            // 如果有错误
-            if (result.error) {
-                console.warn('[Recall] 伏笔分析警告:', result.error);
-            }
+function notifyForeshadowingAnalyzer(content, role) {
+    // Fire-and-forget: 发送请求但不等待响应
+    fetch(`${pluginSettings.apiUrl}/v1/foreshadowing/analyze/turn`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            content: content,
+            role: role,
+            user_id: currentCharacterId || 'default'
+        })
+    }).then(response => {
+        if (!response.ok) {
+            console.debug('[Recall] 伏笔分析通知发送失败:', response.status);
         }
-    } catch (e) {
+        // 不处理响应内容，服务器会在后台异步处理
+        // 如果需要刷新伏笔列表，可以通过定时器或手动刷新
+    }).catch(e => {
         // 静默失败，不影响主流程
         console.debug('[Recall] 伏笔分析器通知失败:', e.message);
-    }
+    });
 }
 
 /**
@@ -1568,7 +1893,7 @@ async function onMessageSent(messageIndex) {
         
         if (!message || !message.mes) return;
         
-        // 保存用户消息作为记忆
+        // 保存用户消息作为记忆（必须 await 确保保存成功）
         await fetch(`${pluginSettings.apiUrl}/v1/memories`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1584,8 +1909,8 @@ async function onMessageSent(messageIndex) {
         });
         console.log('[Recall] 已保存用户消息');
         
-        // 发送到伏笔分析器进行分析
-        await notifyForeshadowingAnalyzer(message.mes, 'user');
+        // 发送到伏笔分析器进行分析（非阻塞，不等待）
+        notifyForeshadowingAnalyzer(message.mes, 'user');
     } catch (e) {
         console.warn('[Recall] 保存用户消息失败:', e);
     }
@@ -1683,7 +2008,7 @@ async function onMessageReceived(messageIndex) {
             console.log(`[Recall] 长文本(${contentToSave.length}字)分成${chunks.length}段保存`);
         }
         
-        // 保存所有分段
+        // 保存所有分段（必须 await 确保每段都保存成功）
         const timestamp = Date.now();
         for (let i = 0; i < chunks.length; i++) {
             const chunk = chunks[i];
@@ -1713,8 +2038,8 @@ async function onMessageReceived(messageIndex) {
         
         console.log(`[Recall] 已保存AI响应 (${chunks.length}段, 共${contentToSave.length}字)`);
         
-        // 发送到伏笔分析器进行分析
-        await notifyForeshadowingAnalyzer(contentToSave, 'assistant');
+        // 发送到伏笔分析器进行分析（非阻塞，不等待）
+        notifyForeshadowingAnalyzer(contentToSave, 'assistant');
     } catch (e) {
         console.warn('[Recall] 保存AI响应失败:', e);
     }
@@ -2200,6 +2525,13 @@ async function loadForeshadowings() {
         const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing?user_id=${userId}`);
         const data = await response.json();
         displayForeshadowings(data);
+        
+        // 更新活跃伏笔计数
+        const countEl = document.getElementById('recall-foreshadowing-count');
+        if (countEl) {
+            const activeCount = Array.isArray(data) ? data.filter(f => f.status === 'planted' || f.status === 'developing').length : 0;
+            countEl.textContent = activeCount;
+        }
     } catch (e) {
         console.error('[Recall] 加载伏笔失败:', e);
     }
@@ -2376,19 +2708,33 @@ function displayForeshadowings(foreshadowings) {
         return;
     }
     
-    listEl.innerHTML = foreshadowings.map(f => `
-        <div class="recall-foreshadowing-item" data-id="${f.id}">
+    // 状态映射
+    const statusDisplay = {
+        'planted': '🌱 已埋下',
+        'developing': '🌿 发展中',
+        'resolved': '✓ 已解决',
+        'abandoned': '✕ 已放弃'
+    };
+    
+    listEl.innerHTML = foreshadowings.map(f => {
+        const isActive = f.status === 'planted' || f.status === 'developing';
+        return `
+        <div class="recall-foreshadowing-item ${f.status}" data-id="${f.id}">
             <div class="recall-memory-header">
-                <span class="recall-memory-role">${f.status === 'planted' ? '🌱 已埋下' : '🌿 已解决'}</span>
+                <span class="recall-memory-role">${statusDisplay[f.status] || f.status}</span>
                 <span class="recall-memory-time">重要性: ${(f.importance * 100).toFixed(0)}%</span>
             </div>
             <p class="recall-foreshadowing-content">${escapeHtml(f.content)}</p>
             <div class="recall-memory-footer">
                 <span></span>
-                ${f.status === 'planted' ? `<button class="recall-delete-btn recall-resolve-foreshadowing" data-id="${f.id}">✓ 解决</button>` : '<span class="recall-memory-score">已完成</span>'}
+                <div class="recall-foreshadowing-actions">
+                    ${isActive ? `<button class="recall-action-btn recall-resolve-foreshadowing" data-id="${f.id}" title="标记为已解决">✓ 解决</button>` : ''}
+                    ${isActive ? `<button class="recall-delete-btn recall-abandon-foreshadowing" data-id="${f.id}" title="放弃此伏笔">✕ 删除</button>` : '<span class="recall-memory-score">已完成</span>'}
+                </div>
             </div>
         </div>
-    `).join('');
+        `;
+    }).join('');
     
     // 绑定解决按钮事件
     listEl.querySelectorAll('.recall-resolve-foreshadowing').forEach(btn => {
@@ -2397,6 +2743,17 @@ function displayForeshadowings(foreshadowings) {
             const id = button.dataset.id;
             if (id && confirm('确定将此伏笔标记为已解决吗？')) {
                 await resolveForeshadowing(id);
+            }
+        });
+    });
+    
+    // 绑定删除/放弃按钮事件
+    listEl.querySelectorAll('.recall-abandon-foreshadowing').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            const button = e.currentTarget;
+            const id = button.dataset.id;
+            if (id && confirm('确定要放弃此伏笔吗？\n放弃后伏笔将被标记为"已放弃"状态。')) {
+                await abandonForeshadowing(id);
             }
         });
     });
@@ -2422,6 +2779,28 @@ async function resolveForeshadowing(foreshadowingId) {
         }
     } catch (e) {
         console.error('[Recall] 解决伏笔失败:', e);
+    }
+}
+
+/**
+ * 放弃/删除伏笔
+ */
+async function abandonForeshadowing(foreshadowingId) {
+    try {
+        const userId = encodeURIComponent(currentCharacterId || 'default');
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing/${foreshadowingId}?user_id=${userId}`, {
+            method: 'DELETE'
+        });
+        
+        if (response.ok) {
+            loadForeshadowings();
+            console.log(`[Recall] 伏笔已放弃 (角色: ${currentCharacterId})`);
+        } else {
+            const error = await response.json().catch(() => ({}));
+            console.error('[Recall] 放弃伏笔失败:', error.detail || '未知错误');
+        }
+    } catch (e) {
+        console.error('[Recall] 放弃伏笔失败:', e);
     }
 }
 

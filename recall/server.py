@@ -2,6 +2,7 @@
 
 import os
 import time
+import asyncio
 from typing import List, Dict, Any, Optional
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -962,27 +963,84 @@ async def resolve_foreshadowing(
     return {"success": True, "message": "伏笔已解决"}
 
 
+@app.delete("/v1/foreshadowing/{foreshadowing_id}", tags=["Foreshadowing"])
+async def abandon_foreshadowing(
+    foreshadowing_id: str,
+    user_id: str = Query(default="default", description="用户ID（角色名）")
+):
+    """放弃/删除伏笔
+    
+    将伏笔标记为已放弃状态（不会物理删除，保留历史记录）
+    """
+    engine = get_engine()
+    success = engine.abandon_foreshadowing(foreshadowing_id, user_id)
+    
+    if not success:
+        raise HTTPException(status_code=404, detail="伏笔不存在")
+    
+    return {"success": True, "message": "伏笔已放弃"}
+
+
 # ==================== 伏笔分析 API ====================
+
+# 后台分析任务集合（防止被垃圾回收）
+_background_analysis_tasks: set = set()
+
+
+async def _background_foreshadowing_analysis(engine: RecallEngine, content: str, role: str, user_id: str):
+    """后台异步执行伏笔分析
+    
+    这个函数在后台运行，不阻塞 API 响应。
+    使用引擎的异步分析方法来避免阻塞事件循环。
+    """
+    try:
+        # 在线程池中运行同步的分析方法，避免阻塞事件循环
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None,  # 使用默认线程池
+            lambda: engine.on_foreshadowing_turn(
+                content=content,
+                role=role,
+                user_id=user_id
+            )
+        )
+    except Exception as e:
+        print(f"[Recall] 后台伏笔分析失败: {e}")
+
 
 @app.post("/v1/foreshadowing/analyze/turn", response_model=ForeshadowingAnalysisResult, tags=["Foreshadowing Analysis"])
 async def analyze_foreshadowing_turn(request: ForeshadowingAnalysisRequest):
     """处理新的一轮对话（用于伏笔分析）
     
+    【非阻塞】: 立即返回响应，分析在后台异步执行。
+    客户端不需要等待 LLM 分析完成。
+    
     在每轮对话后调用此端点，分析器会根据配置决定是否触发分析：
     - 手动模式：不做任何操作，返回空结果
-    - LLM模式：累积对话，达到触发条件时自动分析
+    - LLM模式：累积对话，达到触发条件时在后台自动分析
     """
     engine = get_engine()
-    result = engine.on_foreshadowing_turn(
-        content=request.content,
-        role=request.role,
-        user_id=request.user_id
+    
+    # 创建后台任务执行分析（不等待结果）
+    task = asyncio.create_task(
+        _background_foreshadowing_analysis(
+            engine=engine,
+            content=request.content,
+            role=request.role,
+            user_id=request.user_id
+        )
     )
+    
+    # 保存任务引用防止被垃圾回收
+    _background_analysis_tasks.add(task)
+    task.add_done_callback(_background_analysis_tasks.discard)
+    
+    # 立即返回，不等待分析完成
     return ForeshadowingAnalysisResult(
-        triggered=result.triggered,
-        new_foreshadowings=result.new_foreshadowings,
-        potentially_resolved=result.potentially_resolved,
-        error=result.error
+        triggered=False,  # 实际触发状态在后台处理
+        new_foreshadowings=[],
+        potentially_resolved=[],
+        error=None
     )
 
 

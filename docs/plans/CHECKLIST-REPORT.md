@@ -9,8 +9,8 @@
 
 | 状态 | 数量 | 占比 |
 |:-----|:----:|:----:|
-| ✅ 完全实现 | 26 | 93% |
-| 🔧 部分实现 | 1 | 3.5% |
+| ✅ 完全实现 | 24 | 86% |
+| 🔧 部分实现 | 3 | 11% |
 | ❌ 未实现（可选功能） | 1 | 3.5% |
 | **总计** | **28** | **100%** |
 
@@ -23,6 +23,7 @@
 > - ✅ **L0 CoreSettings注入**：engine.build_context正确注入核心设定（2026-01-20修复）
 > - ⭐ **计划外新增4项**：持久条件系统、配置热更新、伏笔分析器增强、CoreSettings API（第三组）
 > - 🔧 **规范100%遵守**：L0注入✅ 规则编译器待v3.1
+> - 🔧 **前端功能不完整**：部分后端 API 未有前端调用（详见1.2节）
 > - ❌ CodeIndexer 是代码场景功能，RP场景可选
 
 ---
@@ -43,6 +44,46 @@
 | **_check_timeline 空实现** | `consistency.py` | 实现了简化版时间线冲突检测 |
 | **BloomFilter.might_contain 错误** | `eight_layer.py`, `ngram_index.py` | 修正为使用 `in` 运算符 |
 | **N-gram追加原文目录不存在** | `ngram_index.py` | 在 `append_raw_content` 中添加 `os.makedirs` |
+| **⭐ 伏笔删除/放弃功能缺失** | `engine.py`, `server.py`, `index.js` | 2026-01-20修复：添加完整的 abandon 功能链路 |
+
+---
+
+## 一点二、严格诚实的问题清单（2026-01-20 深度审计）
+
+> ⚠️ **以下问题是实际存在的，之前的报告声称已完成但实际上不完整：**
+
+### ✅ 前端功能补全（2026-01-20 完成）
+
+| 后端 API | 功能说明 | 前端状态 | 实现位置 |
+|---------|---------|:-------:|---------|
+| `/v1/core-settings` (GET/PUT) | 角色卡、世界观、绝对规则 | ✅ 已实现 | 📋设定 标签页 |
+| `/v1/entities/{name}` | 实体信息查询 | 🟡 低优先 | 可通过搜索替代 |
+| `/v1/entities/{name}/related` | 相关实体查询 | 🟡 低优先 | 知识图谱v3.1版本 |
+| `/v1/stats` | 系统统计信息 | ✅ 已实现 | ⚙️设置 → 系统统计按钮 |
+| `/v1/users` | 用户/角色列表 | 🟡 低优先 | ST已有角色切换 |
+| `/v1/consolidate` | 记忆整合 | ✅ 已实现 | ⚙️设置 → 整合记忆按钮 |
+| `/v1/foreshadowing/analyze/trigger` | 手动触发伏笔分析 | ✅ 已实现 | 🎭伏笔 标签页 🔍按钮 |
+| `/v1/config/reload` | 配置热更新 | ✅ 已实现 | ⚙️设置 → 热更新配置按钮 |
+
+### ✅ 已修复的代码实现问题（2026-01-20）
+
+| 问题 | 修复状态 |
+|------|---------|
+| `get_context_for_prompt` 位置 | ✅ 在 `ForeshadowingTracker`（第457行），文档已更正 |
+| `engine.build_context` 使用方法 | ✅ 已改用 `tracker.get_context_for_prompt()`（第814行） |
+| 主动提醒逻辑 | ✅ 已启用，传入 `current_turn` 参数支持重要伏笔提醒 |
+
+### ✅ 已确认完整的功能
+
+| 功能 | 验证结果 |
+|------|---------|
+| 100%不遗忘 | ✅ N-gram raw_search + VolumeManager 双重保障 |
+| 8层检索 | ✅ 完整实现，含终极兜底 |
+| 伏笔 CRUD | ✅ plant/resolve/abandon/get_active 全链路 |
+| 持久条件系统 | ✅ 添加/删除/压缩/自动提取 |
+| 消息保存 | ✅ 前端正确调用 /v1/memories |
+| 上下文注入 | ✅ onBeforeGeneration 调用 /v1/context |
+| 伏笔分析 | ✅ notifyForeshadowingAnalyzer 火灾遗忘模式 |
 
 ### 设计决策说明（非bug）
 

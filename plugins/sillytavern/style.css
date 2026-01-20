@@ -301,6 +301,44 @@
     color: #f44336;
 }
 
+/* 动作按钮（解决伏笔等）*/
+.recall-action-btn {
+    padding: 3px 8px;
+    background: transparent;
+    border: 1px solid rgba(76, 175, 80, 0.3);
+    border-radius: 4px;
+    color: #81c784;
+    font-size: 10px;
+    cursor: pointer;
+    opacity: 0;
+    transition: all 0.2s;
+}
+
+.recall-foreshadowing-item:hover .recall-action-btn {
+    opacity: 1;
+}
+
+.recall-action-btn:hover {
+    background: rgba(76, 175, 80, 0.2);
+    border-color: rgba(76, 175, 80, 0.5);
+    color: #4caf50;
+}
+
+/* 伏笔操作按钮容器 */
+.recall-foreshadowing-actions {
+    display: flex;
+    gap: 6px;
+}
+
+/* 伏笔状态样式 */
+.recall-foreshadowing-item.resolved {
+    opacity: 0.6;
+}
+
+.recall-foreshadowing-item.abandoned {
+    opacity: 0.4;
+}
+
 /* 展开状态 */
 .recall-memory-item.expanded {
     max-height: none;
@@ -700,4 +738,67 @@
     font-size: 10px;
     color: var(--SmartThemeBodyColor, #888);
     opacity: 0.7;
+}
+/* ========== 核心设定标签页 ========== */
+.recall-textarea {
+    width: 100%;
+    min-height: 80px;
+    resize: vertical;
+    font-family: inherit;
+    font-size: 12px;
+    line-height: 1.5;
+    padding: 8px 10px;
+    background: var(--SmartThemeBlurTintColor, rgba(0,0,0,0.2));
+    border: 1px solid var(--SmartThemeBorderColor, #333);
+    border-radius: 4px;
+    color: var(--SmartThemeBodyColor, #ddd);
+}
+
+.recall-textarea:focus {
+    outline: none;
+    border-color: var(--SmartThemeQuoteColor, #7c7cff);
+}
+
+.recall-textarea::placeholder {
+    color: var(--SmartThemeBodyColor, #666);
+    opacity: 0.7;
+}
+
+/* ========== 系统统计显示 ========== */
+.recall-stats-display {
+    background: var(--SmartThemeBlurTintColor, rgba(0,0,0,0.3));
+    border: 1px solid var(--SmartThemeBorderColor, #333);
+    border-radius: 6px;
+}
+
+.recall-stats-title {
+    font-weight: 600;
+    font-size: 12px;
+    margin-bottom: 10px;
+    color: var(--SmartThemeQuoteColor, #7c7cff);
+}
+
+.recall-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+}
+
+.recall-stat-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 10px;
+    background: rgba(255,255,255,0.03);
+    border-radius: 4px;
+    font-size: 11px;
+}
+
+.recall-stat-label {
+    color: var(--SmartThemeBodyColor, #999);
+}
+
+.recall-stat-value {
+    font-weight: 600;
+    color: var(--SmartThemeQuoteColor, #7c7cff);
 }

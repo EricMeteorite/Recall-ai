@@ -24,14 +24,15 @@
 """
 
 import json
+import os
 import time
+import threading
 from enum import Enum
-from typing import Optional, List, Dict, Any, TYPE_CHECKING
+from typing import Optional, List, Dict, Any, TYPE_CHECKING, Callable
 from dataclasses import dataclass, field
 
 if TYPE_CHECKING:
     from .foreshadowing import ForeshadowingTracker
-
 
 class AnalyzerBackend(Enum):
     """分析器后端类型"""
@@ -266,24 +267,44 @@ Important:
     def __init__(
         self, 
         tracker: 'ForeshadowingTracker',
-        config: Optional[ForeshadowingAnalyzerConfig] = None
+        config: Optional[ForeshadowingAnalyzerConfig] = None,
+        storage_dir: Optional[str] = None,
+        memory_provider: Optional[Callable[[str, int], List[Dict[str, Any]]]] = None
     ):
         """初始化分析器
         
         Args:
             tracker: ForeshadowingTracker 实例（必需）
             config: 分析器配置（可选，默认为手动模式）
+            storage_dir: 持久化目录（可选，用于保存分析状态）
+            memory_provider: 获取记忆的回调函数（可选），签名: (user_id, limit) -> List[Dict]
+                           用于从已保存的记忆构建对话，提高可靠性
         """
         if tracker is None:
             raise ValueError("tracker 参数不能为 None")
         
         self.tracker = tracker
         self.config = config or ForeshadowingAnalyzerConfig.manual()
+        self._storage_dir = storage_dir
+        self._memory_provider = memory_provider
         
         # 对话缓冲区（按用户分隔）
         self._buffers: Dict[str, List[Dict[str, Any]]] = {}
         # 轮次计数器（按用户分隔）
         self._turn_counters: Dict[str, int] = {}
+        
+        # 【新增】分析锁（按用户分隔，防止并发分析冲突）
+        self._analysis_locks: Dict[str, threading.Lock] = {}
+        self._locks_lock = threading.Lock()  # 保护 _analysis_locks 字典本身
+        
+        # 【新增】最后分析位置记录（按用户分隔）
+        # 格式: {user_id: {'last_memory_id': str, 'last_timestamp': float}}
+        self._analysis_markers: Dict[str, Dict[str, Any]] = {}
+        
+        # 【新增】从持久化文件加载分析状态
+        if storage_dir:
+            os.makedirs(storage_dir, exist_ok=True)
+            self._load_analysis_markers()
         
         # LLM 客户端（懒加载）
         self._llm_client = None
@@ -292,6 +313,53 @@ Important:
         if self.config.backend == AnalyzerBackend.LLM:
             self._init_llm_client()
     
+    def _get_user_lock(self, user_id: str) -> threading.Lock:
+        """获取指定用户的分析锁（线程安全）"""
+        with self._locks_lock:
+            if user_id not in self._analysis_locks:
+                self._analysis_locks[user_id] = threading.Lock()
+            return self._analysis_locks[user_id]
+    
+    def _get_markers_file_path(self) -> Optional[str]:
+        """获取分析标记文件路径"""
+        if not self._storage_dir:
+            return None
+        return os.path.join(self._storage_dir, 'analysis_markers.json')
+    
+    def _load_analysis_markers(self):
+        """从文件加载分析标记（服务器重启时恢复状态）"""
+        markers_file = self._get_markers_file_path()
+        if not markers_file or not os.path.exists(markers_file):
+            return
+        
+        try:
+            with open(markers_file, 'r', encoding='utf-8') as f:
+                self._analysis_markers = json.load(f)
+            print(f"[Recall] 已加载伏笔分析状态（{len(self._analysis_markers)} 个用户）")
+        except Exception as e:
+            print(f"[Recall] 加载分析标记失败: {e}")
+            self._analysis_markers = {}
+    
+    def _save_analysis_markers(self):
+        """保存分析标记到文件"""
+        markers_file = self._get_markers_file_path()
+        if not markers_file:
+            return
+        
+        try:
+            with open(markers_file, 'w', encoding='utf-8') as f:
+                json.dump(self._analysis_markers, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"[Recall] 保存分析标记失败: {e}")
+    
+    def _update_analysis_marker(self, user_id: str, memory_id: Optional[str] = None):
+        """更新指定用户的分析标记"""
+        self._analysis_markers[user_id] = {
+            'last_memory_id': memory_id,
+            'last_timestamp': time.time()
+        }
+        self._save_analysis_markers()
+
     def _init_llm_client(self):
         """初始化 LLM 客户端"""
         if not self.config.llm_api_key:
@@ -384,26 +452,87 @@ Important:
             error="LLM 分析未启用（需配置 API key）"
         )
     
+    def _get_conversation_from_memories(self, user_id: str) -> List[Dict[str, Any]]:
+        """从已保存的记忆中获取对话内容
+        
+        这是对 buffer 的补充/替代，确保即使 buffer 丢失也能从记忆恢复。
+        优先使用 memory_provider（如果配置），否则使用 buffer。
+        
+        Returns:
+            List[Dict]: 对话列表，格式与 buffer 相同
+        """
+        if not self._memory_provider:
+            # 没有配置 memory_provider，使用原有的 buffer
+            return self._buffers.get(user_id, [])
+        
+        try:
+            # 获取最近的记忆（限制数量）
+            limit = self.config.max_context_turns * 2
+            memories = self._memory_provider(user_id, limit)
+            
+            if not memories:
+                # 记忆为空，回退到 buffer
+                return self._buffers.get(user_id, [])
+            
+            # 转换记忆格式为对话格式
+            conversations = []
+            for mem in memories:
+                metadata = mem.get('metadata', {})
+                role = metadata.get('role', 'user')
+                content = mem.get('content', '')
+                timestamp = metadata.get('timestamp', 0)
+                
+                if content:
+                    conversations.append({
+                        'role': role,
+                        'content': content,
+                        'timestamp': timestamp,
+                        'memory_id': metadata.get('id')  # 保留记忆ID用于标记
+                    })
+            
+            # 按时间戳排序（确保顺序正确）
+            conversations.sort(key=lambda x: x.get('timestamp', 0))
+            
+            return conversations
+            
+        except Exception as e:
+            print(f"[Recall] 从记忆获取对话失败: {e}，回退到 buffer")
+            return self._buffers.get(user_id, [])
+    
     def _trigger_llm_analysis(self, user_id: str) -> AnalysisResult:
-        """触发 LLM 分析"""
+        """触发 LLM 分析（带锁保护）"""
         if not self.is_llm_enabled:
             return AnalysisResult(
                 triggered=False,
                 error="LLM 客户端未初始化"
             )
         
-        buffer = self._buffers.get(user_id, [])
-        if not buffer:
+        # 【新增】获取用户锁，防止同一用户的并发分析
+        user_lock = self._get_user_lock(user_id)
+        
+        # 尝试获取锁，如果已经有分析在进行则跳过
+        if not user_lock.acquire(blocking=False):
+            print(f"[Recall] 用户 {user_id} 的伏笔分析正在进行中，跳过本次")
             return AnalysisResult(
-                triggered=True,
-                error="对话缓冲区为空"
+                triggered=False,
+                error="分析正在进行中"
             )
         
         try:
+            # 【改进】优先从已保存的记忆获取对话
+            conversations = self._get_conversation_from_memories(user_id)
+            
+            if not conversations:
+                return AnalysisResult(
+                    triggered=True,
+                    error="对话缓冲区为空"
+                )
+            
+            # 限制对话数量
+            conversations = conversations[-self.config.max_context_turns * 2:]
+            
             # 构建对话文本
-            conversation = self._format_conversation(
-                buffer[-self.config.max_context_turns * 2:]
-            )
+            conversation_text = self._format_conversation(conversations)
             
             # 获取当前活跃的伏笔
             active = self.tracker.get_active(user_id)
@@ -419,7 +548,7 @@ Important:
             # 构建提示词
             prompt = prompt_template.format(
                 active_foreshadowings=active_text or "（暂无）" if self.config.language == 'zh' else "(None)",
-                conversation=conversation
+                conversation=conversation_text
             )
             
             # 调用 LLM
@@ -464,7 +593,13 @@ Important:
                         except Exception as e:
                             print(f"[Recall] 自动解决伏笔失败: {e}")
             
-            # 清空已分析的缓冲区
+            # 【改进】更新分析标记（记录最后分析的记忆ID）
+            last_memory_id = None
+            if conversations and 'memory_id' in conversations[-1]:
+                last_memory_id = conversations[-1]['memory_id']
+            self._update_analysis_marker(user_id, last_memory_id)
+            
+            # 清空已分析的缓冲区（保持向后兼容）
             self._buffers[user_id] = []
             
             return result
@@ -474,6 +609,9 @@ Important:
                 triggered=True,
                 error=f"LLM 分析失败: {str(e)}"
             )
+        finally:
+            # 【重要】确保释放锁
+            user_lock.release()
     
     def _format_conversation(self, turns: List[Dict[str, Any]]) -> str:
         """格式化对话内容"""

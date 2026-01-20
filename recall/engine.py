@@ -211,9 +211,13 @@ class RecallEngine:
         )
         
         # 伏笔分析器（可选功能，默认手动模式）
+        # 传入 memory_provider 用于从已保存记忆获取对话，提高可靠性
+        # 传入 storage_dir 用于持久化分析状态，服务器重启不丢失
         self.foreshadowing_analyzer = ForeshadowingAnalyzer(
             tracker=self.foreshadowing_tracker,
-            config=self._foreshadowing_config  # 可能是 None，会使用默认手动模式
+            config=self._foreshadowing_config,  # 可能是 None，会使用默认手动模式
+            storage_dir=os.path.join(self.data_root, 'data', 'foreshadowing_analyzer'),
+            memory_provider=self._get_recent_memories_for_analysis
         )
         
         self.consistency_checker = ConsistencyChecker()
@@ -263,6 +267,31 @@ class RecallEngine:
         
         # 预加载最近的卷（确保热数据在内存中，支持上万轮RP）
         self.volume_manager.preload_recent()
+    
+    def _get_recent_memories_for_analysis(self, user_id: str, limit: int) -> List[Dict[str, Any]]:
+        """获取最近的记忆用于伏笔分析
+        
+        这是 ForeshadowingAnalyzer 的 memory_provider 回调函数。
+        从已保存的记忆中获取对话，确保分析基于已持久化的数据。
+        
+        Args:
+            user_id: 用户/角色ID
+            limit: 最大返回数量
+            
+        Returns:
+            List[Dict]: 记忆列表，按时间排序
+        """
+        try:
+            scope = self.storage.get_scope(user_id)
+            memories = scope.get_all(limit=limit)
+            
+            # 按时间戳排序（旧 -> 新）
+            memories.sort(key=lambda m: m.get('metadata', {}).get('timestamp', 0))
+            
+            return memories
+        except Exception as e:
+            print(f"[Recall] 获取记忆失败: {e}")
+            return []
     
     def _get_memory_content_by_id(self, memory_id: str) -> Optional[str]:
         """通过 ID 获取记忆内容（供检索器回调）
@@ -780,11 +809,15 @@ class RecallEngine:
             if recent_section:
                 parts.append(recent_section)
         
-        # ========== 5. 伏笔层（所有活跃伏笔）==========
-        active_foreshadowings = self.get_active_foreshadowings(user_id)
-        if active_foreshadowings:
-            foreshadowing_section = self._format_foreshadowings(active_foreshadowings)
-            parts.append(foreshadowing_section)
+        # ========== 5. 伏笔层（所有活跃伏笔 + 主动提醒）==========
+        # 使用 tracker 的专用方法，包含主动提醒逻辑（重要伏笔长期未推进会提醒 AI）
+        foreshadowing_context = self.foreshadowing_tracker.get_context_for_prompt(
+            user_id=user_id,
+            max_count=5,
+            current_turn=self.volume_manager.get_total_turns() if self.volume_manager else None
+        )
+        if foreshadowing_context:
+            parts.append(foreshadowing_context)
         
         return "\n".join(parts)
     
@@ -983,6 +1016,24 @@ class RecallEngine:
     ) -> bool:
         """解决伏笔"""
         return self.foreshadowing_tracker.resolve(foreshadowing_id, resolution, user_id)
+    
+    def abandon_foreshadowing(
+        self,
+        foreshadowing_id: str,
+        user_id: str = "default"
+    ) -> bool:
+        """放弃/删除伏笔
+        
+        将伏笔标记为已放弃状态（不会物理删除，保留历史记录）
+        
+        Args:
+            foreshadowing_id: 伏笔ID
+            user_id: 用户ID
+            
+        Returns:
+            bool: 是否成功
+        """
+        return self.foreshadowing_tracker.abandon(foreshadowing_id, user_id)
     
     def get_active_foreshadowings(self, user_id: str = "default") -> List[Foreshadowing]:
         """获取活跃伏笔"""
