@@ -2124,10 +2124,21 @@ async function loadMemories() {
     currentMemoryOffset = 0;
     
     try {
-        // 获取记忆列表
+        // 添加超时控制（10秒）
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000);
+        
+        // 获取记忆列表（明确传入 offset=0）
         const response = await fetch(
-            `${pluginSettings.apiUrl}/v1/memories?user_id=${encodeURIComponent(currentCharacterId || 'default')}&limit=${MEMORIES_PER_PAGE}`
+            `${pluginSettings.apiUrl}/v1/memories?user_id=${encodeURIComponent(currentCharacterId || 'default')}&limit=${MEMORIES_PER_PAGE}&offset=0`,
+            { signal: controller.signal }
         );
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        
         const data = await response.json();
         
         // 更新统计信息（使用 total 总数，而不是当前页的 count）
@@ -2144,8 +2155,14 @@ async function loadMemories() {
         hasMoreMemories = loadedCount < (data.total || 0);
         updateLoadMoreButton();
         
+        console.log('[Recall] 记忆加载完成:', { count: data.count, total: data.total, hasMore: hasMoreMemories });
+        
     } catch (e) {
-        console.error('[Recall] 加载记忆失败:', e);
+        if (e.name === 'AbortError') {
+            console.warn('[Recall] 加载记忆超时');
+        } else {
+            console.error('[Recall] 加载记忆失败:', e);
+        }
     }
 }
 
@@ -2334,10 +2351,24 @@ async function onLoadMoreMemories() {
     
     try {
         currentMemoryOffset += MEMORIES_PER_PAGE;
+        
+        // 添加超时控制（10秒）
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000);
+        
         const response = await fetch(
-            `${pluginSettings.apiUrl}/v1/memories?user_id=${encodeURIComponent(currentCharacterId || 'default')}&limit=${MEMORIES_PER_PAGE}&offset=${currentMemoryOffset}`
+            `${pluginSettings.apiUrl}/v1/memories?user_id=${encodeURIComponent(currentCharacterId || 'default')}&limit=${MEMORIES_PER_PAGE}&offset=${currentMemoryOffset}`,
+            { signal: controller.signal }
         );
+        clearTimeout(timeoutId);
+        
+        // 检查响应状态
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
         const data = await response.json();
+        console.log('[Recall] 加载更多响应:', { offset: currentMemoryOffset, count: data.count, total: data.total });
         
         if (data.memories && data.memories.length > 0) {
             appendMemories(data.memories);
@@ -2353,9 +2384,14 @@ async function onLoadMoreMemories() {
         console.error('[Recall] 加载更多记忆失败:', e);
         // 出错时回滚 offset
         currentMemoryOffset -= MEMORIES_PER_PAGE;
+        // 显示错误提示
+        const errMsg = e.name === 'AbortError' ? '请求超时，请检查网络连接' : e.message;
+        toastr?.warning?.(`加载更多失败: ${errMsg}`, 'Recall') || console.warn(`加载更多失败: ${errMsg}`);
     } finally {
         isLoadingMore = false;
-        if (loadMoreBtn) loadMoreBtn.textContent = '加载更多...';
+        // 重新获取按钮元素（防止 DOM 被重建导致引用失效）
+        const btn = document.getElementById('recall-load-more-btn');
+        if (btn) btn.textContent = '加载更多...';
     }
 }
 
