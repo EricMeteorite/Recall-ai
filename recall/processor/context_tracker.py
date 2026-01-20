@@ -110,6 +110,9 @@ class PersistentContext:
         # 兼容旧数据（没有 _embedding 字段）
         if '_embedding' not in data:
             data['_embedding'] = None
+        # 移除归档时添加的额外字段（这些字段不是 PersistentContext 的属性）
+        data.pop('archived_at', None)
+        data.pop('archive_reason', None)
         return cls(**data)
 
 
@@ -117,11 +120,12 @@ class ContextTracker:
     """持久上下文追踪器
     
     增长控制策略：
-    1. 每个类型最多保留 max_per_type 个条件（默认5个）
+    1. 每个类型最多保留 max_per_type 个条件（默认10个）
     2. 相似内容自动合并（增加置信度而非新增）- 使用 Embedding 语义相似度
     3. 置信度衰减：长期未被引用的条件置信度下降
     4. 超出数量时，淘汰置信度最低的
     5. 有LLM时，可以智能压缩多个条件
+    6. 低置信度条件自动归档到 archive/contexts.jsonl
     
     智能去重机制：
     - 第一级：Embedding 向量余弦相似度（>0.85 直接合并，0.70-0.85 可能相似）
@@ -129,13 +133,41 @@ class ContextTracker:
     - 第三级：定期批量整理合并
     """
     
-    # 配置常量
-    MAX_PER_TYPE = 5          # 每类型最多保留5个条件
-    MAX_TOTAL = 30            # 总数最多30个
-    DECAY_DAYS = 7            # 7天未使用开始衰减
-    DECAY_RATE = 0.1          # 每次衰减10%置信度
-    MIN_CONFIDENCE = 0.2      # 最低置信度，低于此自动删除
+    # 配置常量（从环境变量读取，支持热更新）
+    @staticmethod
+    def _get_limits_config():
+        """获取限制配置（每次调用时读取，支持热更新）"""
+        return {
+            'max_per_type': int(os.environ.get('CONTEXT_MAX_PER_TYPE', '10')),
+            'max_total': int(os.environ.get('CONTEXT_MAX_TOTAL', '100')),
+            'decay_days': int(os.environ.get('CONTEXT_DECAY_DAYS', '14')),
+            'decay_rate': float(os.environ.get('CONTEXT_DECAY_RATE', '0.05')),
+            'min_confidence': float(os.environ.get('CONTEXT_MIN_CONFIDENCE', '0.1')),
+        }
+    
+    # 兼容旧代码的属性访问
+    @property
+    def MAX_PER_TYPE(self) -> int:
+        return self._get_limits_config()['max_per_type']
+    
+    @property
+    def MAX_TOTAL(self) -> int:
+        return self._get_limits_config()['max_total']
+    
+    @property
+    def DECAY_DAYS(self) -> int:
+        return self._get_limits_config()['decay_days']
+    
+    @property
+    def DECAY_RATE(self) -> float:
+        return self._get_limits_config()['decay_rate']
+    
+    @property
+    def MIN_CONFIDENCE(self) -> float:
+        return self._get_limits_config()['min_confidence']
+    
     SIMILARITY_THRESHOLD = 0.6  # 词重叠相似度阈值（后备方案）
+    FLOAT_EPSILON = 1e-9  # 浮点数比较容差
     
     # 智能去重配置（从环境变量读取，支持热更新）
     @staticmethod
@@ -151,23 +183,38 @@ class ContextTracker:
             'low_threshold': float(os.environ.get('DEDUP_LOW_THRESHOLD', '0.70'))
         }
     
-    def __init__(self, storage_dir: str, llm_client: Optional[Any] = None, 
-                 embedding_backend: Optional[Any] = None):
+    def __init__(self, base_path: Optional[str] = None, llm_client: Optional[Any] = None, 
+                 embedding_backend: Optional[Any] = None, storage_dir: Optional[str] = None):
         """初始化持久上下文追踪器
         
+        存储结构：{base_path}/{user_id}/{character_id}/contexts.json
+        与 MultiTenantStorage 和 ForeshadowingTracker 保持一致的路径结构。
+        
         Args:
-            storage_dir: 存储目录
+            base_path: 数据根目录（新参数，推荐使用）
             llm_client: LLM 客户端（用于智能提取和压缩）
             embedding_backend: Embedding 后端（用于智能去重），如果为 None 会尝试自动获取
+            storage_dir: 旧参数（向后兼容），如果提供则自动迁移到新结构
         """
-        self.storage_dir = storage_dir
+        # 向后兼容：如果提供了 storage_dir 而非 base_path
+        if storage_dir and not base_path:
+            # 旧的 storage_dir 格式是 {data_root}/data/contexts
+            # 新的 base_path 格式是 {data_root}/data
+            if storage_dir.endswith('contexts'):
+                base_path = os.path.dirname(storage_dir)
+            else:
+                base_path = storage_dir
+        
+        self.base_path = base_path
         self.llm_client = llm_client
-        self.contexts: Dict[str, List[PersistentContext]] = {}  # user_id -> contexts
+        # 按 {user_id}/{character_id} 分隔的上下文存储
+        self.contexts: Dict[str, List[PersistentContext]] = {}  # cache_key -> contexts
         
         # Embedding 后端（用于智能去重）
         self.embedding_backend = embedding_backend
         
-        os.makedirs(storage_dir, exist_ok=True)
+        if base_path:
+            os.makedirs(base_path, exist_ok=True)
         self._load_all()
         
         # 条件检测模式（用于自动从对话中提取条件）
@@ -220,33 +267,167 @@ class ContextTracker:
 
 只返回JSON，不要其他解释。"""
     
+    def _sanitize_path_component(self, name: str) -> str:
+        """清理路径组件中的非法字符"""
+        return "".join(c if c.isalnum() or c in ('_', '-') else '_' for c in name)
+    
+    def _get_cache_key(self, user_id: str, character_id: str) -> str:
+        """获取内部缓存键"""
+        return f"{user_id}/{character_id}"
+    
+    def _get_storage_path(self, user_id: str, character_id: str) -> str:
+        """获取存储路径
+        
+        新结构：{base_path}/{user_id}/{character_id}/contexts.json
+        """
+        safe_user_id = self._sanitize_path_component(user_id)
+        safe_char_id = self._sanitize_path_component(character_id)
+        return os.path.join(self.base_path, safe_user_id, safe_char_id, 'contexts.json')
+    
     def _load_all(self):
-        """加载所有用户的上下文"""
-        if not os.path.exists(self.storage_dir):
+        """加载所有用户/角色的上下文（新结构）"""
+        if not self.base_path or not os.path.exists(self.base_path):
             return
         
-        for filename in os.listdir(self.storage_dir):
-            if filename.endswith('_contexts.json'):
-                user_id = filename[:-14]  # 去掉 _contexts.json
-                self._load_user(user_id)
+        # 新结构：遍历 {base_path}/{user_id}/{character_id}/contexts.json
+        for user_id in os.listdir(self.base_path):
+            user_path = os.path.join(self.base_path, user_id)
+            if not os.path.isdir(user_path) or user_id.startswith('.'):
+                continue
+            for character_id in os.listdir(user_path):
+                char_path = os.path.join(user_path, character_id)
+                if not os.path.isdir(char_path):
+                    continue
+                ctx_file = os.path.join(char_path, 'contexts.json')
+                if os.path.exists(ctx_file):
+                    self._load_user(user_id, character_id)
     
-    def _load_user(self, user_id: str):
-        """加载用户的上下文"""
-        filepath = os.path.join(self.storage_dir, f'{user_id}_contexts.json')
+    def _load_user(self, user_id: str, character_id: str = "default"):
+        """加载用户/角色的上下文"""
+        cache_key = self._get_cache_key(user_id, character_id)
+        filepath = self._get_storage_path(user_id, character_id)
         if os.path.exists(filepath):
-            with open(filepath, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                self.contexts[user_id] = [
-                    PersistentContext.from_dict(item) for item in data
-                ]
+            try:
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    self.contexts[cache_key] = [
+                        PersistentContext.from_dict(item) for item in data
+                    ]
+            except Exception as e:
+                print(f"[Recall] 加载上下文数据失败 ({user_id}/{character_id}): {e}")
+                self.contexts[cache_key] = []
     
-    def _save_user(self, user_id: str):
-        """保存用户的上下文"""
-        filepath = os.path.join(self.storage_dir, f'{user_id}_contexts.json')
-        contexts = self.contexts.get(user_id, [])
+    def _save_user(self, user_id: str, character_id: str = "default"):
+        """保存用户/角色的上下文"""
+        cache_key = self._get_cache_key(user_id, character_id)
+        filepath = self._get_storage_path(user_id, character_id)
+        # 确保目录存在
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        contexts = self.contexts.get(cache_key, [])
         with open(filepath, 'w', encoding='utf-8') as f:
             json.dump([c.to_dict() for c in contexts], f, ensure_ascii=False, indent=2)
     
+    # =========================
+    # 归档机制（低置信度条件自动归档）
+    # =========================
+    
+    MAX_ARCHIVE_FILE_SIZE = 10 * 1024 * 1024  # 10MB 归档文件大小上限
+    
+    def _get_archive_path(self, user_id: str, character_id: str) -> str:
+        """获取归档文件路径
+        
+        路径格式：{base_path}/{user_id}/{character_id}/archive/contexts.jsonl
+        """
+        safe_user_id = self._sanitize_path_component(user_id)
+        safe_char_id = self._sanitize_path_component(character_id)
+        archive_dir = os.path.join(self.base_path, safe_user_id, safe_char_id, 'archive')
+        os.makedirs(archive_dir, exist_ok=True)
+        return os.path.join(archive_dir, 'contexts.jsonl')
+    
+    def _archive_context(self, ctx: 'PersistentContext', user_id: str, character_id: str,
+                         reason: str = 'low_confidence') -> bool:
+        """将单个条件归档到 JSONL 文件
+        
+        归档格式：每行一个 JSON 对象，包含完整条件数据和归档时间
+        
+        Args:
+            ctx: 要归档的条件
+            user_id: 用户ID
+            character_id: 角色ID
+            reason: 归档原因 ('low_confidence', 'type_overflow', 'total_overflow')
+        
+        Returns:
+            bool: 归档是否成功
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        try:
+            archive_path = self._get_archive_path(user_id, character_id)
+            
+            # 检查文件大小，如果超过上限则轮转
+            if os.path.exists(archive_path):
+                file_size = os.path.getsize(archive_path)
+                if file_size >= self.MAX_ARCHIVE_FILE_SIZE:
+                    # 轮转文件：contexts.jsonl -> contexts_001.jsonl
+                    base_name = archive_path.rsplit('.', 1)[0]
+                    suffix = 1
+                    while os.path.exists(f"{base_name}_{suffix:03d}.jsonl"):
+                        suffix += 1
+                    os.rename(archive_path, f"{base_name}_{suffix:03d}.jsonl")
+                    logger.info(f"[ContextTracker] 归档文件轮转: contexts.jsonl -> contexts_{suffix:03d}.jsonl")
+            
+            # 准备归档数据
+            archive_data = ctx.to_dict()
+            archive_data['archived_at'] = time.time()
+            archive_data['archive_reason'] = reason
+            
+            # 追加写入 JSONL
+            with open(archive_path, 'a', encoding='utf-8') as f:
+                f.write(json.dumps(archive_data, ensure_ascii=False) + '\n')
+            
+            logger.debug(f"[ContextTracker] 已归档条件: {ctx.id} (置信度={ctx.confidence:.2f}, 原因={reason})")
+            return True
+            
+        except Exception as e:
+            logger.error(f"[ContextTracker] 归档条件失败: {e}")
+            return False
+    
+    def get_context_by_id(self, context_id: str, user_id: str = "default", 
+                          character_id: str = "default") -> Optional['PersistentContext']:
+        """根据ID获取条件（包括已归档的）
+        
+        优先从活跃条件中查找，找不到再去归档中找（包括分卷文件）
+        """
+        # 先从活跃条件中找
+        cache_key = self._get_cache_key(user_id, character_id)
+        if cache_key in self.contexts:
+            for ctx in self.contexts[cache_key]:
+                if ctx.id == context_id:
+                    return ctx
+        
+        # 再从归档中找（搜索所有归档文件，包括分卷）
+        if self.base_path:
+            safe_user_id = self._sanitize_path_component(user_id)
+            safe_char_id = self._sanitize_path_component(character_id)
+            archive_dir = os.path.join(self.base_path, safe_user_id, safe_char_id, 'archive')
+            
+            if os.path.exists(archive_dir):
+                for filename in os.listdir(archive_dir):
+                    if filename.startswith('contexts') and filename.endswith('.jsonl'):
+                        archive_path = os.path.join(archive_dir, filename)
+                        try:
+                            with open(archive_path, 'r', encoding='utf-8') as f:
+                                for line in f:
+                                    if line.strip():
+                                        data = json.loads(line)
+                                        if data.get('id') == context_id:
+                                            return PersistentContext.from_dict(data)
+                        except Exception:
+                            pass
+        
+        return None
+
     def _get_embedding(self, text: str) -> Optional[List[float]]:
         """获取文本的Embedding向量
         
@@ -347,7 +528,8 @@ class ContextTracker:
         sim = self._compute_word_similarity(text1, text2)
         return (sim, "word")
     
-    def _find_similar(self, content: str, user_id: str, context_type: ContextType,
+    def _find_similar(self, content: str, user_id: str, character_id: str,
+                     context_type: ContextType,
                      new_embedding: Optional[List[float]] = None) -> Tuple[Optional[PersistentContext], float, str]:
         """查找语义相似的已有条件
         
@@ -360,6 +542,7 @@ class ContextTracker:
         Args:
             content: 新条件内容
             user_id: 用户ID
+            character_id: 角色ID
             context_type: 条件类型
             new_embedding: 新条件的Embedding向量（可选，如果提供则避免重复计算）
             
@@ -367,7 +550,8 @@ class ContextTracker:
             Tuple[Optional[PersistentContext], float, str]: 
                 (相似条件或None, 相似度, 方法 "exact"/"embedding"/"word")
         """
-        if user_id not in self.contexts:
+        cache_key = self._get_cache_key(user_id, character_id)
+        if cache_key not in self.contexts:
             return (None, 0.0, "none")
         
         dedup_config = self._get_dedup_config()
@@ -375,7 +559,7 @@ class ContextTracker:
         best_sim = 0.0
         best_method = "none"
         
-        for existing in self.contexts[user_id]:
+        for existing in self.contexts[cache_key]:
             if existing.context_type != context_type:
                 continue
             if not existing.is_active:
@@ -421,25 +605,42 @@ class ContextTracker:
         
         return (None, best_sim, best_method)
     
-    def _enforce_limits(self, user_id: str):
-        """强制执行数量限制"""
-        if user_id not in self.contexts:
+    def _enforce_limits(self, user_id: str, character_id: str = "default"):
+        """强制执行数量限制
+        
+        处理流程：
+        1. 应用置信度衰减
+        2. 归档并删除低置信度条件
+        3. 按类型限制数量（溢出的归档）
+        4. 按总数限制数量（溢出的归档）
+        """
+        cache_key = self._get_cache_key(user_id, character_id)
+        if cache_key not in self.contexts:
             return
         
-        contexts = self.contexts[user_id]
+        contexts = self.contexts[cache_key]
         
-        # 1. 应用置信度衰减
+        # 1. 应用置信度衰减（指数衰减）
         now = time.time()
         decay_threshold = now - (self.DECAY_DAYS * 24 * 3600)
         
         for ctx in contexts:
             if ctx.is_active and ctx.last_used < decay_threshold:
-                ctx.confidence = max(self.MIN_CONFIDENCE, ctx.confidence - self.DECAY_RATE)
+                # 乘法衰减（指数衰减）：每次衰减 DECAY_RATE 比例
+                # 例如 DECAY_RATE=0.05 时，每次衰减后保留 95% 的置信度
+                # 低于 MIN_CONFIDENCE 时会被下面的逻辑归档
+                ctx.confidence = max(0, ctx.confidence * (1 - self.DECAY_RATE))
         
-        # 2. 删除置信度太低且不活跃的，以及置信度低于阈值的（即使活跃也标记为不活跃）
+        # 2. 归档并删除低置信度条件
+        to_archive = []
         for ctx in contexts:
-            if ctx.confidence < self.MIN_CONFIDENCE:
+            if ctx.confidence <= self.MIN_CONFIDENCE + self.FLOAT_EPSILON:  # 使用类常量容差
                 ctx.is_active = False
+                to_archive.append(ctx)
+        
+        # 归档低置信度条件
+        for ctx in to_archive:
+            self._archive_context(ctx, user_id, character_id, reason='low_confidence')
         
         # 只保留活跃的
         contexts = [c for c in contexts if c.is_active]
@@ -451,21 +652,31 @@ class ContextTracker:
                 by_type[ctx.context_type] = []
             by_type[ctx.context_type].append(ctx)
         
-        # 每类型只保留置信度最高的 MAX_PER_TYPE 个
+        # 每类型只保留置信度最高的 MAX_PER_TYPE 个，超出的归档
         kept = []
         for ctx_type, type_contexts in by_type.items():
             # 按置信度排序
             type_contexts.sort(key=lambda c: -c.confidence)
             kept.extend(type_contexts[:self.MAX_PER_TYPE])
+            # 超出的归档
+            for ctx in type_contexts[self.MAX_PER_TYPE:]:
+                self._archive_context(ctx, user_id, character_id, reason='type_overflow')
         
         # 4. 总数限制
         if len(kept) > self.MAX_TOTAL:
             kept.sort(key=lambda c: -c.confidence)
+            # 超出的归档
+            for ctx in kept[self.MAX_TOTAL:]:
+                self._archive_context(ctx, user_id, character_id, reason='total_overflow')
             kept = kept[:self.MAX_TOTAL]
         
-        self.contexts[user_id] = kept
+        self.contexts[cache_key] = kept
+        
+        # 保存更改（确保归档后的状态持久化）
+        self._save_user(user_id, character_id)
     
     def add(self, content: str, context_type: ContextType, user_id: str = "default",
+            character_id: str = "default",
             source_turn: str = None, keywords: List[str] = None,
             related_entities: List[str] = None) -> PersistentContext:
         """添加持久上下文
@@ -485,15 +696,16 @@ class ContextTracker:
         import logging
         logger = logging.getLogger(__name__)
         
-        if user_id not in self.contexts:
-            self.contexts[user_id] = []
+        cache_key = self._get_cache_key(user_id, character_id)
+        if cache_key not in self.contexts:
+            self.contexts[cache_key] = []
         
         # 1. 预计算新内容的Embedding（避免重复计算）
         new_embedding = self._get_embedding(content)
         
         # 2. 检查是否有语义相似的已有条件
         similar, sim_score, sim_method = self._find_similar(
-            content, user_id, context_type, new_embedding=new_embedding
+            content, user_id, character_id, context_type, new_embedding=new_embedding
         )
         
         if similar:
@@ -529,7 +741,7 @@ class ContextTracker:
                     if new_embedding:
                         similar.embedding = new_embedding
             
-            self._save_user(user_id)
+            self._save_user(user_id, character_id)
             return similar
         
         # 3. 创建新条件
@@ -547,29 +759,30 @@ class ContextTracker:
         if new_embedding:
             ctx.embedding = new_embedding
         
-        self.contexts[user_id].append(ctx)
+        self.contexts[cache_key].append(ctx)
         
         # 4. 强制执行数量限制
-        self._enforce_limits(user_id)
+        self._enforce_limits(user_id, character_id)
         
         # 检查新条件是否被淘汰了
-        if ctx not in self.contexts[user_id]:
+        if ctx not in self.contexts[cache_key]:
             # 条件被淘汰了（因为置信度不够高），标记为不活跃
             ctx.is_active = False
             logger.debug(f"[ContextTracker] 新条件因数量限制被淘汰: {content[:50]}...")
         
-        self._save_user(user_id)
+        self._save_user(user_id, character_id)
         return ctx
     
-    def get_active(self, user_id: str = "default") -> List[PersistentContext]:
+    def get_active(self, user_id: str = "default", character_id: str = "default") -> List[PersistentContext]:
         """获取所有活跃的持久上下文"""
-        if user_id not in self.contexts:
+        cache_key = self._get_cache_key(user_id, character_id)
+        if cache_key not in self.contexts:
             return []
         
         now = time.time()
         active = []
         
-        for ctx in self.contexts[user_id]:
+        for ctx in self.contexts[cache_key]:
             if not ctx.is_active:
                 continue
             if ctx.expires_at and ctx.expires_at < now:
@@ -581,66 +794,76 @@ class ContextTracker:
         active.sort(key=lambda c: (-c.confidence, c.context_type.value))
         return active
     
-    def get_by_type(self, context_type: ContextType, user_id: str = "default") -> List[PersistentContext]:
+    def get_by_type(self, context_type: ContextType, user_id: str = "default",
+                    character_id: str = "default") -> List[PersistentContext]:
         """按类型获取上下文"""
-        return [c for c in self.get_active(user_id) if c.context_type == context_type]
+        return [c for c in self.get_active(user_id, character_id) if c.context_type == context_type]
     
-    def deactivate(self, context_id: str, user_id: str = "default") -> bool:
+    def deactivate(self, context_id: str, user_id: str = "default",
+                   character_id: str = "default") -> bool:
         """停用某个上下文"""
-        if user_id not in self.contexts:
+        cache_key = self._get_cache_key(user_id, character_id)
+        if cache_key not in self.contexts:
             return False
         
-        for ctx in self.contexts[user_id]:
+        for ctx in self.contexts[cache_key]:
             if ctx.id == context_id:
                 ctx.is_active = False
-                self._save_user(user_id)
+                self._save_user(user_id, character_id)
                 return True
         return False
     
-    def mark_used(self, context_id: str, user_id: str = "default", save: bool = True):
+    def mark_used(self, context_id: str, user_id: str = "default", character_id: str = "default",
+                  save: bool = True):
         """标记上下文被使用
         
         Args:
             context_id: 条件ID
             user_id: 用户ID
+            character_id: 角色ID
             save: 是否立即保存（批量操作时设为False，最后统一保存）
         """
-        if user_id not in self.contexts:
+        cache_key = self._get_cache_key(user_id, character_id)
+        if cache_key not in self.contexts:
             return
         
-        for ctx in self.contexts[user_id]:
+        for ctx in self.contexts[cache_key]:
             if ctx.id == context_id:
                 ctx.last_used = time.time()
                 ctx.use_count += 1
                 if save:
-                    self._save_user(user_id)
+                    self._save_user(user_id, character_id)
                 return
     
-    def mark_used_batch(self, context_ids: List[str], user_id: str = "default"):
+    def mark_used_batch(self, context_ids: List[str], user_id: str = "default",
+                        character_id: str = "default"):
         """批量标记上下文被使用（只保存一次）"""
-        if user_id not in self.contexts or not context_ids:
+        cache_key = self._get_cache_key(user_id, character_id)
+        if cache_key not in self.contexts or not context_ids:
             return
         
         now = time.time()
         id_set = set(context_ids)  # 转成 set 提高查找效率
-        for ctx in self.contexts[user_id]:
+        for ctx in self.contexts[cache_key]:
             if ctx.id in id_set:
                 ctx.last_used = now
                 ctx.use_count += 1
         
-        self._save_user(user_id)
+        self._save_user(user_id, character_id)
     
-    def extract_from_text(self, text: str, user_id: str = "default") -> List[PersistentContext]:
+    def extract_from_text(self, text: str, user_id: str = "default",
+                          character_id: str = "default") -> List[PersistentContext]:
         """从文本中自动提取持久上下文
         
         优先使用 LLM，如果没有 LLM 则使用规则
         """
         if self.llm_client:
-            return self._extract_with_llm(text, user_id)
+            return self._extract_with_llm(text, user_id, character_id)
         else:
-            return self._extract_with_rules(text, user_id)
+            return self._extract_with_rules(text, user_id, character_id)
     
-    def _extract_with_rules(self, text: str, user_id: str) -> List[PersistentContext]:
+    def _extract_with_rules(self, text: str, user_id: str,
+                            character_id: str = "default") -> List[PersistentContext]:
         """使用规则提取"""
         extracted = []
         seen_contents = set()  # 避免重复
@@ -677,13 +900,15 @@ class ContextTracker:
                     ctx = self.add(
                         content=content,
                         context_type=context_type,
-                        user_id=user_id
+                        user_id=user_id,
+                        character_id=character_id
                     )
                     extracted.append(ctx)
         
         return extracted
     
-    def _extract_with_llm(self, text: str, user_id: str) -> List[PersistentContext]:
+    def _extract_with_llm(self, text: str, user_id: str,
+                          character_id: str = "default") -> List[PersistentContext]:
         """使用 LLM 提取"""
         try:
             prompt = self.extraction_prompt.format(content=text)
@@ -703,6 +928,7 @@ class ContextTracker:
                             content=item['content'],
                             context_type=ContextType(item['type']),
                             user_id=user_id,
+                            character_id=character_id,
                             keywords=item.get('keywords', [])
                         )
                         extracted.append(ctx)
@@ -714,11 +940,15 @@ class ContextTracker:
             print(f"[ContextTracker] LLM提取失败，回退到规则提取: {e}")
         
         # 回退到规则提取
-        return self._extract_with_rules(text, user_id)
+        return self._extract_with_rules(text, user_id, character_id)
     
-    def format_for_prompt(self, user_id: str = "default") -> str:
-        """格式化为提示词注入"""
-        active = self.get_active(user_id)
+    def format_for_prompt(self, user_id: str = "default", character_id: str = "default") -> str:
+        """格式化为提示词注入
+        
+        注意：本方法不再自动调用 _enforce_limits()，避免重复衰减检查。
+        调用方（如 engine.build_context）应负责在适当时机调用衰减检查。
+        """
+        active = self.get_active(user_id, character_id)
         if not active:
             return ""
         
@@ -758,9 +988,10 @@ class ContextTracker:
         lines.append("</persistent_context>")
         return "\n".join(lines)
     
-    def get_relevant(self, query: str, user_id: str = "default", top_k: int = 5) -> List[PersistentContext]:
+    def get_relevant(self, query: str, user_id: str = "default", character_id: str = "default",
+                     top_k: int = 5) -> List[PersistentContext]:
         """获取与查询最相关的上下文"""
-        active = self.get_active(user_id)
+        active = self.get_active(user_id, character_id)
         if not active:
             return []
         
@@ -793,7 +1024,8 @@ class ContextTracker:
         scored.sort(key=lambda x: -x[1])
         return [ctx for ctx, score in scored[:top_k]]
     
-    def consolidate_contexts(self, user_id: str = "default", force: bool = False) -> int:
+    def consolidate_contexts(self, user_id: str = "default", character_id: str = "default",
+                             force: bool = False) -> int:
         """智能压缩合并相似的持久条件
         
         当条件数量超过阈值或强制执行时，使用LLM将相似条件合并
@@ -801,10 +1033,12 @@ class ContextTracker:
         Returns:
             减少的条件数量
         """
-        if user_id not in self.contexts:
+        cache_key = self._get_cache_key(user_id, character_id)
+        
+        if cache_key not in self.contexts:
             return 0
         
-        contexts = [c for c in self.contexts[user_id] if c.is_active]
+        contexts = [c for c in self.contexts[cache_key] if c.is_active]
         original_count = len(contexts)
         
         # 只有条件数量超过阈值或强制执行时才压缩
@@ -825,21 +1059,22 @@ class ContextTracker:
             
             if self.llm_client:
                 # 使用 LLM 压缩
-                self._consolidate_with_llm(type_contexts, ctx_type, user_id)
+                self._consolidate_with_llm(type_contexts, ctx_type, user_id, character_id)
             else:
                 # 简单压缩：保留置信度最高的几个
                 type_contexts.sort(key=lambda c: -c.confidence)
                 for ctx in type_contexts[self.MAX_PER_TYPE:]:
                     ctx.is_active = False
         
-        self._save_user(user_id)
+        self._save_user(user_id, character_id)
         
         # 计算减少的数量
-        new_count = len([c for c in self.contexts[user_id] if c.is_active])
+        new_count = len([c for c in self.contexts[cache_key] if c.is_active])
         return original_count - new_count
     
     def _consolidate_with_llm(self, contexts: List[PersistentContext], 
-                              ctx_type: ContextType, user_id: str):
+                              ctx_type: ContextType, user_id: str,
+                              character_id: str = "default"):
         """使用 LLM 压缩合并同类型的条件"""
         try:
             # 构建条件列表
@@ -867,18 +1102,27 @@ class ContextTracker:
             if json_match:
                 merged = json.loads(json_match.group(0))
                 
-                # 停用旧条件
+                # 过滤有效内容
+                valid_contents = [c.strip() for c in merged[:self.MAX_PER_TYPE] if c and c.strip()]
+                
+                # 如果 LLM 返回空结果，使用回退策略
+                if not valid_contents:
+                    raise ValueError("LLM 返回空结果")
+                
+                # 停用旧条件（只在确认有新条件后再停用）
                 for ctx in contexts:
                     ctx.is_active = False
                 
                 # 添加合并后的条件
-                for content in merged[:self.MAX_PER_TYPE]:
-                    if content.strip():
-                        self.add(
-                            content=content.strip(),
-                            context_type=ctx_type,
-                            user_id=user_id
-                        )
+                for content in valid_contents:
+                    self.add(
+                        content=content,
+                        context_type=ctx_type,
+                        user_id=user_id,
+                        character_id=character_id
+                    )
+            else:
+                raise ValueError("LLM 响应格式无效")
                         
         except Exception as e:
             print(f"[ContextTracker] LLM压缩失败: {e}")
@@ -887,9 +1131,17 @@ class ContextTracker:
             for ctx in contexts[self.MAX_PER_TYPE:]:
                 ctx.is_active = False
     
-    def get_stats(self, user_id: str = "default") -> Dict[str, Any]:
+    # get_by_id 是 get_context_by_id 的别名，保持API一致性
+    def get_by_id(self, context_id: str, user_id: str = "default", 
+                  character_id: str = "default") -> Optional[PersistentContext]:
+        """get_context_by_id 的别名，保持与 ForeshadowingTracker 的 API 一致"""
+        return self.get_context_by_id(context_id, user_id, character_id)
+    
+    def get_stats(self, user_id: str = "default", character_id: str = "default") -> Dict[str, Any]:
         """获取持久条件的统计信息"""
-        if user_id not in self.contexts:
+        cache_key = self._get_cache_key(user_id, character_id)
+        
+        if cache_key not in self.contexts:
             return {
                 "total": 0,
                 "active": 0,
@@ -898,7 +1150,7 @@ class ContextTracker:
                 "oldest_days": 0
             }
         
-        contexts = self.contexts[user_id]
+        contexts = self.contexts[cache_key]
         active = [c for c in contexts if c.is_active]
         
         # 按类型统计

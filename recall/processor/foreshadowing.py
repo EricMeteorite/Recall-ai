@@ -77,45 +77,80 @@ class Foreshadowing:
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'Foreshadowing':
-        """从字典创建（兼容旧数据：无embedding字段）"""
+        """从字典创建（兼容旧数据和归档数据）"""
         data = data.copy()
         data['status'] = ForeshadowingStatus(data['status'])
         # 向后兼容：旧数据可能没有 _embedding 字段
         if '_embedding' not in data:
             data['_embedding'] = None
+        # 移除归档时添加的额外字段（这些字段不是 Foreshadowing 的属性）
+        data.pop('archived_at', None)
+        data.pop('archive_reason', None)
         return cls(**data)
 
 
 class ForeshadowingTracker:
-    """伏笔追踪器 - 支持多角色分隔存储
+    """伏笔追踪器 - 支持多用户/多角色分隔存储
+    
+    存储结构：{base_path}/{user_id}/{character_id}/foreshadowings.json
+    归档结构：{base_path}/{user_id}/{character_id}/archive/foreshadowings.jsonl
+    与 MultiTenantStorage 保持一致的路径结构。
     
     三级语义去重策略：
     1. Embedding余弦相似度（快速过滤）- 相似度>=0.85自动合并
     2. 完全相同检测（精确匹配）
     3. 词重叠后备方案（兼容无Embedding场景）
     
+    归档机制：
+    - resolved/abandoned 状态的伏笔自动归档
+    - 超过 MAX_ACTIVE 上限时，按优先级归档低重要性伏笔
+    
     配置通过环境变量控制：
     - DEDUP_EMBEDDING_ENABLED: 是否启用Embedding去重
     - DEDUP_HIGH_THRESHOLD: 高相似度阈值（自动合并）
     - DEDUP_LOW_THRESHOLD: 低相似度阈值（视为不同）
+    - FORESHADOWING_MAX_RETURN: 伏笔召回数量
+    - FORESHADOWING_MAX_ACTIVE: 活跃伏笔数量上限
     """
     
     # 词重叠相似度阈值（后备方案）
     WORD_SIMILARITY_THRESHOLD = 0.6
+    # 归档文件最大大小（10MB），超过则分卷
+    MAX_ARCHIVE_FILE_SIZE = 10 * 1024 * 1024
     
-    def __init__(self, storage_dir: Optional[str] = None, embedding_backend: Optional[Any] = None):
+    @staticmethod
+    def _get_limits_config():
+        """获取限制配置（每次调用时读取，支持热更新）"""
+        return {
+            'max_return': int(os.environ.get('FORESHADOWING_MAX_RETURN', '10')),
+            'max_active': int(os.environ.get('FORESHADOWING_MAX_ACTIVE', '50')),
+        }
+    
+    def __init__(self, base_path: Optional[str] = None, embedding_backend: Optional[Any] = None,
+                 storage_dir: Optional[str] = None):
         """
         Args:
-            storage_dir: 存储目录路径，每个角色的伏笔存储在单独的文件中
+            base_path: 数据根目录路径（新参数，推荐使用）
+                      存储结构：{base_path}/{user_id}/{character_id}/foreshadowings.json
             embedding_backend: Embedding后端（可选），用于语义去重
+            storage_dir: 旧参数（向后兼容），如果提供则自动迁移到新结构
         """
-        self.storage_dir = storage_dir
+        # 向后兼容：如果提供了 storage_dir 而非 base_path
+        if storage_dir and not base_path:
+            # 旧的 storage_dir 格式是 {data_root}/data/foreshadowings
+            # 新的 base_path 格式是 {data_root}/data
+            if storage_dir.endswith('foreshadowings'):
+                base_path = os.path.dirname(storage_dir)
+            else:
+                base_path = storage_dir
+        
+        self.base_path = base_path
         self.embedding_backend = embedding_backend
-        # 按 user_id 分隔的伏笔存储
+        # 按 {user_id}/{character_id} 分隔的伏笔存储
         self._user_data: Dict[str, Dict[str, Any]] = {}
         
-        if storage_dir:
-            os.makedirs(storage_dir, exist_ok=True)
+        if base_path:
+            os.makedirs(base_path, exist_ok=True)
     
     @staticmethod
     def _get_dedup_config() -> Dict[str, Any]:
@@ -174,14 +209,14 @@ class ForeshadowingTracker:
         union = words1 | words2
         return len(intersection) / len(union) if union else 0.0
     
-    def _find_similar(self, content: str, user_id: str, 
+    def _find_similar(self, content: str, user_id: str, character_id: str = "default",
                      new_embedding: Optional[List[float]] = None) -> Tuple[Optional[Foreshadowing], float, str]:
         """查找语义相似的已有伏笔
         
         Returns:
             Tuple[Optional[Foreshadowing], float, str]: (相似伏笔或None, 相似度, 方法)
         """
-        user_data = self._load_user_data(user_id)
+        user_data = self._load_user_data(user_id, character_id)
         foreshadowings = user_data.get('foreshadowings', {})
         
         dedup_config = self._get_dedup_config()
@@ -236,24 +271,37 @@ class ForeshadowingTracker:
         
         return (None, best_sim, best_method)
     
-    def _get_user_storage_path(self, user_id: str) -> str:
-        """获取用户的存储路径"""
-        # 清理文件名中的非法字符
-        safe_user_id = "".join(c if c.isalnum() or c in ('_', '-') else '_' for c in user_id)
-        return os.path.join(self.storage_dir, f"foreshadowing_{safe_user_id}.json")
+    def _sanitize_path_component(self, name: str) -> str:
+        """清理路径组件中的非法字符"""
+        return "".join(c if c.isalnum() or c in ('_', '-') else '_' for c in name)
     
-    def _load_user_data(self, user_id: str) -> Dict[str, Any]:
-        """加载用户的伏笔数据"""
-        if user_id in self._user_data:
-            return self._user_data[user_id]
+    def _get_cache_key(self, user_id: str, character_id: str) -> str:
+        """获取内部缓存键"""
+        return f"{user_id}/{character_id}"
+    
+    def _get_storage_path(self, user_id: str, character_id: str) -> str:
+        """获取存储路径
+        
+        新结构：{base_path}/{user_id}/{character_id}/foreshadowings.json
+        """
+        safe_user_id = self._sanitize_path_component(user_id)
+        safe_char_id = self._sanitize_path_component(character_id)
+        return os.path.join(self.base_path, safe_user_id, safe_char_id, 'foreshadowings.json')
+    
+    def _load_user_data(self, user_id: str, character_id: str = "default") -> Dict[str, Any]:
+        """加载用户/角色的伏笔数据"""
+        cache_key = self._get_cache_key(user_id, character_id)
+        
+        if cache_key in self._user_data:
+            return self._user_data[cache_key]
         
         data = {
             'id_counter': 0,
             'foreshadowings': {}
         }
         
-        if self.storage_dir:
-            path = self._get_user_storage_path(user_id)
+        if self.base_path:
+            path = self._get_storage_path(user_id, character_id)
             if os.path.exists(path):
                 try:
                     with open(path, 'r', encoding='utf-8') as f:
@@ -264,21 +312,25 @@ class ForeshadowingTracker:
                         for k, v in loaded.get('foreshadowings', {}).items()
                     }
                 except Exception as e:
-                    print(f"[Recall] 加载伏笔数据失败 ({user_id}): {e}")
+                    print(f"[Recall] 加载伏笔数据失败 ({user_id}/{character_id}): {e}")
         
-        self._user_data[user_id] = data
+        self._user_data[cache_key] = data
         return data
     
-    def _save_user_data(self, user_id: str):
-        """保存用户的伏笔数据"""
-        if not self.storage_dir:
+    def _save_user_data(self, user_id: str, character_id: str = "default"):
+        """保存用户/角色的伏笔数据"""
+        if not self.base_path:
             return
         
-        data = self._user_data.get(user_id, {})
+        cache_key = self._get_cache_key(user_id, character_id)
+        data = self._user_data.get(cache_key, {})
         if not data:
             return
         
-        path = self._get_user_storage_path(user_id)
+        path = self._get_storage_path(user_id, character_id)
+        # 确保目录存在
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        
         save_data = {
             'id_counter': data.get('id_counter', 0),
             'foreshadowings': {
@@ -289,10 +341,140 @@ class ForeshadowingTracker:
         with open(path, 'w', encoding='utf-8') as f:
             json.dump(save_data, f, ensure_ascii=False, indent=2)
     
+    def _get_archive_path(self, user_id: str, character_id: str) -> str:
+        """获取归档文件路径
+        
+        归档结构：{base_path}/{user_id}/{character_id}/archive/foreshadowings.jsonl
+        超过 MAX_ARCHIVE_FILE_SIZE 时自动分卷
+        """
+        safe_user_id = self._sanitize_path_component(user_id)
+        safe_char_id = self._sanitize_path_component(character_id)
+        archive_dir = os.path.join(self.base_path, safe_user_id, safe_char_id, 'archive')
+        os.makedirs(archive_dir, exist_ok=True)
+        
+        archive_file = os.path.join(archive_dir, 'foreshadowings.jsonl')
+        
+        # 检查是否需要分卷
+        if os.path.exists(archive_file) and os.path.getsize(archive_file) > self.MAX_ARCHIVE_FILE_SIZE:
+            # 重命名为带编号的文件
+            index = 1
+            while os.path.exists(os.path.join(archive_dir, f'foreshadowings_{index:03d}.jsonl')):
+                index += 1
+            os.rename(archive_file, os.path.join(archive_dir, f'foreshadowings_{index:03d}.jsonl'))
+        
+        return archive_file
+    
+    def _archive_foreshadowing(self, fsh: Foreshadowing, user_id: str, character_id: str,
+                                reason: str = None):
+        """将伏笔归档到 archive/foreshadowings.jsonl
+        
+        Args:
+            fsh: 要归档的伏笔
+            user_id: 用户ID
+            character_id: 角色ID
+            reason: 归档原因（如果不提供，则根据状态自动判断）
+        """
+        if not self.base_path:
+            return
+        
+        archive_path = self._get_archive_path(user_id, character_id)
+        
+        # 准备归档数据
+        archive_data = fsh.to_dict()
+        archive_data['archived_at'] = time.time()
+        # 根据状态自动判断归档原因
+        if reason:
+            archive_data['archive_reason'] = reason
+        elif fsh.status == ForeshadowingStatus.RESOLVED:
+            archive_data['archive_reason'] = 'resolved'
+        elif fsh.status == ForeshadowingStatus.ABANDONED:
+            archive_data['archive_reason'] = 'abandoned'
+        else:
+            archive_data['archive_reason'] = 'overflow'
+        
+        # 追加写入 JSONL 格式
+        with open(archive_path, 'a', encoding='utf-8') as f:
+            f.write(json.dumps(archive_data, ensure_ascii=False) + '\n')
+    
+    def _archive_overflow_foreshadowings(self, user_id: str, character_id: str):
+        """当超过上限时，归档优先级最低的伏笔
+        
+        排序策略：优先归档 importance 最低的，其次是最旧的
+        """
+        max_active = self._get_limits_config()['max_active']
+        
+        user_data = self._load_user_data(user_id, character_id)
+        foreshadowings = user_data.get('foreshadowings', {})
+        
+        # 只计算活跃伏笔
+        active_items = [
+            (fsh_id, fsh) for fsh_id, fsh in foreshadowings.items()
+            if fsh.status in (ForeshadowingStatus.PLANTED, ForeshadowingStatus.DEVELOPING)
+        ]
+        
+        if len(active_items) <= max_active:
+            return
+        
+        # 按优先级排序：importance 升序，planted_at 升序（最旧的优先归档）
+        sorted_items = sorted(
+            active_items,
+            key=lambda x: (x[1].importance, x[1].planted_at)
+        )
+        
+        # 计算需要归档的数量
+        to_archive_count = len(active_items) - max_active
+        to_archive = sorted_items[:to_archive_count]
+        
+        # 执行归档
+        for fsh_id, fsh in to_archive:
+            # 标记为 ABANDONED（因为是被系统自动归档的）
+            fsh.status = ForeshadowingStatus.ABANDONED
+            fsh.resolution = "[系统自动归档：超出活跃数量上限]"
+            self._archive_foreshadowing(fsh, user_id, character_id, reason='overflow')
+            del foreshadowings[fsh_id]
+        
+        self._save_user_data(user_id, character_id)
+    
+    def get_by_id(self, foreshadowing_id: str, user_id: str = "default",
+                  character_id: str = "default") -> Optional[Foreshadowing]:
+        """获取伏笔（包括已归档的）
+        
+        先查活跃伏笔，未找到则查归档文件
+        """
+        # 1. 先查活跃伏笔
+        user_data = self._load_user_data(user_id, character_id)
+        foreshadowings = user_data.get('foreshadowings', {})
+        if foreshadowing_id in foreshadowings:
+            return foreshadowings[foreshadowing_id]
+        
+        # 2. 查归档文件
+        if self.base_path:
+            safe_user_id = self._sanitize_path_component(user_id)
+            safe_char_id = self._sanitize_path_component(character_id)
+            archive_dir = os.path.join(self.base_path, safe_user_id, safe_char_id, 'archive')
+            
+            if os.path.exists(archive_dir):
+                # 搜索所有归档文件
+                for filename in os.listdir(archive_dir):
+                    if filename.startswith('foreshadowings') and filename.endswith('.jsonl'):
+                        archive_path = os.path.join(archive_dir, filename)
+                        try:
+                            with open(archive_path, 'r', encoding='utf-8') as f:
+                                for line in f:
+                                    if line.strip():
+                                        fsh_data = json.loads(line)
+                                        if fsh_data.get('id') == foreshadowing_id:
+                                            return Foreshadowing.from_dict(fsh_data)
+                        except Exception:
+                            pass
+        
+        return None
+
     def plant(
         self,
         content: str,
         user_id: str = "default",
+        character_id: str = "default",
         related_entities: Optional[List[str]] = None,
         importance: float = 0.5
     ) -> Foreshadowing:
@@ -303,6 +485,13 @@ class ForeshadowingTracker:
         2. 查找语义相似的已有伏笔
         3. 高相似度：增加重要性而非新建
         4. 低相似度或无匹配：创建新伏笔
+        
+        Args:
+            content: 伏笔内容
+            user_id: 用户ID
+            character_id: 角色ID（RP场景）
+            related_entities: 相关实体
+            importance: 重要性（0-1）
         
         Returns:
             Foreshadowing: 新建或已存在的伏笔对象
@@ -315,7 +504,7 @@ class ForeshadowingTracker:
         
         # 2. 查找相似伏笔
         similar, sim_score, sim_method = self._find_similar(
-            content, user_id, new_embedding=new_embedding
+            content, user_id, character_id, new_embedding=new_embedding
         )
         
         if similar:
@@ -348,11 +537,11 @@ class ForeshadowingTracker:
                     if entity not in similar.related_entities:
                         similar.related_entities.append(entity)
             
-            self._save_user_data(user_id)
+            self._save_user_data(user_id, character_id)
             return similar
         
         # 3. 创建新伏笔
-        user_data = self._load_user_data(user_id)
+        user_data = self._load_user_data(user_id, character_id)
         user_data['id_counter'] += 1
         
         foreshadowing_id = f"fsh_{user_data['id_counter']}_{int(time.time())}"
@@ -370,13 +559,19 @@ class ForeshadowingTracker:
             foreshadowing.embedding = new_embedding
         
         user_data['foreshadowings'][foreshadowing_id] = foreshadowing
-        self._save_user_data(user_id)
+        self._save_user_data(user_id, character_id)
         
+        # 检查是否超出活跃伏笔数量限制，如果超出则归档最旧的
+        self._archive_overflow_foreshadowings(user_id, character_id)
+        
+        # 重新加载用户数据，检查伏笔是否仍然存在（可能在溢出归档中被删除）
+        # 即使被归档，也返回伏笔对象（包含完整信息），调用者可检查 id 是否仍在活跃列表
         return foreshadowing
     
-    def add_hint(self, foreshadowing_id: str, hint: str, user_id: str = "default") -> bool:
+    def add_hint(self, foreshadowing_id: str, hint: str, user_id: str = "default",
+                 character_id: str = "default") -> bool:
         """添加伏笔提示"""
-        user_data = self._load_user_data(user_id)
+        user_data = self._load_user_data(user_id, character_id)
         foreshadowings = user_data.get('foreshadowings', {})
         
         if foreshadowing_id not in foreshadowings:
@@ -388,12 +583,13 @@ class ForeshadowingTracker:
         if fsh.status == ForeshadowingStatus.PLANTED:
             fsh.status = ForeshadowingStatus.DEVELOPING
         
-        self._save_user_data(user_id)
+        self._save_user_data(user_id, character_id)
         return True
     
-    def resolve(self, foreshadowing_id: str, resolution: str, user_id: str = "default") -> bool:
+    def resolve(self, foreshadowing_id: str, resolution: str, user_id: str = "default",
+                character_id: str = "default") -> bool:
         """解决伏笔"""
-        user_data = self._load_user_data(user_id)
+        user_data = self._load_user_data(user_id, character_id)
         foreshadowings = user_data.get('foreshadowings', {})
         
         if foreshadowing_id not in foreshadowings:
@@ -404,24 +600,35 @@ class ForeshadowingTracker:
         fsh.resolution = resolution
         fsh.resolved_at = time.time()
         
-        self._save_user_data(user_id)
+        # 归档已解决的伏笔并从活跃列表移除
+        self._archive_foreshadowing(fsh, user_id, character_id)
+        del foreshadowings[foreshadowing_id]
+        
+        self._save_user_data(user_id, character_id)
         return True
     
-    def abandon(self, foreshadowing_id: str, user_id: str = "default") -> bool:
+    def abandon(self, foreshadowing_id: str, user_id: str = "default",
+                character_id: str = "default") -> bool:
         """放弃伏笔"""
-        user_data = self._load_user_data(user_id)
+        user_data = self._load_user_data(user_id, character_id)
         foreshadowings = user_data.get('foreshadowings', {})
         
         if foreshadowing_id not in foreshadowings:
             return False
         
-        foreshadowings[foreshadowing_id].status = ForeshadowingStatus.ABANDONED
-        self._save_user_data(user_id)
+        fsh = foreshadowings[foreshadowing_id]
+        fsh.status = ForeshadowingStatus.ABANDONED
+        
+        # 归档已放弃的伏笔并从活跃列表移除
+        self._archive_foreshadowing(fsh, user_id, character_id)
+        del foreshadowings[foreshadowing_id]
+        
+        self._save_user_data(user_id, character_id)
         return True
     
-    def get_active(self, user_id: str = "default") -> List[Foreshadowing]:
+    def get_active(self, user_id: str = "default", character_id: str = "default") -> List[Foreshadowing]:
         """获取活跃的伏笔"""
-        user_data = self._load_user_data(user_id)
+        user_data = self._load_user_data(user_id, character_id)
         foreshadowings = user_data.get('foreshadowings', {})
         
         return [
@@ -429,9 +636,10 @@ class ForeshadowingTracker:
             if f.status in (ForeshadowingStatus.PLANTED, ForeshadowingStatus.DEVELOPING)
         ]
     
-    def get_by_entity(self, entity_name: str, user_id: str = "default") -> List[Foreshadowing]:
+    def get_by_entity(self, entity_name: str, user_id: str = "default",
+                      character_id: str = "default") -> List[Foreshadowing]:
         """获取与实体相关的伏笔"""
-        user_data = self._load_user_data(user_id)
+        user_data = self._load_user_data(user_id, character_id)
         foreshadowings = user_data.get('foreshadowings', {})
         
         return [
@@ -439,9 +647,9 @@ class ForeshadowingTracker:
             if entity_name in f.related_entities
         ]
     
-    def get_summary(self, user_id: str = "default") -> str:
+    def get_summary(self, user_id: str = "default", character_id: str = "default") -> str:
         """获取伏笔摘要"""
-        active = self.get_active(user_id)
+        active = self.get_active(user_id, character_id)
         if not active:
             return "当前没有活跃的伏笔。"
         
@@ -457,20 +665,26 @@ class ForeshadowingTracker:
     def get_context_for_prompt(
         self,
         user_id: str = "default",
-        max_count: int = 5,
+        character_id: str = "default",
+        max_count: Optional[int] = None,
         current_turn: Optional[int] = None
     ) -> str:
         """生成用于注入 prompt 的伏笔上下文
         
         Args:
             user_id: 用户ID
-            max_count: 最多返回的伏笔数量
+            character_id: 角色ID
+            max_count: 最多返回的伏笔数量（默认从环境变量 FORESHADOWING_MAX_RETURN 读取）
             current_turn: 当前轮次（用于主动提醒判断）
         
         Returns:
             str: 格式化的伏笔上下文，可直接注入 prompt
         """
-        active = self.get_active(user_id)
+        # 从环境变量读取默认值
+        if max_count is None:
+            max_count = self._get_limits_config()['max_return']
+        
+        active = self.get_active(user_id, character_id)
         if not active:
             return ""
         
@@ -494,16 +708,23 @@ class ForeshadowingTracker:
         lines.append("</foreshadowings>")
         return "\n".join(lines)
 
-
 class ForeshadowingTrackerLite:
-    """伏笔追踪器 - 轻量版（无持久化，支持多角色）"""
+    """伏笔追踪器 - 轻量版（无持久化）
+    
+    注意：此轻量版不支持多角色分隔存储，character_id 参数被忽略。
+    如需多角色支持，请使用 ForeshadowingTracker。
+    """
     
     def __init__(self):
         # 按 user_id 分隔
         self._user_foreshadowings: Dict[str, List[Dict[str, Any]]] = {}
     
-    def plant(self, content: str, user_id: str = "default", **kwargs) -> Dict[str, Any]:
-        """埋下伏笔"""
+    def plant(self, content: str, user_id: str = "default", character_id: str = "default",
+              **kwargs) -> Dict[str, Any]:
+        """埋下伏笔
+        
+        注意：character_id 在轻量版中被忽略
+        """
         if user_id not in self._user_foreshadowings:
             self._user_foreshadowings[user_id] = []
         
@@ -521,13 +742,20 @@ class ForeshadowingTrackerLite:
         fsh_list.append(fsh)
         return fsh
     
-    def get_active(self, user_id: str = "default") -> List[Dict[str, Any]]:
-        """获取活跃伏笔"""
+    def get_active(self, user_id: str = "default", character_id: str = "default") -> List[Dict[str, Any]]:
+        """获取活跃伏笔
+        
+        注意：character_id 在轻量版中被忽略
+        """
         fsh_list = self._user_foreshadowings.get(user_id, [])
         return [f for f in fsh_list if f.get('status') in ('planted', 'developing')]
     
-    def resolve(self, foreshadowing_id: str, resolution: str, user_id: str = "default") -> bool:
-        """解决伏笔"""
+    def resolve(self, foreshadowing_id: str, resolution: str, user_id: str = "default",
+                character_id: str = "default") -> bool:
+        """解决伏笔
+        
+        注意：character_id 在轻量版中被忽略
+        """
         fsh_list = self._user_foreshadowings.get(user_id, [])
         for fsh in fsh_list:
             if fsh['id'] == foreshadowing_id:

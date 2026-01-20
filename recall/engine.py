@@ -205,8 +205,9 @@ class RecallEngine:
             embedding_backend_for_trackers = self._vector_index.embedding_backend
         
         # 伏笔追踪器（支持语义去重）
+        # 使用新的 {user_id}/{character_id}/ 存储结构
         self.foreshadowing_tracker = ForeshadowingTracker(
-            storage_dir=os.path.join(self.data_root, 'data', 'foreshadowings'),
+            base_path=os.path.join(self.data_root, 'data'),
             embedding_backend=embedding_backend_for_trackers
         )
         
@@ -226,8 +227,9 @@ class RecallEngine:
         
         # 持久上下文追踪器（追踪持久性前提条件）
         # 使用同一个embedding_backend用于语义去重
+        # 使用新的 {user_id}/{character_id}/ 存储结构
         self.context_tracker = ContextTracker(
-            storage_dir=os.path.join(self.data_root, 'data', 'contexts'),
+            base_path=os.path.join(self.data_root, 'data'),
             llm_client=self.llm_client,
             embedding_backend=embedding_backend_for_trackers
         )
@@ -267,7 +269,111 @@ class RecallEngine:
         
         # 预加载最近的卷（确保热数据在内存中，支持上万轮RP）
         self.volume_manager.preload_recent()
+        
+        # 检查并为已有的伏笔/条件补建 VectorIndex 索引（首次升级时执行）
+        self._check_and_rebuild_index()
     
+    def _check_and_rebuild_index(self):
+        """检查并为已有伏笔/条件补建 VectorIndex 索引
+        
+        使用标记文件 .index_rebuilt_v2 来判断是否已经迁移过。
+        如果没有 VectorIndex 或已禁用，则跳过。
+        """
+        if not self._vector_index or not self._vector_index.enabled:
+            return
+        
+        marker_file = os.path.join(self.data_root, 'data', '.index_rebuilt_v2')
+        if os.path.exists(marker_file):
+            return  # 已经迁移过
+        
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info("[Recall] 检测到首次升级，开始为已有伏笔/条件补建 VectorIndex 索引...")
+        
+        indexed_count = 0
+        
+        # 1. 索引所有伏笔
+        data_path = os.path.join(self.data_root, 'data')
+        if os.path.exists(data_path):
+            for user_id in os.listdir(data_path):
+                user_path = os.path.join(data_path, user_id)
+                if not os.path.isdir(user_path) or user_id.startswith('.'):
+                    continue
+                for character_id in os.listdir(user_path):
+                    char_path = os.path.join(user_path, character_id)
+                    if not os.path.isdir(char_path):
+                        continue
+                    
+                    # 索引伏笔
+                    fsh_file = os.path.join(char_path, 'foreshadowings.json')
+                    if os.path.exists(fsh_file):
+                        try:
+                            import json
+                            with open(fsh_file, 'r', encoding='utf-8') as f:
+                                data = json.load(f)
+                            foreshadowings = data.get('foreshadowings', {})
+                            for fsh_id, fsh in foreshadowings.items():
+                                content = fsh.get('content', '')
+                                if content:
+                                    # 注意：fsh_id 已经是 fsh_{counter}_{timestamp} 格式
+                                    # 不需要再加 fsh_ 前缀，与 plant_foreshadowing 保持一致
+                                    doc_id = f"{user_id}_{character_id}_{fsh_id}"
+                                    self._vector_index.add_text(doc_id, content)
+                                    indexed_count += 1
+                        except Exception as e:
+                            logger.warning(f"[Recall] 索引伏笔失败 ({user_id}/{character_id}): {e}")
+                    
+                    # 索引条件
+                    ctx_file = os.path.join(char_path, 'contexts.json')
+                    if os.path.exists(ctx_file):
+                        try:
+                            import json
+                            with open(ctx_file, 'r', encoding='utf-8') as f:
+                                contexts = json.load(f)
+                            for ctx in contexts:
+                                if ctx.get('is_active', True):
+                                    content = ctx.get('content', '')
+                                    ctx_id = ctx.get('id', '')
+                                    if content and ctx_id:
+                                        doc_id = f"ctx_{user_id}_{character_id}_{ctx_id}"
+                                        self._vector_index.add_text(doc_id, content)
+                                        indexed_count += 1
+                        except Exception as e:
+                            logger.warning(f"[Recall] 索引条件失败 ({user_id}/{character_id}): {e}")
+        
+        # 创建标记文件
+        os.makedirs(os.path.dirname(marker_file), exist_ok=True)
+        with open(marker_file, 'w') as f:
+            f.write(f"indexed_at: {time.time()}\ncount: {indexed_count}\n")
+        
+        logger.info(f"[Recall] VectorIndex 索引补建完成，共索引 {indexed_count} 条记录")
+        
+        return indexed_count
+
+    def rebuild_vector_index(self, force: bool = False) -> int:
+        """手动重建 VectorIndex 索引
+        
+        为所有伏笔和条件重建语义索引。通常不需要手动调用，
+        系统会在首次升级时自动重建。
+        
+        使用场景：
+        - 索引数据损坏需要重建
+        - 手动导入了数据文件
+        - 从备份恢复后需要重建索引
+        
+        Args:
+            force: 是否强制重建（删除标记文件后重建）
+            
+        Returns:
+            int: 索引的记录数量
+        """
+        if force:
+            marker_file = os.path.join(self.data_root, 'data', '.index_rebuilt_v2')
+            if os.path.exists(marker_file):
+                os.remove(marker_file)
+        
+        return self._check_and_rebuild_index() or 0
+
     def _get_recent_memories_for_analysis(self, user_id: str, limit: int) -> List[Dict[str, Any]]:
         """获取最近的记忆用于伏笔分析
         
@@ -526,7 +632,7 @@ class RecallEngine:
                 self._add_count[user_id] = self._add_count.get(user_id, 0) + 1
                 
                 if self._add_count[user_id] % 10 == 0:
-                    reduced = self.context_tracker.consolidate_contexts(user_id)
+                    reduced = self.context_tracker.consolidate_contexts(user_id=user_id)
                     if reduced > 0:
                         print(f"[Recall] 持久条件压缩: 减少了 {reduced} 个冗余条件")
             except Exception:
@@ -756,6 +862,7 @@ class RecallEngine:
         self,
         query: str,
         user_id: str = "default",
+        character_id: str = "default",
         max_tokens: int = 2000,
         include_recent: int = 5,
         include_core_facts: bool = True,
@@ -798,19 +905,19 @@ class RecallEngine:
         
         # ========== 1. 持久条件层（已确立的背景设定）==========
         # 这是最重要的层 - 用户说"我是大学生想创业"，后续所有对话都应基于此
-        active_contexts = self.context_tracker.get_active(user_id)
+        active_contexts = self.context_tracker.get_active(user_id, character_id)
         if active_contexts:
             # 批量标记所有被使用的条件（更新 last_used 和 use_count，只写一次文件）
             context_ids = [ctx.id for ctx in active_contexts]
-            self.context_tracker.mark_used_batch(context_ids, user_id)
+            self.context_tracker.mark_used_batch(context_ids, user_id, character_id)
             
-            persistent_context = self.context_tracker.format_for_prompt(user_id)
+            persistent_context = self.context_tracker.format_for_prompt(user_id, character_id)
             if persistent_context:
                 parts.append(persistent_context)
         
         # 自动从当前查询中提取新的持久条件
         if auto_extract_context and query:
-            self.context_tracker.extract_from_text(query, user_id)
+            self.context_tracker.extract_from_text(query, user_id, character_id)
         
         # ========== 2. 核心事实层 + 关系图谱 ==========
         if include_core_facts:
@@ -846,6 +953,7 @@ class RecallEngine:
         # 使用 tracker 的专用方法，包含主动提醒逻辑（重要伏笔长期未推进会提醒 AI）
         foreshadowing_context = self.foreshadowing_tracker.get_context_for_prompt(
             user_id=user_id,
+            character_id=character_id,
             max_count=5,
             current_turn=self.volume_manager.get_total_turns() if self.volume_manager else None
         )
@@ -1030,30 +1138,67 @@ class RecallEngine:
         self,
         content: str,
         user_id: str = "default",
+        character_id: str = "default",
         related_entities: Optional[List[str]] = None,
         importance: float = 0.5
     ) -> Foreshadowing:
-        """埋下伏笔"""
-        return self.foreshadowing_tracker.plant(
+        """埋下伏笔
+        
+        同时将伏笔索引到 VectorIndex 以支持语义检索（即使归档后也能搜索）
+        """
+        foreshadowing = self.foreshadowing_tracker.plant(
             content=content,
             user_id=user_id,
+            character_id=character_id,
             related_entities=related_entities,
             importance=importance
         )
+        
+        # 索引到 VectorIndex（确保归档后仍可语义检索）
+        # 注意：foreshadowing.id 已经是 fsh_{counter}_{timestamp} 格式，不需要再加 fsh_ 前缀
+        if self._vector_index and self._vector_index.enabled:
+            doc_id = f"{user_id}_{character_id}_{foreshadowing.id}"
+            self._vector_index.add_text(doc_id, content)
+        
+        return foreshadowing
     
     def resolve_foreshadowing(
         self,
         foreshadowing_id: str,
         resolution: str,
-        user_id: str = "default"
+        user_id: str = "default",
+        character_id: str = "default"
     ) -> bool:
         """解决伏笔"""
-        return self.foreshadowing_tracker.resolve(foreshadowing_id, resolution, user_id)
+        return self.foreshadowing_tracker.resolve(foreshadowing_id, resolution, user_id, character_id)
+    
+    def add_foreshadowing_hint(
+        self,
+        foreshadowing_id: str,
+        hint: str,
+        user_id: str = "default",
+        character_id: str = "default"
+    ) -> bool:
+        """添加伏笔提示
+        
+        为伏笔添加进展提示，会将状态从 PLANTED 更新为 DEVELOPING
+        
+        Args:
+            foreshadowing_id: 伏笔ID
+            hint: 提示内容
+            user_id: 用户ID
+            character_id: 角色ID
+            
+        Returns:
+            bool: 是否成功
+        """
+        return self.foreshadowing_tracker.add_hint(foreshadowing_id, hint, user_id, character_id)
     
     def abandon_foreshadowing(
         self,
         foreshadowing_id: str,
-        user_id: str = "default"
+        user_id: str = "default",
+        character_id: str = "default"
     ) -> bool:
         """放弃/删除伏笔
         
@@ -1062,21 +1207,44 @@ class RecallEngine:
         Args:
             foreshadowing_id: 伏笔ID
             user_id: 用户ID
+            character_id: 角色ID
             
         Returns:
             bool: 是否成功
         """
-        return self.foreshadowing_tracker.abandon(foreshadowing_id, user_id)
+        return self.foreshadowing_tracker.abandon(foreshadowing_id, user_id, character_id)
     
-    def get_active_foreshadowings(self, user_id: str = "default") -> List[Foreshadowing]:
+    def get_active_foreshadowings(self, user_id: str = "default", character_id: str = "default") -> List[Foreshadowing]:
         """获取活跃伏笔"""
-        return self.foreshadowing_tracker.get_active(user_id)
+        return self.foreshadowing_tracker.get_active(user_id, character_id)
+    
+    def get_foreshadowing_by_id(
+        self,
+        foreshadowing_id: str,
+        user_id: str = "default",
+        character_id: str = "default"
+    ) -> Optional[Foreshadowing]:
+        """根据ID获取伏笔（包括已归档的）
+        
+        用于从 VectorIndex 搜索结果中获取伏笔详情。
+        搜索命中归档伏笔时，通过此方法从归档文件读取完整信息。
+        
+        Args:
+            foreshadowing_id: 伏笔ID
+            user_id: 用户ID
+            character_id: 角色ID
+            
+        Returns:
+            Optional[Foreshadowing]: 伏笔对象，未找到返回 None
+        """
+        return self.foreshadowing_tracker.get_by_id(foreshadowing_id, user_id, character_id)
     
     def on_foreshadowing_turn(
         self, 
         content: str, 
         role: str = "user", 
-        user_id: str = "default"
+        user_id: str = "default",
+        character_id: str = "default"
     ) -> AnalysisResult:
         """处理新的一轮对话（用于伏笔分析）
         
@@ -1088,6 +1256,7 @@ class RecallEngine:
             content: 对话内容
             role: 角色（user/assistant）
             user_id: 用户ID
+            character_id: 角色ID
             
         Returns:
             AnalysisResult: 分析结果
@@ -1095,21 +1264,23 @@ class RecallEngine:
         return self.foreshadowing_analyzer.on_new_turn(
             content=content,
             role=role,
-            user_id=user_id
+            user_id=user_id,
+            character_id=character_id
         )
     
-    def trigger_foreshadowing_analysis(self, user_id: str = "default") -> AnalysisResult:
+    def trigger_foreshadowing_analysis(self, user_id: str = "default", character_id: str = "default") -> AnalysisResult:
         """手动触发伏笔分析
         
         可以在任何时候调用，强制触发 LLM 分析（如果已配置）。
         
         Args:
             user_id: 用户ID
+            character_id: 角色ID
             
         Returns:
             AnalysisResult: 分析结果
         """
-        return self.foreshadowing_analyzer.trigger_analysis(user_id)
+        return self.foreshadowing_analyzer.trigger_analysis(user_id, character_id)
     
     def get_foreshadowing_analyzer_config(self) -> Dict[str, Any]:
         """获取伏笔分析器配置"""
@@ -1152,6 +1323,7 @@ class RecallEngine:
         content: str,
         context_type = "custom",
         user_id: str = "default",
+        character_id: str = "default",
         keywords: List[str] = None
     ):
         """添加持久条件
@@ -1173,6 +1345,7 @@ class RecallEngine:
                 - constraint: 约束条件
                 - custom: 自定义
             user_id: 用户ID
+            character_id: 角色ID
             keywords: 关键词列表
             
         Returns:
@@ -1189,38 +1362,78 @@ class RecallEngine:
             except ValueError:
                 ctx_type = ContextType.CUSTOM
         
-        return self.context_tracker.add(
+        context = self.context_tracker.add(
             content=content,
             context_type=ctx_type,
             user_id=user_id,
+            character_id=character_id,
             keywords=keywords
         )
+        
+        # 索引到 VectorIndex（无论是否活跃，确保即使被淘汰也可语义检索）
+        # 被 _enforce_limits() 淘汰的条件仍需可被搜索找回
+        if self._vector_index and self._vector_index.enabled:
+            doc_id = f"ctx_{user_id}_{character_id}_{context.id}"
+            self._vector_index.add_text(doc_id, content)
+        
+        return context
     
-    def get_persistent_contexts(self, user_id: str = "default") -> List[Dict]:
+    def get_persistent_contexts(self, user_id: str = "default", character_id: str = "default") -> List[Dict]:
         """获取所有活跃的持久条件"""
-        contexts = self.context_tracker.get_active(user_id)
+        contexts = self.context_tracker.get_active(user_id, character_id)
         return [c.to_dict() for c in contexts]
     
-    def remove_persistent_context(self, context_id: str, user_id: str = "default") -> bool:
-        """移除（停用）某个持久条件"""
-        return self.context_tracker.deactivate(context_id, user_id)
+    def get_persistent_context_by_id(
+        self,
+        context_id: str,
+        user_id: str = "default",
+        character_id: str = "default"
+    ) -> Optional[Dict]:
+        """根据ID获取持久条件（包括已归档的）
+        
+        用于从 VectorIndex 搜索结果中获取条件详情。
+        搜索命中归档条件时，通过此方法从归档文件读取完整信息。
+        
+        Args:
+            context_id: 条件ID
+            user_id: 用户ID
+            character_id: 角色ID
+            
+        Returns:
+            Optional[Dict]: 条件数据字典，未找到返回 None
+        """
+        ctx = self.context_tracker.get_context_by_id(context_id, user_id, character_id)
+        return ctx.to_dict() if ctx else None
     
-    def extract_contexts_from_text(self, text: str, user_id: str = "default") -> List[Dict]:
+    def remove_persistent_context(self, context_id: str, user_id: str = "default", character_id: str = "default") -> bool:
+        """移除（停用）某个持久条件"""
+        return self.context_tracker.deactivate(context_id, user_id, character_id)
+    
+    def extract_contexts_from_text(self, text: str, user_id: str = "default", character_id: str = "default") -> List[Dict]:
         """从文本中自动提取持久条件
         
         使用 LLM（如果可用）或规则从文本中提取应该持久化的条件。
+        同时将新提取的条件索引到 VectorIndex 以支持语义检索。
         
         Args:
             text: 要分析的文本
             user_id: 用户ID
+            character_id: 角色ID
             
         Returns:
             List[Dict]: 提取出的条件列表
         """
-        contexts = self.context_tracker.extract_from_text(text, user_id)
+        contexts = self.context_tracker.extract_from_text(text, user_id, character_id)
+        
+        # 索引新提取的条件到 VectorIndex（无论活跃状态）
+        if self._vector_index and self._vector_index.enabled:
+            for ctx in contexts:
+                doc_id = f"ctx_{user_id}_{character_id}_{ctx.id}"
+                self._vector_index.add_text(doc_id, ctx.content)
+        
         return [c.to_dict() for c in contexts]
     
-    def consolidate_persistent_contexts(self, user_id: str = "default", force: bool = False) -> Dict:
+    def consolidate_persistent_contexts(self, user_id: str = "default", character_id: str = "default", force: bool = False) -> Dict:
         """压缩合并持久条件
         
         当持久条件数量过多时，智能合并相似的条件以控制增长。
@@ -1228,6 +1441,7 @@ class RecallEngine:
         
         Args:
             user_id: 用户ID
+            character_id: 角色ID
             force: 是否强制执行（默认只在超过阈值时执行）
             
         Returns:
@@ -1236,9 +1450,9 @@ class RecallEngine:
                 - before: 压缩前的统计
                 - after: 压缩后的统计
         """
-        before_stats = self.context_tracker.get_stats(user_id)
-        reduced = self.context_tracker.consolidate_contexts(user_id, force)
-        after_stats = self.context_tracker.get_stats(user_id)
+        before_stats = self.context_tracker.get_stats(user_id=user_id, character_id=character_id)
+        reduced = self.context_tracker.consolidate_contexts(user_id=user_id, character_id=character_id, force=force)
+        after_stats = self.context_tracker.get_stats(user_id=user_id, character_id=character_id)
         
         return {
             'reduced': reduced,

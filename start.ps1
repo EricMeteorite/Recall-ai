@@ -131,6 +131,9 @@ function Load-ApiKeys {
         'LLM_API_KEY', 'LLM_API_BASE', 'LLM_MODEL',
         'FORESHADOWING_LLM_ENABLED', 'FORESHADOWING_TRIGGER_INTERVAL',
         'FORESHADOWING_AUTO_PLANT', 'FORESHADOWING_AUTO_RESOLVE',
+        'FORESHADOWING_MAX_RETURN', 'FORESHADOWING_MAX_ACTIVE',
+        'CONTEXT_MAX_PER_TYPE', 'CONTEXT_MAX_TOTAL',
+        'CONTEXT_DECAY_DAYS', 'CONTEXT_DECAY_RATE', 'CONTEXT_MIN_CONFIDENCE',
         'DEDUP_EMBEDDING_ENABLED', 'DEDUP_HIGH_THRESHOLD', 'DEDUP_LOW_THRESHOLD'
     )
     
@@ -217,6 +220,44 @@ FORESHADOWING_AUTO_PLANT=true
 # 自动解决伏笔 (true/false) - 建议保持 false，让用户手动确认
 # Automatically resolve detected foreshadowing (recommend false)
 FORESHADOWING_AUTO_RESOLVE=false
+
+# 获取伏笔时返回的最大数量 / Max foreshadowings returned per query
+FORESHADOWING_MAX_RETURN=10
+
+# 活跃伏笔上限（超出后自动归档最旧的） / Max active foreshadowings (auto-archive oldest)
+FORESHADOWING_MAX_ACTIVE=50
+
+# ----------------------------------------------------------------------------
+# 持久条件配置
+# Persistent Context Configuration
+# ----------------------------------------------------------------------------
+# 每种类型最大条件数 / Max contexts per type
+CONTEXT_MAX_PER_TYPE=10
+
+# 总条件数上限 / Max total contexts
+CONTEXT_MAX_TOTAL=100
+
+# 置信度衰减开始天数 / Days before decay starts
+CONTEXT_DECAY_DAYS=14
+
+# 每次衰减比例 (0.0-1.0) / Decay rate per check
+CONTEXT_DECAY_RATE=0.05
+
+# 最低置信度阈值（低于此值自动归档） / Min confidence (below this auto-archive)
+CONTEXT_MIN_CONFIDENCE=0.1
+
+# ----------------------------------------------------------------------------
+# 智能去重配置
+# Smart Deduplication Configuration
+# ----------------------------------------------------------------------------
+# 是否启用 Embedding 去重 (true/false) / Enable embedding-based deduplication
+DEDUP_EMBEDDING_ENABLED=true
+
+# 高相似度阈值（>=此值自动合并） / High similarity threshold (auto-merge)
+DEDUP_HIGH_THRESHOLD=0.85
+
+# 低相似度阈值（<此值视为不同） / Low similarity threshold (treat as different)
+DEDUP_LOW_THRESHOLD=0.70
 '@
         Set-Content -Path $configFile -Value $defaultConfig -Encoding UTF8
         Write-Host "  $([char]0x2192) 已创建配置文件: $configFile" -ForegroundColor Cyan

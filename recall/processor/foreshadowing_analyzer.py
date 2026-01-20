@@ -389,7 +389,8 @@ Important:
         self, 
         content: str,
         role: str = "user",
-        user_id: str = "default"
+        user_id: str = "default",
+        character_id: str = "default"
     ) -> AnalysisResult:
         """处理新的一轮对话
         
@@ -399,15 +400,19 @@ Important:
             content: 对话内容
             role: 角色（user/assistant）
             user_id: 用户ID
+            character_id: 角色ID（用于多角色场景）
             
         Returns:
             AnalysisResult: 分析结果（如果触发了分析）
         """
-        # 添加到缓冲区
-        if user_id not in self._buffers:
-            self._buffers[user_id] = []
+        # 使用复合键区分不同用户/角色
+        cache_key = f"{user_id}/{character_id}"
         
-        self._buffers[user_id].append({
+        # 添加到缓冲区
+        if cache_key not in self._buffers:
+            self._buffers[cache_key] = []
+        
+        self._buffers[cache_key].append({
             'role': role,
             'content': content,
             'timestamp': time.time()
@@ -415,24 +420,24 @@ Important:
         
         # 限制缓冲区大小
         max_size = self.config.max_context_turns * 2  # 考虑 user + assistant
-        if len(self._buffers[user_id]) > max_size:
-            self._buffers[user_id] = self._buffers[user_id][-max_size:]
+        if len(self._buffers[cache_key]) > max_size:
+            self._buffers[cache_key] = self._buffers[cache_key][-max_size:]
         
         # 增加轮次计数
-        if user_id not in self._turn_counters:
-            self._turn_counters[user_id] = 0
-        self._turn_counters[user_id] += 1
+        if cache_key not in self._turn_counters:
+            self._turn_counters[cache_key] = 0
+        self._turn_counters[cache_key] += 1
         
         # 检查是否应该触发分析（仅 LLM 模式）
         if self.config.backend == AnalyzerBackend.LLM:
-            if self._turn_counters[user_id] >= self.config.trigger_interval:
-                self._turn_counters[user_id] = 0
-                return self._trigger_llm_analysis(user_id)
+            if self._turn_counters[cache_key] >= self.config.trigger_interval:
+                self._turn_counters[cache_key] = 0
+                return self._trigger_llm_analysis(user_id, character_id)
         
         # 手动模式不做任何分析
         return AnalysisResult(triggered=False)
     
-    def trigger_analysis(self, user_id: str = "default") -> AnalysisResult:
+    def trigger_analysis(self, user_id: str = "default", character_id: str = "default") -> AnalysisResult:
         """手动触发分析
         
         可以在任何模式下调用。如果是 LLM 模式且有配置，会使用 LLM 分析。
@@ -440,30 +445,37 @@ Important:
         
         Args:
             user_id: 用户ID
+            character_id: 角色ID（用于多角色场景）
             
         Returns:
             AnalysisResult: 分析结果
         """
         if self.is_llm_enabled:
-            return self._trigger_llm_analysis(user_id)
+            return self._trigger_llm_analysis(user_id, character_id)
         
         return AnalysisResult(
             triggered=False,
             error="LLM 分析未启用（需配置 API key）"
         )
     
-    def _get_conversation_from_memories(self, user_id: str) -> List[Dict[str, Any]]:
+    def _get_conversation_from_memories(self, user_id: str, character_id: str = "default") -> List[Dict[str, Any]]:
         """从已保存的记忆中获取对话内容
         
         这是对 buffer 的补充/替代，确保即使 buffer 丢失也能从记忆恢复。
         优先使用 memory_provider（如果配置），否则使用 buffer。
         
+        Args:
+            user_id: 用户ID
+            character_id: 角色ID
+            
         Returns:
             List[Dict]: 对话列表，格式与 buffer 相同
         """
+        cache_key = f"{user_id}/{character_id}"
+        
         if not self._memory_provider:
             # 没有配置 memory_provider，使用原有的 buffer
-            return self._buffers.get(user_id, [])
+            return self._buffers.get(cache_key, [])
         
         try:
             # 获取最近的记忆（限制数量）
@@ -472,7 +484,7 @@ Important:
             
             if not memories:
                 # 记忆为空，回退到 buffer
-                return self._buffers.get(user_id, [])
+                return self._buffers.get(cache_key, [])
             
             # 转换记忆格式为对话格式
             conversations = []
@@ -497,22 +509,29 @@ Important:
             
         except Exception as e:
             print(f"[Recall] 从记忆获取对话失败: {e}，回退到 buffer")
-            return self._buffers.get(user_id, [])
+            return self._buffers.get(cache_key, [])
     
-    def _trigger_llm_analysis(self, user_id: str) -> AnalysisResult:
-        """触发 LLM 分析（带锁保护）"""
+    def _trigger_llm_analysis(self, user_id: str, character_id: str = "default") -> AnalysisResult:
+        """触发 LLM 分析（带锁保护）
+        
+        Args:
+            user_id: 用户ID
+            character_id: 角色ID
+        """
         if not self.is_llm_enabled:
             return AnalysisResult(
                 triggered=False,
                 error="LLM 客户端未初始化"
             )
         
-        # 【新增】获取用户锁，防止同一用户的并发分析
-        user_lock = self._get_user_lock(user_id)
+        cache_key = f"{user_id}/{character_id}"
+        
+        # 【新增】获取用户/角色锁，防止同一用户/角色的并发分析
+        user_lock = self._get_user_lock(cache_key)
         
         # 尝试获取锁，如果已经有分析在进行则跳过
         if not user_lock.acquire(blocking=False):
-            print(f"[Recall] 用户 {user_id} 的伏笔分析正在进行中，跳过本次")
+            print(f"[Recall] 用户 {cache_key} 的伏笔分析正在进行中，跳过本次")
             return AnalysisResult(
                 triggered=False,
                 error="分析正在进行中"
@@ -520,7 +539,7 @@ Important:
         
         try:
             # 【改进】优先从已保存的记忆获取对话
-            conversations = self._get_conversation_from_memories(user_id)
+            conversations = self._get_conversation_from_memories(user_id, character_id)
             
             if not conversations:
                 return AnalysisResult(
@@ -535,7 +554,7 @@ Important:
             conversation_text = self._format_conversation(conversations)
             
             # 获取当前活跃的伏笔
-            active = self.tracker.get_active(user_id)
+            active = self.tracker.get_active(user_id, character_id)
             active_text = self._format_active_foreshadowings(active)
             
             # 选择提示词
@@ -569,6 +588,7 @@ Important:
                         self.tracker.plant(
                             content=fsh_data.get('content', ''),
                             user_id=user_id,
+                            character_id=character_id,
                             importance=fsh_data.get('importance', 0.5),
                             related_entities=fsh_data.get('related_entities', [])
                         )
@@ -588,19 +608,21 @@ Important:
                             self.tracker.resolve(
                                 foreshadowing_id=fsh_id,
                                 resolution=f"[自动检测] {evidence}",
-                                user_id=user_id
+                                user_id=user_id,
+                                character_id=character_id
                             )
                         except Exception as e:
                             print(f"[Recall] 自动解决伏笔失败: {e}")
             
             # 【改进】更新分析标记（记录最后分析的记忆ID）
+            cache_key = f"{user_id}/{character_id}"
             last_memory_id = None
             if conversations and 'memory_id' in conversations[-1]:
                 last_memory_id = conversations[-1]['memory_id']
-            self._update_analysis_marker(user_id, last_memory_id)
+            self._update_analysis_marker(cache_key, last_memory_id)
             
-            # 清空已分析的缓冲区（保持向后兼容）
-            self._buffers[user_id] = []
+            # 清空已分析的缓冲区
+            self._buffers[cache_key] = []
             
             return result
             
@@ -668,24 +690,27 @@ Important:
         
         return result
     
-    def get_buffer_size(self, user_id: str = "default") -> int:
+    def get_buffer_size(self, user_id: str = "default", character_id: str = "default") -> int:
         """获取当前缓冲区大小"""
-        return len(self._buffers.get(user_id, []))
+        cache_key = f"{user_id}/{character_id}"
+        return len(self._buffers.get(cache_key, []))
     
-    def get_turns_until_analysis(self, user_id: str = "default") -> int:
+    def get_turns_until_analysis(self, user_id: str = "default", character_id: str = "default") -> int:
         """获取距离下次分析还需要多少轮"""
         if self.config.backend != AnalyzerBackend.LLM:
             return -1  # 手动模式不会自动分析
         
-        current = self._turn_counters.get(user_id, 0)
+        cache_key = f"{user_id}/{character_id}"
+        current = self._turn_counters.get(cache_key, 0)
         return self.config.trigger_interval - current
     
-    def clear_buffer(self, user_id: str = "default"):
+    def clear_buffer(self, user_id: str = "default", character_id: str = "default"):
         """清空对话缓冲区"""
-        if user_id in self._buffers:
-            self._buffers[user_id] = []
-        if user_id in self._turn_counters:
-            self._turn_counters[user_id] = 0
+        cache_key = f"{user_id}/{character_id}"
+        if cache_key in self._buffers:
+            self._buffers[cache_key] = []
+        if cache_key in self._turn_counters:
+            self._turn_counters[cache_key] = 0
     
     def update_config(
         self,

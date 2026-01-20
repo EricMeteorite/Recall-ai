@@ -35,6 +35,14 @@ SUPPORTED_CONFIG_KEYS = {
     'FORESHADOWING_TRIGGER_INTERVAL',
     'FORESHADOWING_AUTO_PLANT',
     'FORESHADOWING_AUTO_RESOLVE',
+    'FORESHADOWING_MAX_RETURN',       # 伏笔召回数量
+    'FORESHADOWING_MAX_ACTIVE',       # 活跃伏笔数量上限
+    # 持久条件系统配置
+    'CONTEXT_MAX_PER_TYPE',           # 每类型条件上限
+    'CONTEXT_MAX_TOTAL',              # 条件总数上限
+    'CONTEXT_DECAY_DAYS',             # 衰减开始天数
+    'CONTEXT_DECAY_RATE',             # 每次衰减比例
+    'CONTEXT_MIN_CONFIDENCE',         # 最低置信度（低于此自动归档）
     # 智能去重配置（持久条件和伏笔系统）
     'DEDUP_EMBEDDING_ENABLED',
     'DEDUP_HIGH_THRESHOLD',
@@ -101,6 +109,33 @@ FORESHADOWING_AUTO_PLANT=true
 # 自动解决伏笔 (true/false) - 建议保持 false，让用户手动确认
 # Automatically resolve detected foreshadowing (recommend false)
 FORESHADOWING_AUTO_RESOLVE=false
+
+# 伏笔召回数量（构建上下文时返回的伏笔数量）
+# Number of foreshadowings to return when building context
+FORESHADOWING_MAX_RETURN=10
+
+# 活跃伏笔数量上限（超出时自动归档低优先级的伏笔）
+# Max active foreshadowings (auto-archive low-priority ones when exceeded)
+FORESHADOWING_MAX_ACTIVE=50
+
+# ----------------------------------------------------------------------------
+# 持久条件系统配置
+# Persistent Context Configuration
+# ----------------------------------------------------------------------------
+# 每类型最大条件数 / Max conditions per type
+CONTEXT_MAX_PER_TYPE=10
+
+# 条件总数上限 / Max total conditions
+CONTEXT_MAX_TOTAL=100
+
+# 置信度衰减开始天数 / Days before decay starts
+CONTEXT_DECAY_DAYS=14
+
+# 每次衰减比例 (0.0-1.0) / Decay rate per check
+CONTEXT_DECAY_RATE=0.05
+
+# 最低置信度（低于此值自动归档）/ Min confidence before archive
+CONTEXT_MIN_CONFIDENCE=0.1
 
 # ----------------------------------------------------------------------------
 # 智能去重配置（持久条件和伏笔系统）
@@ -274,6 +309,7 @@ class ContextRequest(BaseModel):
     """构建上下文请求"""
     query: str = Field(..., description="当前查询")
     user_id: str = Field(default="default", description="用户ID")
+    character_id: str = Field(default="default", description="角色ID")
     max_tokens: int = Field(default=2000, description="最大token数")
     include_recent: int = Field(default=5, description="包含的最近对话数")
     include_core_facts: bool = Field(default=True, description="是否包含核心事实摘要")
@@ -309,6 +345,7 @@ class ForeshadowingRequest(BaseModel):
     """伏笔请求"""
     content: str = Field(..., description="伏笔内容")
     user_id: str = Field(default="default", description="用户ID（角色名）")
+    character_id: str = Field(default="default", description="角色ID")
     related_entities: Optional[List[str]] = Field(default=None, description="相关实体")
     importance: float = Field(default=0.5, ge=0, le=1, description="重要性")
 
@@ -320,6 +357,7 @@ class PersistentContextRequest(BaseModel):
     content: str = Field(..., description="条件内容")
     context_type: str = Field(default="custom", description="条件类型：user_identity, user_goal, user_preference, environment, project, character_trait, world_setting, relationship, assumption, constraint, custom")
     user_id: str = Field(default="default", description="用户ID")
+    character_id: str = Field(default="default", description="角色ID")
     keywords: Optional[List[str]] = Field(default=None, description="关键词")
 
 
@@ -360,6 +398,7 @@ class ForeshadowingAnalysisRequest(BaseModel):
     content: str = Field(..., description="对话内容")
     role: str = Field(default="user", description="角色（user/assistant）")
     user_id: str = Field(default="default", description="用户ID（角色名）")
+    character_id: str = Field(default="default", description="角色ID")
 
 
 class ForeshadowingAnalysisResult(BaseModel):
@@ -757,6 +796,7 @@ async def build_context(request: ContextRequest):
     context = engine.build_context(
         query=request.query,
         user_id=request.user_id,
+        character_id=request.character_id,
         max_tokens=request.max_tokens,
         include_recent=request.include_recent,
         include_core_facts=request.include_core_facts,
@@ -788,6 +828,7 @@ async def add_persistent_context(request: PersistentContextRequest):
         content=request.content,
         context_type=ctx_type,
         user_id=request.user_id,
+        character_id=request.character_id,
         keywords=request.keywords
     )
     
@@ -807,11 +848,12 @@ async def add_persistent_context(request: PersistentContextRequest):
 @app.get("/v1/persistent-contexts", response_model=List[PersistentContextItem], tags=["Persistent Contexts"])
 async def list_persistent_contexts(
     user_id: str = Query(default="default", description="用户ID"),
+    character_id: str = Query(default="default", description="角色ID"),
     context_type: Optional[str] = Query(default=None, description="按类型过滤")
 ):
     """获取所有活跃的持久条件"""
     engine = get_engine()
-    contexts = engine.get_persistent_contexts(user_id)
+    contexts = engine.get_persistent_contexts(user_id, character_id)
     
     # 按类型过滤
     if context_type:
@@ -836,17 +878,19 @@ async def list_persistent_contexts(
 
 @app.get("/v1/persistent-contexts/stats", response_model=PersistentContextStats, tags=["Persistent Contexts"])
 async def get_persistent_context_stats(
-    user_id: str = Query(default="default", description="用户ID")
+    user_id: str = Query(default="default", description="用户ID"),
+    character_id: str = Query(default="default", description="角色ID")
 ):
     """获取持久条件统计信息"""
     engine = get_engine()
-    stats = engine.context_tracker.get_stats(user_id)
+    stats = engine.context_tracker.get_stats(user_id, character_id)
     return PersistentContextStats(**stats)
 
 
 @app.post("/v1/persistent-contexts/consolidate", tags=["Persistent Contexts"])
 async def consolidate_contexts(
     user_id: str = Query(default="default", description="用户ID"),
+    character_id: str = Query(default="default", description="角色ID"),
     force: bool = Query(default=False, description="是否强制执行（不管数量是否超过阈值）")
 ):
     """压缩合并持久条件
@@ -855,21 +899,22 @@ async def consolidate_contexts(
     如果配置了LLM，会使用LLM进行智能压缩。
     """
     engine = get_engine()
-    result = engine.consolidate_persistent_contexts(user_id, force)
+    result = engine.consolidate_persistent_contexts(user_id, character_id, force)
     return result
 
 
 @app.post("/v1/persistent-contexts/extract", tags=["Persistent Contexts"])
 async def extract_contexts_from_text(
     text: str = Body(..., embed=True, description="要分析的文本"),
-    user_id: str = Query(default="default", description="用户ID")
+    user_id: str = Query(default="default", description="用户ID"),
+    character_id: str = Query(default="default", description="角色ID")
 ):
     """从文本中自动提取持久条件
     
     使用 LLM（如果可用）或规则从文本中提取应该持久化的条件。
     """
     engine = get_engine()
-    contexts = engine.extract_contexts_from_text(text, user_id)
+    contexts = engine.extract_contexts_from_text(text, user_id, character_id)
     return {
         "extracted": len(contexts),
         "contexts": contexts
@@ -879,11 +924,12 @@ async def extract_contexts_from_text(
 @app.delete("/v1/persistent-contexts/{context_id}", tags=["Persistent Contexts"])
 async def remove_persistent_context(
     context_id: str,
-    user_id: str = Query(default="default", description="用户ID")
+    user_id: str = Query(default="default", description="用户ID"),
+    character_id: str = Query(default="default", description="角色ID")
 ):
     """停用持久条件"""
     engine = get_engine()
-    success = engine.remove_persistent_context(context_id, user_id)
+    success = engine.remove_persistent_context(context_id, user_id, character_id)
     
     if not success:
         raise HTTPException(status_code=404, detail="持久条件不存在")
@@ -894,7 +940,8 @@ async def remove_persistent_context(
 @app.post("/v1/persistent-contexts/{context_id}/used", tags=["Persistent Contexts"])
 async def mark_context_used(
     context_id: str,
-    user_id: str = Query(default="default", description="用户ID")
+    user_id: str = Query(default="default", description="用户ID"),
+    character_id: str = Query(default="default", description="角色ID")
 ):
     """标记持久条件已使用
     
@@ -902,7 +949,7 @@ async def mark_context_used(
     这对于置信度衰减机制很重要。
     """
     engine = get_engine()
-    engine.context_tracker.mark_used(context_id, user_id)
+    engine.context_tracker.mark_used(context_id, user_id, character_id)
     return {"success": True, "message": "已标记使用"}
 
 
@@ -915,6 +962,7 @@ async def plant_foreshadowing(request: ForeshadowingRequest):
     fsh = engine.plant_foreshadowing(
         content=request.content,
         user_id=request.user_id,
+        character_id=request.character_id,
         related_entities=request.related_entities,
         importance=request.importance
     )
@@ -929,10 +977,13 @@ async def plant_foreshadowing(request: ForeshadowingRequest):
 
 
 @app.get("/v1/foreshadowing", response_model=List[ForeshadowingItem], tags=["Foreshadowing"])
-async def list_foreshadowing(user_id: str = Query(default="default", description="用户ID（角色名）")):
+async def list_foreshadowing(
+    user_id: str = Query(default="default", description="用户ID（角色名）"),
+    character_id: str = Query(default="default", description="角色ID")
+):
     """获取活跃伏笔"""
     engine = get_engine()
-    active = engine.get_active_foreshadowings(user_id)
+    active = engine.get_active_foreshadowings(user_id, character_id)
     return [
         ForeshadowingItem(
             id=f.id,
@@ -950,11 +1001,12 @@ async def list_foreshadowing(user_id: str = Query(default="default", description
 async def resolve_foreshadowing(
     foreshadowing_id: str,
     resolution: str = Body(..., embed=True),
-    user_id: str = Query(default="default", description="用户ID（角色名）")
+    user_id: str = Query(default="default", description="用户ID（角色名）"),
+    character_id: str = Query(default="default", description="角色ID")
 ):
     """解决伏笔"""
     engine = get_engine()
-    success = engine.resolve_foreshadowing(foreshadowing_id, resolution, user_id)
+    success = engine.resolve_foreshadowing(foreshadowing_id, resolution, user_id, character_id)
     
     if not success:
         raise HTTPException(status_code=404, detail="伏笔不存在")
@@ -962,17 +1014,38 @@ async def resolve_foreshadowing(
     return {"success": True, "message": "伏笔已解决"}
 
 
+@app.post("/v1/foreshadowing/{foreshadowing_id}/hint", tags=["Foreshadowing"])
+async def add_foreshadowing_hint(
+    foreshadowing_id: str,
+    hint: str = Body(..., embed=True, description="提示内容"),
+    user_id: str = Query(default="default", description="用户ID（角色名）"),
+    character_id: str = Query(default="default", description="角色ID")
+):
+    """添加伏笔提示
+    
+    为伏笔添加进展提示，会将状态从 PLANTED 更新为 DEVELOPING
+    """
+    engine = get_engine()
+    success = engine.add_foreshadowing_hint(foreshadowing_id, hint, user_id, character_id)
+    
+    if not success:
+        raise HTTPException(status_code=404, detail="伏笔不存在")
+    
+    return {"success": True, "message": "提示已添加"}
+
+
 @app.delete("/v1/foreshadowing/{foreshadowing_id}", tags=["Foreshadowing"])
 async def abandon_foreshadowing(
     foreshadowing_id: str,
-    user_id: str = Query(default="default", description="用户ID（角色名）")
+    user_id: str = Query(default="default", description="用户ID（角色名）"),
+    character_id: str = Query(default="default", description="角色ID")
 ):
     """放弃/删除伏笔
     
     将伏笔标记为已放弃状态（不会物理删除，保留历史记录）
     """
     engine = get_engine()
-    success = engine.abandon_foreshadowing(foreshadowing_id, user_id)
+    success = engine.abandon_foreshadowing(foreshadowing_id, user_id, character_id)
     
     if not success:
         raise HTTPException(status_code=404, detail="伏笔不存在")
@@ -986,23 +1059,30 @@ async def abandon_foreshadowing(
 _background_analysis_tasks: set = set()
 
 
-async def _background_foreshadowing_analysis(engine: RecallEngine, content: str, role: str, user_id: str):
+async def _background_foreshadowing_analysis(engine: RecallEngine, content: str, role: str, user_id: str, character_id: str):
     """后台异步执行伏笔分析
     
     这个函数在后台运行，不阻塞 API 响应。
     使用引擎的异步分析方法来避免阻塞事件循环。
+    设置 60 秒超时，防止 LLM 调用卡住导致线程池耗尽。
     """
     try:
         # 在线程池中运行同步的分析方法，避免阻塞事件循环
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(
-            None,  # 使用默认线程池
-            lambda: engine.on_foreshadowing_turn(
-                content=content,
-                role=role,
-                user_id=user_id
-            )
+        await asyncio.wait_for(
+            loop.run_in_executor(
+                None,  # 使用默认线程池
+                lambda: engine.on_foreshadowing_turn(
+                    content=content,
+                    role=role,
+                    user_id=user_id,
+                    character_id=character_id
+                )
+            ),
+            timeout=60.0  # 60秒超时
         )
+    except asyncio.TimeoutError:
+        print(f"[Recall] 后台伏笔分析超时 (>60s)")
     except Exception as e:
         print(f"[Recall] 后台伏笔分析失败: {e}")
 
@@ -1026,7 +1106,8 @@ async def analyze_foreshadowing_turn(request: ForeshadowingAnalysisRequest):
             engine=engine,
             content=request.content,
             role=request.role,
-            user_id=request.user_id
+            user_id=request.user_id,
+            character_id=request.character_id
         )
     )
     
@@ -1045,14 +1126,15 @@ async def analyze_foreshadowing_turn(request: ForeshadowingAnalysisRequest):
 
 @app.post("/v1/foreshadowing/analyze/trigger", response_model=ForeshadowingAnalysisResult, tags=["Foreshadowing Analysis"])
 async def trigger_foreshadowing_analysis(
-    user_id: str = Query(default="default", description="用户ID（角色名）")
+    user_id: str = Query(default="default", description="用户ID（角色名）"),
+    character_id: str = Query(default="default", description="角色ID")
 ):
     """手动触发伏笔分析
     
     强制触发 LLM 分析（如果已配置）。可以在任何时候调用。
     """
     engine = get_engine()
-    result = engine.trigger_foreshadowing_analysis(user_id)
+    result = engine.trigger_foreshadowing_analysis(user_id, character_id)
     return ForeshadowingAnalysisResult(
         triggered=result.triggered,
         new_foreshadowings=result.new_foreshadowings,
@@ -1111,6 +1193,7 @@ async def update_foreshadowing_analyzer_config(config: ForeshadowingConfigUpdate
     
     # 准备要更新到配置文件的内容
     config_updates = {}
+    llm_enable_error = None  # 记录 LLM 启用失败的错误
     
     # 处理 LLM 启用开关
     if config.llm_enabled is not None:
@@ -1127,12 +1210,14 @@ async def update_foreshadowing_analyzer_config(config: ForeshadowingConfigUpdate
                     base_url=os.environ.get('LLM_API_BASE')
                 )
             else:
-                return {"success": False, "message": "无法启用 LLM 模式：未配置 LLM API Key"}
+                # 记录错误但继续处理其他配置
+                llm_enable_error = "无法启用 LLM 模式：未配置 LLM API Key"
+                del config_updates['FORESHADOWING_LLM_ENABLED']  # 不保存失败的配置
         else:
             # 禁用 LLM 模式，切换到手动模式
             engine.disable_foreshadowing_llm_mode()
     
-    # 处理其他配置
+    # 处理其他配置（即使 LLM 启用失败也继续处理）
     if config.trigger_interval is not None:
         config_updates['FORESHADOWING_TRIGGER_INTERVAL'] = str(config.trigger_interval)
     if config.auto_plant is not None:
@@ -1150,6 +1235,15 @@ async def update_foreshadowing_analyzer_config(config: ForeshadowingConfigUpdate
     # 保存到配置文件
     if config_updates:
         save_config_to_file(config_updates)
+    
+    # 如果 LLM 启用失败，返回部分成功的响应
+    if llm_enable_error:
+        return {
+            "success": False, 
+            "message": llm_enable_error,
+            "partial_success": True,  # 表示其他配置已保存
+            "config": (await get_foreshadowing_analyzer_config())["config"]
+        }
     
     return {"success": True, "config": (await get_foreshadowing_analyzer_config())["config"]}
 
@@ -1235,6 +1329,42 @@ async def reload_config():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"重新加载失败: {str(e)}")
+
+
+@app.post("/v1/maintenance/rebuild-index", tags=["Admin"])
+async def rebuild_index():
+    """手动重建 VectorIndex 索引
+    
+    为所有伏笔和条件重建语义索引。通常不需要手动调用，
+    系统会在首次升级时自动重建。
+    
+    使用场景：
+    - 索引数据损坏需要重建
+    - 手动导入了数据文件
+    - 从备份恢复后需要重建索引
+    
+    注意：此操作可能需要较长时间，取决于数据量大小。
+    """
+    try:
+        engine = get_engine()
+        
+        if not engine._vector_index or not engine._vector_index.enabled:
+            return {
+                "success": False,
+                "message": "VectorIndex 未启用（轻量模式下不可用）",
+                "indexed_count": 0
+            }
+        
+        # 使用公开方法强制重建索引
+        indexed_count = engine.rebuild_vector_index(force=True)
+        
+        return {
+            "success": True,
+            "message": "索引重建完成",
+            "indexed_count": indexed_count
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"索引重建失败: {str(e)}")
 
 
 @app.get("/v1/config", tags=["Admin"])
