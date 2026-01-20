@@ -56,7 +56,7 @@
 
 | 后端 API | 功能说明 | 前端状态 | 实现位置 |
 |---------|---------|:-------:|---------|
-| `/v1/core-settings` (GET/PUT) | 角色卡、世界观、绝对规则 | ✅ 已实现 | 📋设定 标签页 |
+| `/v1/core-settings` (GET/PUT) | 绝对规则管理 | ✅ 已实现 | ⚠️规则 标签页（仅绝对规则） |
 | `/v1/entities/{name}` | 实体信息查询 | 🟡 低优先 | 可通过搜索替代 |
 | `/v1/entities/{name}/related` | 相关实体查询 | 🟡 低优先 | 知识图谱v3.1版本 |
 | `/v1/stats` | 系统统计信息 | ✅ 已实现 | ⚙️设置 → 系统统计按钮 |
@@ -65,6 +65,11 @@
 | `/v1/foreshadowing/analyze/trigger` | 手动触发伏笔分析 | ✅ 已实现 | 🎭伏笔 标签页 🔍按钮 |
 | `/v1/config/reload` | 配置热更新 | ✅ 已实现 | ⚙️设置 → 热更新配置按钮 |
 
+> 📌 **设计决策**：ST 插件前端的 `/v1/core-settings` 只暴露"绝对规则"功能。
+> - 角色卡、世界观、写作风格等功能与 **SillyTavern 自带功能重复**
+> - 用户应使用 ST 的角色卡编辑器、世界书、作者注等功能
+> - Recall 后端 API 仍保留完整功能，供其他 AI 工具（非 ST）使用
+
 ### ✅ 已修复的代码实现问题（2026-01-20）
 
 | 问题 | 修复状态 |
@@ -72,6 +77,7 @@
 | `get_context_for_prompt` 位置 | ✅ 在 `ForeshadowingTracker`（第457行），文档已更正 |
 | `engine.build_context` 使用方法 | ✅ 已改用 `tracker.get_context_for_prompt()`（第814行） |
 | 主动提醒逻辑 | ✅ 已启用，传入 `current_turn` 参数支持重要伏笔提醒 |
+| ST 前端功能重复 | ✅ 移除与 ST 重复的 UI，只保留绝对规则功能 |
 
 ### ✅ 已确认完整的功能
 
@@ -93,6 +99,7 @@
 | **ContextBuilder 未被使用** | `engine.build_context()` 自己实现了6.5层上下文策略，ContextBuilder 保留供未来扩展 |
 | **ParallelRetriever 未被使用** | 设计选择，EightLayerRetriever是主要实现 |
 | **RecallInit/LightweightConfig 导入** | 保留用于CLI等场景，添加了 `# noqa: F401` 注释 |
+| **ST 前端只暴露绝对规则** | 故意设计。角色卡/世界观/写作风格与 ST 自带功能重复，后端 API 完整保留供其他工具使用 |
 
 ### 100%不遗忘机制验证结果
 

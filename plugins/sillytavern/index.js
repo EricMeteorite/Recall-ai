@@ -192,7 +192,7 @@ function createUI() {
                     <button class="recall-tab active" data-tab="memories">📚 记忆</button>
                     <button class="recall-tab" data-tab="contexts">📌 条件</button>
                     <button class="recall-tab" data-tab="foreshadowing">🎭 伏笔</button>
-                    <button class="recall-tab" data-tab="core-settings">📋 设定</button>
+                    <button class="recall-tab" data-tab="core-settings">⚠️ 规则</button>
                     <button class="recall-tab" data-tab="settings">⚙️ 设置</button>
                 </div>
                 
@@ -308,51 +308,28 @@ function createUI() {
                     </div>
                 </div>
                 
-                <!-- 核心设定标签页（L0 Core Settings） -->
+                <!-- 绝对规则标签页（Recall 独有功能，不与 ST 重复） -->
                 <div id="recall-tab-core-settings" class="recall-tab-content">
-                    <div class="recall-setting-hint" style="margin-bottom:10px;">
-                        📋 核心设定是最高优先级的规则，会被注入到每次对话的上下文中。
+                    <div class="recall-info-box" style="margin-bottom:12px;">
+                        <div class="recall-info-title">💡 关于绝对规则</div>
+                        <ul>
+                            <li>绝对规则是 AI <strong>必须遵守</strong>的硬性约束</li>
+                            <li>角色卡、世界观、写作风格请使用 <strong>SillyTavern 自带功能</strong></li>
+                            <li>此功能是 ST 没有的<strong>补充功能</strong>，用于强制 AI 遵守某些规则</li>
+                        </ul>
                     </div>
                     
                     <div class="recall-settings-section">
-                        <div class="recall-settings-section-title">🎭 角色卡设定</div>
-                        <textarea id="recall-core-character" class="text_pole recall-textarea" 
-                            placeholder="角色的核心设定、性格特征、背景故事等...
-例如：
-角色名: 小明
-性格: 开朗、乐于助人
-背景: 在现代都市生活的大学生" rows="5"></textarea>
-                    </div>
-                    
-                    <div class="recall-settings-section">
-                        <div class="recall-settings-section-title">🌍 世界观设定</div>
-                        <textarea id="recall-core-world" class="text_pole recall-textarea" 
-                            placeholder="故事发生的世界背景、时代设定、特殊规则等...
-例如：
-时代: 2024年现代都市
-地点: 某大学校园
-特殊设定: 无魔法、无超能力的普通世界" rows="4"></textarea>
-                    </div>
-                    
-                    <div class="recall-settings-section">
-                        <div class="recall-settings-section-title">✍️ 写作风格</div>
-                        <textarea id="recall-core-style" class="text_pole recall-textarea" 
-                            placeholder="期望的写作风格、语气、文风等...
-例如：
-风格: 轻松幽默
-语气: 亲切自然
-长度: 每次回复100-300字" rows="3"></textarea>
-                    </div>
-                    
-                    <div class="recall-settings-section">
-                        <div class="recall-settings-section-title">⚠️ 绝对规则</div>
-                        <div class="recall-setting-hint">每行一条规则，AI必须遵守</div>
+                        <div class="recall-settings-section-title">⚠️ 绝对规则（每行一条）</div>
+                        <div class="recall-setting-hint">这些规则会被强制注入，AI 必须遵守</div>
                         <textarea id="recall-core-rules" class="text_pole recall-textarea" 
                             placeholder="绝对不能违反的规则，每行一条
 例如：
 角色不会主动伤害无辜的人
 角色说话时不会使用脏话
-保持角色设定的一致性" rows="4"></textarea>
+保持角色设定的一致性
+不要在回复中使用emoji
+不要打破第四面墙" rows="8"></textarea>
                     </div>
                     
                     <div class="recall-setting-actions" style="margin-top:10px;">
@@ -362,7 +339,7 @@ function createUI() {
                         </button>
                         <button id="recall-save-core-settings" class="menu_button menu_button_icon">
                             <i class="fa-solid fa-save"></i>
-                            <span>保存设定</span>
+                            <span>保存规则</span>
                         </button>
                     </div>
                 </div>
@@ -1359,10 +1336,11 @@ async function onSaveForeshadowingAnalyzerConfig() {
     }
 }
 
-// ==================== 核心设定 (Core Settings) 功能 ====================
+// ==================== 绝对规则功能（ST 补充功能） ====================
 
 /**
- * 加载核心设定
+ * 加载绝对规则
+ * 注：角色卡/世界观/写作风格请使用 SillyTavern 自带功能
  */
 async function loadCoreSettings() {
     try {
@@ -1370,31 +1348,25 @@ async function loadCoreSettings() {
         if (response.ok) {
             const data = await response.json();
             
-            // 填充表单
-            document.getElementById('recall-core-character').value = data.character_card || '';
-            document.getElementById('recall-core-world').value = data.world_setting || '';
-            document.getElementById('recall-core-style').value = data.writing_style || '';
-            
-            // 绝对规则是数组，转换为文本（每行一条）
+            // 只加载绝对规则（其他设定请用 ST 自带功能）
             const rulesArray = data.absolute_rules || [];
             document.getElementById('recall-core-rules').value = rulesArray.join('\n');
             
-            console.log('[Recall] 核心设定已加载');
+            console.log('[Recall] 绝对规则已加载');
         } else {
-            console.error('[Recall] 加载核心设定失败:', response.status);
+            console.error('[Recall] 加载绝对规则失败:', response.status);
         }
     } catch (e) {
-        console.error('[Recall] 加载核心设定失败:', e);
+        console.error('[Recall] 加载绝对规则失败:', e);
     }
 }
 
 /**
- * 保存核心设定
+ * 保存绝对规则
+ * 注：只更新 absolute_rules 字段，不覆盖其他设定
+ * 后端 API 支持部分更新，未传递的字段不会被清空
  */
 async function saveCoreSettings() {
-    const characterCard = document.getElementById('recall-core-character').value.trim();
-    const worldSetting = document.getElementById('recall-core-world').value.trim();
-    const writingStyle = document.getElementById('recall-core-style').value.trim();
     const rulesText = document.getElementById('recall-core-rules').value.trim();
     
     // 解析绝对规则（每行一条，过滤空行）
@@ -1403,11 +1375,9 @@ async function saveCoreSettings() {
         .map(line => line.trim())
         .filter(line => line.length > 0);
     
+    // 只发送 absolute_rules 字段，不影响其他设定
     const settingsData = {
-        character_card: characterCard || null,
-        world_setting: worldSetting || null,
-        writing_style: writingStyle || null,
-        absolute_rules: absoluteRules.length > 0 ? absoluteRules : null
+        absolute_rules: absoluteRules.length > 0 ? absoluteRules : []
     };
     
     try {
@@ -1419,14 +1389,14 @@ async function saveCoreSettings() {
         
         if (response.ok) {
             const result = await response.json();
-            alert(`✅ 核心设定已保存\n\n角色卡: ${result.character_card ? '已设置' : '未设置'}\n世界观: ${result.world_setting ? '已设置' : '未设置'}\n写作风格: ${result.writing_style ? '已设置' : '未设置'}\n绝对规则: ${(result.absolute_rules || []).length} 条`);
-            console.log('[Recall] 核心设定已保存');
+            alert(`✅ 绝对规则已保存\n\n共 ${(result.absolute_rules || []).length} 条规则`);
+            console.log('[Recall] 绝对规则已保存');
         } else {
             const error = await response.json().catch(() => ({}));
-            alert(`❌ 保存核心设定失败: ${error.detail || '未知错误'}`);
+            alert(`❌ 保存绝对规则失败: ${error.detail || '未知错误'}`);
         }
     } catch (e) {
-        alert(`❌ 保存核心设定失败: ${e.message}`);
+        alert(`❌ 保存绝对规则失败: ${e.message}`);
     }
 }
 
