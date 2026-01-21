@@ -470,6 +470,353 @@ class ForeshadowingTracker:
         
         return None
 
+    def get_archived_foreshadowings(
+        self,
+        user_id: str = "default",
+        character_id: str = "default",
+        page: int = 1,
+        page_size: int = 20,
+        search: Optional[str] = None,
+        status: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """获取归档的伏笔列表（分页、搜索、筛选）
+        
+        Args:
+            user_id: 用户ID
+            character_id: 角色ID
+            page: 页码（从1开始）
+            page_size: 每页数量
+            search: 搜索关键词（搜索内容）
+            status: 状态筛选（resolved/abandoned）
+            
+        Returns:
+            Dict: {
+                'items': List[Dict],  # 当前页的伏笔列表
+                'total': int,         # 总数量
+                'page': int,          # 当前页
+                'page_size': int,     # 每页数量
+                'total_pages': int    # 总页数
+            }
+        """
+        all_archived = []
+        
+        if self.base_path:
+            safe_user_id = self._sanitize_path_component(user_id)
+            safe_char_id = self._sanitize_path_component(character_id)
+            archive_dir = os.path.join(self.base_path, safe_user_id, safe_char_id, 'archive')
+            
+            if os.path.exists(archive_dir):
+                # 读取所有归档文件
+                for filename in sorted(os.listdir(archive_dir), reverse=True):
+                    if filename.startswith('foreshadowings') and filename.endswith('.jsonl'):
+                        archive_path = os.path.join(archive_dir, filename)
+                        try:
+                            with open(archive_path, 'r', encoding='utf-8') as f:
+                                for line in f:
+                                    if line.strip():
+                                        data = json.loads(line)
+                                        all_archived.append(data)
+                        except Exception:
+                            pass
+        
+        # 按归档时间倒序排列
+        all_archived.sort(key=lambda x: x.get('archived_at', 0), reverse=True)
+        
+        # 筛选：状态
+        if status:
+            all_archived = [f for f in all_archived if f.get('status') == status]
+        
+        # 筛选：搜索
+        if search:
+            search_lower = search.lower()
+            all_archived = [f for f in all_archived if search_lower in f.get('content', '').lower()]
+        
+        # 分页
+        total = len(all_archived)
+        total_pages = max(1, (total + page_size - 1) // page_size)
+        page = max(1, min(page, total_pages))
+        start_idx = (page - 1) * page_size
+        end_idx = start_idx + page_size
+        items = all_archived[start_idx:end_idx]
+        
+        return {
+            'items': items,
+            'total': total,
+            'page': page,
+            'page_size': page_size,
+            'total_pages': total_pages
+        }
+
+    def restore_from_archive(
+        self,
+        foreshadowing_id: str,
+        user_id: str = "default",
+        character_id: str = "default"
+    ) -> Optional[Foreshadowing]:
+        """从归档恢复伏笔到活跃列表
+        
+        Args:
+            foreshadowing_id: 伏笔ID
+            user_id: 用户ID
+            character_id: 角色ID
+            
+        Returns:
+            Optional[Foreshadowing]: 恢复的伏笔，未找到返回 None
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        if not self.base_path:
+            return None
+        
+        safe_user_id = self._sanitize_path_component(user_id)
+        safe_char_id = self._sanitize_path_component(character_id)
+        archive_dir = os.path.join(self.base_path, safe_user_id, safe_char_id, 'archive')
+        
+        if not os.path.exists(archive_dir):
+            return None
+        
+        # 在所有归档文件中查找并移除
+        found_data = None
+        for filename in os.listdir(archive_dir):
+            if not (filename.startswith('foreshadowings') and filename.endswith('.jsonl')):
+                continue
+            
+            archive_path = os.path.join(archive_dir, filename)
+            lines_to_keep = []
+            
+            try:
+                with open(archive_path, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        if line.strip():
+                            data = json.loads(line)
+                            if data.get('id') == foreshadowing_id and found_data is None:
+                                found_data = data
+                            else:
+                                lines_to_keep.append(line)
+                
+                if found_data:
+                    # 重写归档文件（移除已恢复的伏笔）
+                    with open(archive_path, 'w', encoding='utf-8') as f:
+                        f.writelines(lines_to_keep)
+                    break
+            except Exception as e:
+                logger.error(f"[ForeshadowingTracker] 读取归档文件失败: {e}")
+        
+        if not found_data:
+            return None
+        
+        # 移除归档字段，创建 Foreshadowing 对象
+        found_data.pop('archived_at', None)
+        found_data.pop('archive_reason', None)
+        fsh = Foreshadowing.from_dict(found_data)
+        # 恢复为活跃状态
+        fsh.status = ForeshadowingStatus.PLANTED
+        fsh.resolution = None
+        fsh.resolved_at = None
+        
+        # 添加到活跃列表
+        user_data = self._load_user_data(user_id, character_id)
+        user_data['foreshadowings'][fsh.id] = fsh
+        self._save_user_data(user_id, character_id)
+        
+        logger.info(f"[ForeshadowingTracker] 已从归档恢复伏笔: {foreshadowing_id}")
+        return fsh
+
+    def delete_archived(
+        self,
+        foreshadowing_id: str,
+        user_id: str = "default",
+        character_id: str = "default"
+    ) -> bool:
+        """彻底删除归档中的伏笔
+        
+        Args:
+            foreshadowing_id: 伏笔ID
+            user_id: 用户ID
+            character_id: 角色ID
+            
+        Returns:
+            bool: 是否成功删除
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        if not self.base_path:
+            return False
+        
+        safe_user_id = self._sanitize_path_component(user_id)
+        safe_char_id = self._sanitize_path_component(character_id)
+        archive_dir = os.path.join(self.base_path, safe_user_id, safe_char_id, 'archive')
+        
+        if not os.path.exists(archive_dir):
+            return False
+        
+        deleted = False
+        for filename in os.listdir(archive_dir):
+            if not (filename.startswith('foreshadowings') and filename.endswith('.jsonl')):
+                continue
+            
+            archive_path = os.path.join(archive_dir, filename)
+            lines_to_keep = []
+            
+            try:
+                with open(archive_path, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        if line.strip():
+                            data = json.loads(line)
+                            if data.get('id') == foreshadowing_id:
+                                deleted = True
+                            else:
+                                lines_to_keep.append(line)
+                
+                if deleted:
+                    with open(archive_path, 'w', encoding='utf-8') as f:
+                        f.writelines(lines_to_keep)
+                    logger.info(f"[ForeshadowingTracker] 已彻底删除归档伏笔: {foreshadowing_id}")
+                    break
+            except Exception as e:
+                logger.error(f"[ForeshadowingTracker] 删除归档伏笔失败: {e}")
+        
+        return deleted
+
+    def clear_archived(
+        self,
+        user_id: str = "default",
+        character_id: str = "default"
+    ) -> int:
+        """清空所有归档伏笔
+        
+        Args:
+            user_id: 用户ID
+            character_id: 角色ID
+            
+        Returns:
+            int: 删除的伏笔数量
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        if not self.base_path:
+            return 0
+        
+        safe_user_id = self._sanitize_path_component(user_id)
+        safe_char_id = self._sanitize_path_component(character_id)
+        archive_dir = os.path.join(self.base_path, safe_user_id, safe_char_id, 'archive')
+        
+        if not os.path.exists(archive_dir):
+            return 0
+        
+        count = 0
+        for filename in os.listdir(archive_dir):
+            if filename.startswith('foreshadowings') and filename.endswith('.jsonl'):
+                archive_path = os.path.join(archive_dir, filename)
+                try:
+                    # 统计行数
+                    with open(archive_path, 'r', encoding='utf-8') as f:
+                        count += sum(1 for line in f if line.strip())
+                    # 删除文件
+                    os.remove(archive_path)
+                except Exception as e:
+                    logger.error(f"[ForeshadowingTracker] 清空归档文件失败: {e}")
+        
+        logger.info(f"[ForeshadowingTracker] 已清空归档伏笔: {count} 个")
+        return count
+
+    def archive_foreshadowing(
+        self,
+        foreshadowing_id: str,
+        user_id: str = "default",
+        character_id: str = "default"
+    ) -> bool:
+        """手动将活跃伏笔归档
+        
+        Args:
+            foreshadowing_id: 伏笔ID
+            user_id: 用户ID
+            character_id: 角色ID
+            
+        Returns:
+            bool: 是否成功归档
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        user_data = self._load_user_data(user_id, character_id)
+        foreshadowings = user_data.get('foreshadowings', {})
+        
+        if foreshadowing_id not in foreshadowings:
+            return False
+        
+        fsh = foreshadowings.pop(foreshadowing_id)
+        fsh.status = ForeshadowingStatus.ABANDONED
+        fsh.resolution = "[手动归档]"
+        
+        self._archive_foreshadowing(fsh, user_id, character_id, reason='manual')
+        self._save_user_data(user_id, character_id)
+        
+        logger.info(f"[ForeshadowingTracker] 已手动归档伏笔: {foreshadowing_id}")
+        return True
+
+    def update_foreshadowing(
+        self,
+        foreshadowing_id: str,
+        user_id: str = "default",
+        character_id: str = "default",
+        content: Optional[str] = None,
+        status: Optional[str] = None,
+        importance: Optional[float] = None,
+        hints: Optional[List[str]] = None,
+        resolution: Optional[str] = None
+    ) -> Optional[Foreshadowing]:
+        """更新伏笔的字段
+        
+        Args:
+            foreshadowing_id: 伏笔ID
+            user_id: 用户ID
+            character_id: 角色ID
+            content: 新内容（可选）
+            status: 新状态（可选）
+            importance: 新重要性（可选）
+            hints: 新提示列表（可选）
+            resolution: 新解决方案（可选）
+            
+        Returns:
+            Optional[Foreshadowing]: 更新后的伏笔，未找到返回 None
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        user_data = self._load_user_data(user_id, character_id)
+        foreshadowings = user_data.get('foreshadowings', {})
+        
+        if foreshadowing_id not in foreshadowings:
+            return None
+        
+        fsh = foreshadowings[foreshadowing_id]
+        
+        if content is not None:
+            fsh.content = content
+            # 更新 embedding
+            new_embedding = self._get_embedding(content)
+            if new_embedding:
+                fsh.embedding = new_embedding
+        if status is not None:
+            try:
+                fsh.status = ForeshadowingStatus(status)
+            except ValueError:
+                pass  # 保持原状态
+        if importance is not None:
+            fsh.importance = max(0.0, min(1.0, importance))
+        if hints is not None:
+            fsh.hints = hints
+        if resolution is not None:
+            fsh.resolution = resolution
+        
+        self._save_user_data(user_id, character_id)
+        logger.info(f"[ForeshadowingTracker] 已更新伏笔: {foreshadowing_id}")
+        return fsh
+
     def plant(
         self,
         content: str,

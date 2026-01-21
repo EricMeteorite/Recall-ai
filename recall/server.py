@@ -1036,6 +1036,134 @@ async def mark_context_used(
     return {"success": True, "message": "已标记使用"}
 
 
+@app.get("/v1/persistent-contexts/archived", tags=["Persistent Contexts"])
+async def list_archived_contexts(
+    user_id: str = Query(default="default", description="用户ID"),
+    character_id: str = Query(default="default", description="角色ID"),
+    page: int = Query(default=1, ge=1, description="页码"),
+    page_size: int = Query(default=20, ge=1, le=100, description="每页数量"),
+    search: Optional[str] = Query(default=None, description="搜索关键词"),
+    context_type: Optional[str] = Query(default=None, description="类型筛选")
+):
+    """获取归档的持久条件列表（分页、搜索、筛选）"""
+    engine = get_engine()
+    result = engine.context_tracker.get_archived_contexts(
+        user_id=user_id,
+        character_id=character_id,
+        page=page,
+        page_size=page_size,
+        search=search,
+        context_type=context_type
+    )
+    return result
+
+
+@app.post("/v1/persistent-contexts/{context_id}/restore", tags=["Persistent Contexts"])
+async def restore_context_from_archive(
+    context_id: str,
+    user_id: str = Query(default="default", description="用户ID"),
+    character_id: str = Query(default="default", description="角色ID")
+):
+    """从归档恢复持久条件到活跃列表"""
+    engine = get_engine()
+    ctx = engine.context_tracker.restore_from_archive(context_id, user_id, character_id)
+    
+    if not ctx:
+        raise HTTPException(status_code=404, detail="归档条件不存在")
+    
+    return {
+        "success": True,
+        "message": "已恢复条件",
+        "context": {
+            "id": ctx.id,
+            "content": ctx.content,
+            "context_type": ctx.context_type.value,
+            "confidence": ctx.confidence
+        }
+    }
+
+
+@app.delete("/v1/persistent-contexts/archived/{context_id}", tags=["Persistent Contexts"])
+async def delete_archived_context(
+    context_id: str,
+    user_id: str = Query(default="default", description="用户ID"),
+    character_id: str = Query(default="default", description="角色ID")
+):
+    """彻底删除归档中的持久条件"""
+    engine = get_engine()
+    success = engine.context_tracker.delete_archived(context_id, user_id, character_id)
+    
+    if not success:
+        raise HTTPException(status_code=404, detail="归档条件不存在")
+    
+    return {"success": True, "message": "已彻底删除归档条件"}
+
+
+@app.delete("/v1/persistent-contexts/archived", tags=["Persistent Contexts"])
+async def clear_all_archived_contexts(
+    user_id: str = Query(default="default", description="用户ID"),
+    character_id: str = Query(default="default", description="角色ID")
+):
+    """清空所有归档的持久条件"""
+    engine = get_engine()
+    count = engine.context_tracker.clear_archived(user_id, character_id)
+    return {"success": True, "message": f"已清空 {count} 个归档条件", "count": count}
+
+
+@app.post("/v1/persistent-contexts/{context_id}/archive", tags=["Persistent Contexts"])
+async def archive_context(
+    context_id: str,
+    user_id: str = Query(default="default", description="用户ID"),
+    character_id: str = Query(default="default", description="角色ID")
+):
+    """手动将活跃条件归档"""
+    engine = get_engine()
+    success = engine.context_tracker.archive_context(context_id, user_id, character_id)
+    
+    if not success:
+        raise HTTPException(status_code=404, detail="条件不存在")
+    
+    return {"success": True, "message": "已归档条件"}
+
+
+@app.put("/v1/persistent-contexts/{context_id}", tags=["Persistent Contexts"])
+async def update_persistent_context(
+    context_id: str,
+    content: Optional[str] = Body(default=None, description="新内容"),
+    context_type: Optional[str] = Body(default=None, description="新类型"),
+    confidence: Optional[float] = Body(default=None, ge=0, le=1, description="新置信度"),
+    keywords: Optional[List[str]] = Body(default=None, description="新关键词"),
+    user_id: str = Query(default="default", description="用户ID"),
+    character_id: str = Query(default="default", description="角色ID")
+):
+    """编辑持久条件的字段"""
+    engine = get_engine()
+    ctx = engine.context_tracker.update_context(
+        context_id=context_id,
+        user_id=user_id,
+        character_id=character_id,
+        content=content,
+        context_type=context_type,
+        confidence=confidence,
+        keywords=keywords
+    )
+    
+    if not ctx:
+        raise HTTPException(status_code=404, detail="条件不存在")
+    
+    return {
+        "success": True,
+        "message": "已更新条件",
+        "context": {
+            "id": ctx.id,
+            "content": ctx.content,
+            "context_type": ctx.context_type.value,
+            "confidence": ctx.confidence,
+            "keywords": ctx.keywords
+        }
+    }
+
+
 # ==================== 伏笔 API ====================
 
 @app.post("/v1/foreshadowing", response_model=ForeshadowingItem, tags=["Foreshadowing"])
@@ -1157,6 +1285,137 @@ async def clear_all_foreshadowings(
     
     print(f"[Recall] 清空伏笔: user={user_id}, character={character_id}, count={count}")
     return {"success": True, "message": f"已清空 {count} 个伏笔", "count": count}
+
+
+@app.get("/v1/foreshadowing/archived", tags=["Foreshadowing"])
+async def list_archived_foreshadowings(
+    user_id: str = Query(default="default", description="用户ID"),
+    character_id: str = Query(default="default", description="角色ID"),
+    page: int = Query(default=1, ge=1, description="页码"),
+    page_size: int = Query(default=20, ge=1, le=100, description="每页数量"),
+    search: Optional[str] = Query(default=None, description="搜索关键词"),
+    status: Optional[str] = Query(default=None, description="状态筛选（resolved/abandoned）")
+):
+    """获取归档的伏笔列表（分页、搜索、筛选）"""
+    engine = get_engine()
+    result = engine.foreshadowing_tracker.get_archived_foreshadowings(
+        user_id=user_id,
+        character_id=character_id,
+        page=page,
+        page_size=page_size,
+        search=search,
+        status=status
+    )
+    return result
+
+
+@app.post("/v1/foreshadowing/{foreshadowing_id}/restore", tags=["Foreshadowing"])
+async def restore_foreshadowing_from_archive(
+    foreshadowing_id: str,
+    user_id: str = Query(default="default", description="用户ID"),
+    character_id: str = Query(default="default", description="角色ID")
+):
+    """从归档恢复伏笔到活跃列表"""
+    engine = get_engine()
+    fsh = engine.foreshadowing_tracker.restore_from_archive(foreshadowing_id, user_id, character_id)
+    
+    if not fsh:
+        raise HTTPException(status_code=404, detail="归档伏笔不存在")
+    
+    return {
+        "success": True,
+        "message": "已恢复伏笔",
+        "foreshadowing": {
+            "id": fsh.id,
+            "content": fsh.content,
+            "status": fsh.status.value,
+            "importance": fsh.importance
+        }
+    }
+
+
+@app.delete("/v1/foreshadowing/archived/{foreshadowing_id}", tags=["Foreshadowing"])
+async def delete_archived_foreshadowing(
+    foreshadowing_id: str,
+    user_id: str = Query(default="default", description="用户ID"),
+    character_id: str = Query(default="default", description="角色ID")
+):
+    """彻底删除归档中的伏笔"""
+    engine = get_engine()
+    success = engine.foreshadowing_tracker.delete_archived(foreshadowing_id, user_id, character_id)
+    
+    if not success:
+        raise HTTPException(status_code=404, detail="归档伏笔不存在")
+    
+    return {"success": True, "message": "已彻底删除归档伏笔"}
+
+
+@app.delete("/v1/foreshadowing/archived", tags=["Foreshadowing"])
+async def clear_all_archived_foreshadowings(
+    user_id: str = Query(default="default", description="用户ID"),
+    character_id: str = Query(default="default", description="角色ID")
+):
+    """清空所有归档的伏笔"""
+    engine = get_engine()
+    count = engine.foreshadowing_tracker.clear_archived(user_id, character_id)
+    return {"success": True, "message": f"已清空 {count} 个归档伏笔", "count": count}
+
+
+@app.post("/v1/foreshadowing/{foreshadowing_id}/archive", tags=["Foreshadowing"])
+async def archive_foreshadowing_manually(
+    foreshadowing_id: str,
+    user_id: str = Query(default="default", description="用户ID"),
+    character_id: str = Query(default="default", description="角色ID")
+):
+    """手动将活跃伏笔归档"""
+    engine = get_engine()
+    success = engine.foreshadowing_tracker.archive_foreshadowing(foreshadowing_id, user_id, character_id)
+    
+    if not success:
+        raise HTTPException(status_code=404, detail="伏笔不存在")
+    
+    return {"success": True, "message": "已归档伏笔"}
+
+
+@app.put("/v1/foreshadowing/{foreshadowing_id}", tags=["Foreshadowing"])
+async def update_foreshadowing(
+    foreshadowing_id: str,
+    content: Optional[str] = Body(default=None, description="新内容"),
+    status: Optional[str] = Body(default=None, description="新状态"),
+    importance: Optional[float] = Body(default=None, ge=0, le=1, description="新重要性"),
+    hints: Optional[List[str]] = Body(default=None, description="新提示列表"),
+    resolution: Optional[str] = Body(default=None, description="解决方案"),
+    user_id: str = Query(default="default", description="用户ID"),
+    character_id: str = Query(default="default", description="角色ID")
+):
+    """编辑伏笔的字段"""
+    engine = get_engine()
+    fsh = engine.foreshadowing_tracker.update_foreshadowing(
+        foreshadowing_id=foreshadowing_id,
+        user_id=user_id,
+        character_id=character_id,
+        content=content,
+        status=status,
+        importance=importance,
+        hints=hints,
+        resolution=resolution
+    )
+    
+    if not fsh:
+        raise HTTPException(status_code=404, detail="伏笔不存在")
+    
+    return {
+        "success": True,
+        "message": "已更新伏笔",
+        "foreshadowing": {
+            "id": fsh.id,
+            "content": fsh.content,
+            "status": fsh.status.value,
+            "importance": fsh.importance,
+            "hints": fsh.hints,
+            "resolution": fsh.resolution
+        }
+    }
 
 
 # ==================== 伏笔分析 API ====================

@@ -432,6 +432,354 @@ class ContextTracker:
         
         return None
 
+    def get_archived_contexts(
+        self,
+        user_id: str = "default",
+        character_id: str = "default",
+        page: int = 1,
+        page_size: int = 20,
+        search: Optional[str] = None,
+        context_type: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """获取归档的持久条件列表（分页、搜索、筛选）
+        
+        Args:
+            user_id: 用户ID
+            character_id: 角色ID
+            page: 页码（从1开始）
+            page_size: 每页数量
+            search: 搜索关键词（搜索内容）
+            context_type: 类型筛选
+            
+        Returns:
+            Dict: {
+                'items': List[Dict],  # 当前页的条件列表
+                'total': int,         # 总数量
+                'page': int,          # 当前页
+                'page_size': int,     # 每页数量
+                'total_pages': int    # 总页数
+            }
+        """
+        all_archived = []
+        
+        if self.base_path:
+            safe_user_id = self._sanitize_path_component(user_id)
+            safe_char_id = self._sanitize_path_component(character_id)
+            archive_dir = os.path.join(self.base_path, safe_user_id, safe_char_id, 'archive')
+            
+            if os.path.exists(archive_dir):
+                # 读取所有归档文件
+                for filename in sorted(os.listdir(archive_dir), reverse=True):
+                    if filename.startswith('contexts') and filename.endswith('.jsonl'):
+                        archive_path = os.path.join(archive_dir, filename)
+                        try:
+                            with open(archive_path, 'r', encoding='utf-8') as f:
+                                for line in f:
+                                    if line.strip():
+                                        data = json.loads(line)
+                                        all_archived.append(data)
+                        except Exception:
+                            pass
+        
+        # 按归档时间倒序排列
+        all_archived.sort(key=lambda x: x.get('archived_at', 0), reverse=True)
+        
+        # 筛选：类型
+        if context_type:
+            all_archived = [c for c in all_archived if c.get('context_type') == context_type]
+        
+        # 筛选：搜索
+        if search:
+            search_lower = search.lower()
+            all_archived = [c for c in all_archived if search_lower in c.get('content', '').lower()]
+        
+        # 分页
+        total = len(all_archived)
+        total_pages = max(1, (total + page_size - 1) // page_size)
+        page = max(1, min(page, total_pages))
+        start_idx = (page - 1) * page_size
+        end_idx = start_idx + page_size
+        items = all_archived[start_idx:end_idx]
+        
+        return {
+            'items': items,
+            'total': total,
+            'page': page,
+            'page_size': page_size,
+            'total_pages': total_pages
+        }
+
+    def restore_from_archive(
+        self,
+        context_id: str,
+        user_id: str = "default",
+        character_id: str = "default"
+    ) -> Optional['PersistentContext']:
+        """从归档恢复条件到活跃列表
+        
+        Args:
+            context_id: 条件ID
+            user_id: 用户ID
+            character_id: 角色ID
+            
+        Returns:
+            Optional[PersistentContext]: 恢复的条件，未找到返回 None
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        if not self.base_path:
+            return None
+        
+        safe_user_id = self._sanitize_path_component(user_id)
+        safe_char_id = self._sanitize_path_component(character_id)
+        archive_dir = os.path.join(self.base_path, safe_user_id, safe_char_id, 'archive')
+        
+        if not os.path.exists(archive_dir):
+            return None
+        
+        # 在所有归档文件中查找并移除
+        found_data = None
+        for filename in os.listdir(archive_dir):
+            if not (filename.startswith('contexts') and filename.endswith('.jsonl')):
+                continue
+            
+            archive_path = os.path.join(archive_dir, filename)
+            lines_to_keep = []
+            
+            try:
+                with open(archive_path, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        if line.strip():
+                            data = json.loads(line)
+                            if data.get('id') == context_id and found_data is None:
+                                found_data = data
+                            else:
+                                lines_to_keep.append(line)
+                
+                if found_data:
+                    # 重写归档文件（移除已恢复的条件）
+                    with open(archive_path, 'w', encoding='utf-8') as f:
+                        f.writelines(lines_to_keep)
+                    break
+            except Exception as e:
+                logger.error(f"[ContextTracker] 读取归档文件失败: {e}")
+        
+        if not found_data:
+            return None
+        
+        # 移除归档字段，创建 PersistentContext 对象
+        found_data.pop('archived_at', None)
+        found_data.pop('archive_reason', None)
+        ctx = PersistentContext.from_dict(found_data)
+        ctx.is_active = True
+        
+        # 添加到活跃列表
+        cache_key = self._get_cache_key(user_id, character_id)
+        if cache_key not in self.contexts:
+            self.contexts[cache_key] = []
+        self.contexts[cache_key].append(ctx)
+        self._save_user(user_id, character_id)
+        
+        logger.info(f"[ContextTracker] 已从归档恢复条件: {context_id}")
+        return ctx
+
+    def delete_archived(
+        self,
+        context_id: str,
+        user_id: str = "default",
+        character_id: str = "default"
+    ) -> bool:
+        """彻底删除归档中的条件
+        
+        Args:
+            context_id: 条件ID
+            user_id: 用户ID
+            character_id: 角色ID
+            
+        Returns:
+            bool: 是否成功删除
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        if not self.base_path:
+            return False
+        
+        safe_user_id = self._sanitize_path_component(user_id)
+        safe_char_id = self._sanitize_path_component(character_id)
+        archive_dir = os.path.join(self.base_path, safe_user_id, safe_char_id, 'archive')
+        
+        if not os.path.exists(archive_dir):
+            return False
+        
+        deleted = False
+        for filename in os.listdir(archive_dir):
+            if not (filename.startswith('contexts') and filename.endswith('.jsonl')):
+                continue
+            
+            archive_path = os.path.join(archive_dir, filename)
+            lines_to_keep = []
+            
+            try:
+                with open(archive_path, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        if line.strip():
+                            data = json.loads(line)
+                            if data.get('id') == context_id:
+                                deleted = True
+                            else:
+                                lines_to_keep.append(line)
+                
+                if deleted:
+                    with open(archive_path, 'w', encoding='utf-8') as f:
+                        f.writelines(lines_to_keep)
+                    logger.info(f"[ContextTracker] 已彻底删除归档条件: {context_id}")
+                    break
+            except Exception as e:
+                logger.error(f"[ContextTracker] 删除归档条件失败: {e}")
+        
+        return deleted
+
+    def clear_archived(
+        self,
+        user_id: str = "default",
+        character_id: str = "default"
+    ) -> int:
+        """清空所有归档条件
+        
+        Args:
+            user_id: 用户ID
+            character_id: 角色ID
+            
+        Returns:
+            int: 删除的条件数量
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        if not self.base_path:
+            return 0
+        
+        safe_user_id = self._sanitize_path_component(user_id)
+        safe_char_id = self._sanitize_path_component(character_id)
+        archive_dir = os.path.join(self.base_path, safe_user_id, safe_char_id, 'archive')
+        
+        if not os.path.exists(archive_dir):
+            return 0
+        
+        count = 0
+        for filename in os.listdir(archive_dir):
+            if filename.startswith('contexts') and filename.endswith('.jsonl'):
+                archive_path = os.path.join(archive_dir, filename)
+                try:
+                    # 统计行数
+                    with open(archive_path, 'r', encoding='utf-8') as f:
+                        count += sum(1 for line in f if line.strip())
+                    # 删除文件
+                    os.remove(archive_path)
+                except Exception as e:
+                    logger.error(f"[ContextTracker] 清空归档文件失败: {e}")
+        
+        logger.info(f"[ContextTracker] 已清空归档条件: {count} 个")
+        return count
+
+    def archive_context(
+        self,
+        context_id: str,
+        user_id: str = "default",
+        character_id: str = "default"
+    ) -> bool:
+        """手动将活跃条件归档
+        
+        Args:
+            context_id: 条件ID
+            user_id: 用户ID
+            character_id: 角色ID
+            
+        Returns:
+            bool: 是否成功归档
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        cache_key = self._get_cache_key(user_id, character_id)
+        if cache_key not in self.contexts:
+            return False
+        
+        # 查找并移除
+        ctx_to_archive = None
+        for i, ctx in enumerate(self.contexts[cache_key]):
+            if ctx.id == context_id:
+                ctx_to_archive = self.contexts[cache_key].pop(i)
+                break
+        
+        if not ctx_to_archive:
+            return False
+        
+        # 归档
+        success = self._archive_context(ctx_to_archive, user_id, character_id, reason='manual')
+        if success:
+            self._save_user(user_id, character_id)
+            logger.info(f"[ContextTracker] 已手动归档条件: {context_id}")
+        
+        return success
+
+    def update_context(
+        self,
+        context_id: str,
+        user_id: str = "default",
+        character_id: str = "default",
+        content: Optional[str] = None,
+        context_type: Optional[str] = None,
+        confidence: Optional[float] = None,
+        keywords: Optional[List[str]] = None
+    ) -> Optional['PersistentContext']:
+        """更新持久条件的字段
+        
+        Args:
+            context_id: 条件ID
+            user_id: 用户ID
+            character_id: 角色ID
+            content: 新内容（可选）
+            context_type: 新类型（可选）
+            confidence: 新置信度（可选）
+            keywords: 新关键词（可选）
+            
+        Returns:
+            Optional[PersistentContext]: 更新后的条件，未找到返回 None
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        cache_key = self._get_cache_key(user_id, character_id)
+        if cache_key not in self.contexts:
+            return None
+        
+        for ctx in self.contexts[cache_key]:
+            if ctx.id == context_id:
+                if content is not None:
+                    ctx.content = content
+                    # 更新 embedding
+                    new_embedding = self._get_embedding(content)
+                    if new_embedding:
+                        ctx.embedding = new_embedding
+                if context_type is not None:
+                    try:
+                        ctx.context_type = ContextType(context_type)
+                    except ValueError:
+                        ctx.context_type = ContextType.CUSTOM
+                if confidence is not None:
+                    ctx.confidence = max(0.0, min(1.0, confidence))
+                if keywords is not None:
+                    ctx.keywords = keywords
+                
+                self._save_user(user_id, character_id)
+                logger.info(f"[ContextTracker] 已更新条件: {context_id}")
+                return ctx
+        
+        return None
+
     def _get_embedding(self, text: str) -> Optional[List[float]]:
         """获取文本的Embedding向量
         

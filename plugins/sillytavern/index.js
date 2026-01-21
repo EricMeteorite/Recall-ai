@@ -278,72 +278,168 @@ function createUI() {
                 
                 <!-- 持久条件标签页 -->
                 <div id="recall-tab-contexts" class="recall-tab-content">
-                    <div class="recall-stats-row">
-                        <span>📌 持久条件: <strong id="recall-context-count">0</strong></span>
-                        <div class="recall-stats-actions">
-                            <button id="recall-refresh-contexts-btn" class="recall-icon-btn" title="刷新">🔄</button>
-                            <button id="recall-consolidate-contexts-btn" class="recall-icon-btn" title="压缩合并">📦</button>
-                            <button id="recall-clear-contexts-btn" class="recall-icon-btn recall-danger-icon" title="清空全部">🗑️</button>
+                    <!-- 子标签切换 -->
+                    <div class="recall-sub-tabs">
+                        <button class="recall-sub-tab active" data-subtab="contexts-active">活跃 (<span id="recall-context-count">0</span>)</button>
+                        <button class="recall-sub-tab" data-subtab="contexts-archived">归档 (<span id="recall-context-archived-count">0</span>)</button>
+                    </div>
+                    
+                    <!-- 活跃持久条件 -->
+                    <div id="recall-subtab-contexts-active" class="recall-subtab-content active">
+                        <div class="recall-stats-row">
+                            <span>📌 活跃持久条件</span>
+                            <div class="recall-stats-actions">
+                                <button id="recall-refresh-contexts-btn" class="recall-icon-btn" title="刷新">🔄</button>
+                                <button id="recall-consolidate-contexts-btn" class="recall-icon-btn" title="压缩合并">📦</button>
+                                <button id="recall-clear-contexts-btn" class="recall-icon-btn recall-danger-icon" title="清空全部">🗑️</button>
+                            </div>
+                        </div>
+                        
+                        <div class="recall-setting-hint" style="margin-bottom:10px;">
+                            持久条件是已确立的背景设定，会自动注入到每次对话中。
+                        </div>
+                        
+                        <div id="recall-context-list" class="recall-context-list">
+                            <div class="recall-empty-state">
+                                <div class="recall-empty-icon">📌</div>
+                                <p>暂无持久条件</p>
+                                <small>对话中自动提取或手动添加</small>
+                            </div>
+                        </div>
+                        
+                        <div class="recall-add-bar">
+                            <select id="recall-context-type-select" class="text_pole" style="width:auto;min-width:100px;">
+                                <option value="user_identity">👤 身份</option>
+                                <option value="user_goal">🎯 目标</option>
+                                <option value="user_preference">❤️ 偏好</option>
+                                <option value="environment">💻 环境</option>
+                                <option value="project">📁 项目</option>
+                                <option value="character_trait">🎭 角色</option>
+                                <option value="world_setting">🌍 世界观</option>
+                                <option value="relationship">🤝 关系</option>
+                                <option value="constraint">⚠️ 约束</option>
+                                <option value="custom">📝 自定义</option>
+                            </select>
+                            <input type="text" id="recall-context-input" placeholder="添加持久条件..." class="text_pole" style="flex:1;">
+                            <button id="recall-add-context-btn" class="menu_button menu_button_icon" title="添加">
+                                <i class="fa-solid fa-plus"></i>
+                            </button>
                         </div>
                     </div>
                     
-                    <div class="recall-setting-hint" style="margin-bottom:10px;">
-                        持久条件是已确立的背景设定，会自动注入到每次对话中。
-                        如：用户身份、技术环境、角色设定等。
-                    </div>
-                    
-                    <div id="recall-context-list" class="recall-context-list">
-                        <div class="recall-empty-state">
-                            <div class="recall-empty-icon">📌</div>
-                            <p>暂无持久条件</p>
-                            <small>对话中自动提取或手动添加</small>
+                    <!-- 归档持久条件 -->
+                    <div id="recall-subtab-contexts-archived" class="recall-subtab-content">
+                        <div class="recall-stats-row">
+                            <span>📦 归档持久条件</span>
+                            <div class="recall-stats-actions">
+                                <button id="recall-refresh-archived-contexts-btn" class="recall-icon-btn" title="刷新">🔄</button>
+                                <button id="recall-clear-archived-contexts-btn" class="recall-icon-btn recall-danger-icon" title="清空归档">🗑️</button>
+                            </div>
                         </div>
-                    </div>
-                    
-                    <div class="recall-add-bar">
-                        <select id="recall-context-type-select" class="text_pole" style="width:auto;min-width:100px;">
-                            <option value="user_identity">👤 身份</option>
-                            <option value="user_goal">🎯 目标</option>
-                            <option value="user_preference">❤️ 偏好</option>
-                            <option value="environment">💻 环境</option>
-                            <option value="project">📁 项目</option>
-                            <option value="character_trait">🎭 角色</option>
-                            <option value="world_setting">🌍 世界观</option>
-                            <option value="relationship">🤝 关系</option>
-                            <option value="constraint">⚠️ 约束</option>
-                            <option value="custom">📝 自定义</option>
-                        </select>
-                        <input type="text" id="recall-context-input" placeholder="添加持久条件..." class="text_pole" style="flex:1;">
-                        <button id="recall-add-context-btn" class="menu_button menu_button_icon" title="添加">
-                            <i class="fa-solid fa-plus"></i>
-                        </button>
+                        
+                        <!-- 搜索和筛选 -->
+                        <div class="recall-archive-toolbar">
+                            <input type="text" id="recall-contexts-archive-search" placeholder="搜索..." class="text_pole" style="flex:1;">
+                            <select id="recall-contexts-archive-filter" class="text_pole" style="width:auto;">
+                                <option value="">全部类型</option>
+                                <option value="user_identity">👤 身份</option>
+                                <option value="user_goal">🎯 目标</option>
+                                <option value="user_preference">❤️ 偏好</option>
+                                <option value="environment">💻 环境</option>
+                                <option value="project">📁 项目</option>
+                                <option value="character_trait">🎭 角色</option>
+                                <option value="world_setting">🌍 世界观</option>
+                                <option value="relationship">🤝 关系</option>
+                                <option value="custom">📝 自定义</option>
+                            </select>
+                            <select id="recall-contexts-archive-pagesize" class="text_pole" style="width:auto;">
+                                <option value="20">20条/页</option>
+                                <option value="50">50条/页</option>
+                                <option value="100">100条/页</option>
+                            </select>
+                        </div>
+                        
+                        <div id="recall-archived-context-list" class="recall-context-list">
+                            <div class="recall-empty-state">
+                                <div class="recall-empty-icon">📦</div>
+                                <p>暂无归档条件</p>
+                            </div>
+                        </div>
+                        
+                        <!-- 分页 -->
+                        <div id="recall-contexts-archive-pagination" class="recall-pagination"></div>
                     </div>
                 </div>
                 
                 <!-- 伏笔标签页 -->
                 <div id="recall-tab-foreshadowing" class="recall-tab-content">
-                    <div class="recall-stats-row">
-                        <span>🎭 活跃伏笔: <strong id="recall-foreshadowing-count">0</strong></span>
-                        <div class="recall-stats-actions">
-                            <button id="recall-refresh-foreshadowing-btn" class="recall-icon-btn" title="刷新">🔄</button>
-                            <button id="recall-analyze-foreshadowing-btn" class="recall-icon-btn" title="手动分析">🔍</button>
-                            <button id="recall-clear-foreshadowing-btn" class="recall-icon-btn recall-danger-icon" title="清空全部">🗑️</button>
+                    <!-- 子标签切换 -->
+                    <div class="recall-sub-tabs">
+                        <button class="recall-sub-tab active" data-subtab="foreshadowing-active">活跃 (<span id="recall-foreshadowing-count">0</span>)</button>
+                        <button class="recall-sub-tab" data-subtab="foreshadowing-archived">归档 (<span id="recall-foreshadowing-archived-count">0</span>)</button>
+                    </div>
+                    
+                    <!-- 活跃伏笔 -->
+                    <div id="recall-subtab-foreshadowing-active" class="recall-subtab-content active">
+                        <div class="recall-stats-row">
+                            <span>🎭 活跃伏笔</span>
+                            <div class="recall-stats-actions">
+                                <button id="recall-refresh-foreshadowing-btn" class="recall-icon-btn" title="刷新">🔄</button>
+                                <button id="recall-analyze-foreshadowing-btn" class="recall-icon-btn" title="手动分析">🔍</button>
+                                <button id="recall-clear-foreshadowing-btn" class="recall-icon-btn recall-danger-icon" title="清空全部">🗑️</button>
+                            </div>
+                        </div>
+                    
+                        <div id="recall-foreshadowing-list" class="recall-foreshadowing-list">
+                            <div class="recall-empty-state">
+                                <div class="recall-empty-icon">🎭</div>
+                                <p>暂无伏笔</p>
+                                <small>埋下故事线索</small>
+                            </div>
+                        </div>
+                    
+                        <div class="recall-add-bar">
+                            <input type="text" id="recall-foreshadowing-input" placeholder="🎭 埋下新伏笔..." class="text_pole">
+                            <button id="recall-foreshadowing-btn" class="menu_button menu_button_icon" title="埋下">
+                                <i class="fa-solid fa-seedling"></i>
+                            </button>
                         </div>
                     </div>
                     
-                    <div id="recall-foreshadowing-list" class="recall-foreshadowing-list">
-                        <div class="recall-empty-state">
-                            <div class="recall-empty-icon">🎭</div>
-                            <p>暂无伏笔</p>
-                            <small>埋下故事线索</small>
+                    <!-- 归档伏笔 -->
+                    <div id="recall-subtab-foreshadowing-archived" class="recall-subtab-content">
+                        <div class="recall-stats-row">
+                            <span>📦 归档伏笔</span>
+                            <div class="recall-stats-actions">
+                                <button id="recall-refresh-archived-foreshadowing-btn" class="recall-icon-btn" title="刷新">🔄</button>
+                                <button id="recall-clear-archived-foreshadowing-btn" class="recall-icon-btn recall-danger-icon" title="清空归档">🗑️</button>
+                            </div>
                         </div>
-                    </div>
-                    
-                    <div class="recall-add-bar">
-                        <input type="text" id="recall-foreshadowing-input" placeholder="🎭 埋下新伏笔..." class="text_pole">
-                        <button id="recall-foreshadowing-btn" class="menu_button menu_button_icon" title="埋下">
-                            <i class="fa-solid fa-seedling"></i>
-                        </button>
+                        
+                        <!-- 搜索和筛选 -->
+                        <div class="recall-archive-toolbar">
+                            <input type="text" id="recall-foreshadowing-archive-search" placeholder="搜索..." class="text_pole" style="flex:1;">
+                            <select id="recall-foreshadowing-archive-filter" class="text_pole" style="width:auto;">
+                                <option value="">全部状态</option>
+                                <option value="resolved">✅ 已解决</option>
+                                <option value="abandoned">❌ 已放弃</option>
+                            </select>
+                            <select id="recall-foreshadowing-archive-pagesize" class="text_pole" style="width:auto;">
+                                <option value="20">20条/页</option>
+                                <option value="50">50条/页</option>
+                                <option value="100">100条/页</option>
+                            </select>
+                        </div>
+                        
+                        <div id="recall-archived-foreshadowing-list" class="recall-foreshadowing-list">
+                            <div class="recall-empty-state">
+                                <div class="recall-empty-icon">📦</div>
+                                <p>暂无归档伏笔</p>
+                            </div>
+                        </div>
+                        
+                        <!-- 分页 -->
+                        <div id="recall-foreshadowing-archive-pagination" class="recall-pagination"></div>
                     </div>
                 </div>
                 
@@ -856,6 +952,15 @@ function createUI() {
     // 折叠面板由 SillyTavern 原生处理，不需要自己绑定事件
     // SillyTavern 会自动处理 .inline-drawer-toggle 的点击
     
+    // 辅助函数：防抖
+    function debounce(fn, delay) {
+        let timer = null;
+        return function(...args) {
+            clearTimeout(timer);
+            timer = setTimeout(() => fn.apply(this, args), delay);
+        };
+    }
+    
     // 绑定事件
     document.getElementById('recall-save-settings')?.addEventListener('click', safeExecute(onSaveSettings, '保存设置失败'));
     document.getElementById('recall-test-connection')?.addEventListener('click', safeExecute(onTestConnection, '测试连接失败'));
@@ -866,6 +971,31 @@ function createUI() {
     document.getElementById('recall-refresh-btn')?.addEventListener('click', safeExecute(loadMemories, '刷新失败'));
     document.getElementById('recall-load-more-btn')?.addEventListener('click', safeExecute(onLoadMoreMemories, '加载更多失败'));
     
+    // 子标签页切换
+    document.querySelectorAll('.recall-sub-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            const subtab = tab.dataset.subtab;
+            const parent = tab.closest('.recall-tab-content');
+            
+            // 切换子标签按钮状态
+            parent.querySelectorAll('.recall-sub-tab').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            
+            // 切换子内容面板
+            parent.querySelectorAll('.recall-subtab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            document.getElementById(`recall-subtab-${subtab}`)?.classList.add('active');
+            
+            // 根据子标签加载数据
+            if (subtab === 'contexts-archived' && isConnected) {
+                loadArchivedContexts();
+            } else if (subtab === 'foreshadowing-archived' && isConnected) {
+                loadArchivedForeshadowings();
+            }
+        });
+    });
+    
     // 持久条件相关事件绑定
     document.getElementById('recall-add-context-btn')?.addEventListener('click', safeExecute(onAddPersistentContext, '添加持久条件失败'));
     document.getElementById('recall-refresh-contexts-btn')?.addEventListener('click', safeExecute(loadPersistentContexts, '刷新持久条件失败'));
@@ -874,6 +1004,13 @@ function createUI() {
     document.getElementById('recall-context-input')?.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') safeExecute(onAddPersistentContext, '添加持久条件失败')();
     });
+    
+    // 归档持久条件事件绑定
+    document.getElementById('recall-refresh-archived-contexts-btn')?.addEventListener('click', safeExecute(loadArchivedContexts, '刷新归档失败'));
+    document.getElementById('recall-clear-archived-contexts-btn')?.addEventListener('click', safeExecute(onClearAllArchivedContexts, '清空归档失败'));
+    document.getElementById('recall-contexts-archive-search')?.addEventListener('input', debounce(() => loadArchivedContexts(1), 500));
+    document.getElementById('recall-contexts-archive-filter')?.addEventListener('change', () => loadArchivedContexts(1));
+    document.getElementById('recall-contexts-archive-pagesize')?.addEventListener('change', () => loadArchivedContexts(1));
     
     // API 配置相关事件绑定
     document.getElementById('recall-test-embedding')?.addEventListener('click', safeExecute(onTestEmbedding, '测试 Embedding 失败'));
@@ -889,6 +1026,13 @@ function createUI() {
     document.getElementById('recall-refresh-foreshadowing-btn')?.addEventListener('click', safeExecute(loadForeshadowings, '刷新伏笔失败'));
     document.getElementById('recall-analyze-foreshadowing-btn')?.addEventListener('click', safeExecute(triggerForeshadowingAnalysis, '触发伏笔分析失败'));
     document.getElementById('recall-clear-foreshadowing-btn')?.addEventListener('click', safeExecute(onClearAllForeshadowings, '清空伏笔失败'));
+    
+    // 归档伏笔事件绑定
+    document.getElementById('recall-refresh-archived-foreshadowing-btn')?.addEventListener('click', safeExecute(loadArchivedForeshadowings, '刷新归档失败'));
+    document.getElementById('recall-clear-archived-foreshadowing-btn')?.addEventListener('click', safeExecute(onClearAllArchivedForeshadowings, '清空归档失败'));
+    document.getElementById('recall-foreshadowing-archive-search')?.addEventListener('input', debounce(() => loadArchivedForeshadowings(1), 500));
+    document.getElementById('recall-foreshadowing-archive-filter')?.addEventListener('change', () => loadArchivedForeshadowings(1));
+    document.getElementById('recall-foreshadowing-archive-pagesize')?.addEventListener('change', () => loadArchivedForeshadowings(1));
     
     // 核心设定相关事件绑定
     document.getElementById('recall-load-core-settings')?.addEventListener('click', safeExecute(loadCoreSettings, '加载核心设定失败'));
@@ -3077,6 +3221,18 @@ async function loadForeshadowings() {
             const activeCount = Array.isArray(data) ? data.filter(f => f.status === 'planted' || f.status === 'developing').length : 0;
             countEl.textContent = activeCount;
         }
+        
+        // 同时加载归档数量（只获取计数）
+        try {
+            const archivedRes = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing/archived?user_id=${userId}&page=1&page_size=1`);
+            if (archivedRes.ok) {
+                const archivedData = await archivedRes.json();
+                const archivedCountEl = document.getElementById('recall-foreshadowing-archived-count');
+                if (archivedCountEl) archivedCountEl.textContent = archivedData.total || 0;
+            }
+        } catch (archivedErr) {
+            // 忽略归档计数加载失败
+        }
     } catch (e) {
         const errMsg = e.name === 'AbortError' ? '请求超时' : e.message;
         console.error('[Recall] 加载伏笔失败:', errMsg);
@@ -3140,9 +3296,21 @@ async function loadPersistentContexts() {
         const data = await response.json();
         displayPersistentContexts(data);
         
-        // 更新计数
+        // 更新活跃计数
         const countEl = document.getElementById('recall-context-count');
         if (countEl) countEl.textContent = data.length;
+        
+        // 同时加载归档数量（只获取计数）
+        try {
+            const archivedRes = await fetch(`${pluginSettings.apiUrl}/v1/persistent-contexts/archived?user_id=${userId}&page=1&page_size=1`);
+            if (archivedRes.ok) {
+                const archivedData = await archivedRes.json();
+                const archivedCountEl = document.getElementById('recall-context-archived-count');
+                if (archivedCountEl) archivedCountEl.textContent = archivedData.total || 0;
+            }
+        } catch (archivedErr) {
+            // 忽略归档计数加载失败
+        }
     } catch (e) {
         const errMsg = e.name === 'AbortError' ? '请求超时' : e.message;
         console.error('[Recall] 加载持久条件失败:', errMsg);
@@ -3181,6 +3349,12 @@ function displayPersistentContexts(contexts) {
         'custom': '📝 自定义'
     };
     
+    // 存储上下文数据用于编辑
+    window._recallContextsData = {};
+    contexts.forEach(ctx => {
+        window._recallContextsData[ctx.id] = ctx;
+    });
+    
     listEl.innerHTML = contexts.map(ctx => `
         <div class="recall-context-item" data-id="${ctx.id}">
             <div class="recall-context-header">
@@ -3190,7 +3364,11 @@ function displayPersistentContexts(contexts) {
             <p class="recall-context-content">${escapeHtml(ctx.content)}</p>
             <div class="recall-context-footer">
                 <span>使用 ${ctx.use_count} 次</span>
-                <button class="recall-delete-btn recall-remove-context" data-id="${ctx.id}">✕ 移除</button>
+                <div style="display:flex;gap:4px;">
+                    <button class="recall-action-btn recall-edit-context" data-id="${ctx.id}" title="编辑">✏️</button>
+                    <button class="recall-action-btn recall-archive-context" data-id="${ctx.id}" title="归档">📦</button>
+                    <button class="recall-delete-btn recall-remove-context" data-id="${ctx.id}" title="删除">✕</button>
+                </div>
             </div>
         </div>
     `).join('');
@@ -3202,6 +3380,25 @@ function displayPersistentContexts(contexts) {
             const id = button.dataset.id;
             if (id && confirm('确定要移除这个持久条件吗？')) {
                 await removePersistentContext(id);
+            }
+        });
+    });
+    
+    // 绑定编辑按钮事件
+    listEl.querySelectorAll('.recall-edit-context').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const id = e.currentTarget.dataset.id;
+            const ctx = window._recallContextsData[id];
+            if (ctx) showEditContextModal(ctx);
+        });
+    });
+    
+    // 绑定归档按钮事件
+    listEl.querySelectorAll('.recall-archive-context').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            const id = e.currentTarget.dataset.id;
+            if (confirm('确定要归档这个持久条件吗？')) {
+                await archiveContext(id);
             }
         });
     });
@@ -3288,6 +3485,712 @@ async function onClearAllContexts() {
         console.error('[Recall] 清空持久条件失败:', e);
     }
 }
+
+// ==================== 归档管理功能 ====================
+
+// 归档分页状态
+let archivedContextsPage = 1;
+let archivedForeshadowingsPage = 1;
+
+/**
+ * 加载归档的持久条件
+ */
+async function loadArchivedContexts(page = archivedContextsPage) {
+    if (!isConnected) return;
+    
+    const searchEl = document.getElementById('recall-contexts-archive-search');
+    const filterEl = document.getElementById('recall-contexts-archive-filter');
+    const pageSizeEl = document.getElementById('recall-contexts-archive-pagesize');
+    
+    const search = searchEl?.value || '';
+    const contextType = filterEl?.value || '';
+    const pageSize = parseInt(pageSizeEl?.value || '20');
+    
+    try {
+        const userId = encodeURIComponent(currentCharacterId || 'default');
+        let url = `${pluginSettings.apiUrl}/v1/persistent-contexts/archived?user_id=${userId}&page=${page}&page_size=${pageSize}`;
+        if (search) url += `&search=${encodeURIComponent(search)}`;
+        if (contextType) url += `&context_type=${encodeURIComponent(contextType)}`;
+        
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        
+        const data = await response.json();
+        archivedContextsPage = data.page;
+        
+        displayArchivedContexts(data.items);
+        renderContextsPagination(data);
+        
+        // 更新归档计数
+        const countEl = document.getElementById('recall-context-archived-count');
+        if (countEl) countEl.textContent = data.total;
+    } catch (e) {
+        console.error('[Recall] 加载归档持久条件失败:', e);
+    }
+}
+
+/**
+ * 显示归档持久条件列表
+ */
+function displayArchivedContexts(items) {
+    const listEl = document.getElementById('recall-archived-context-list');
+    if (!listEl) return;
+    
+    if (!items || items.length === 0) {
+        listEl.innerHTML = `
+            <div class="recall-empty-state">
+                <div class="recall-empty-icon">📦</div>
+                <p>暂无归档条件</p>
+            </div>
+        `;
+        return;
+    }
+    
+    const typeNames = {
+        'user_identity': '👤 身份',
+        'user_goal': '🎯 目标',
+        'user_preference': '❤️ 偏好',
+        'environment': '💻 环境',
+        'project': '📁 项目',
+        'character_trait': '🎭 角色',
+        'world_setting': '🌍 世界观',
+        'relationship': '🤝 关系',
+        'assumption': '💭 假设',
+        'constraint': '⚠️ 约束',
+        'custom': '📝 自定义'
+    };
+    
+    const reasonNames = {
+        'low_confidence': '置信度低',
+        'type_overflow': '类型数量超限',
+        'total_overflow': '总数量超限',
+        'manual': '手动归档'
+    };
+    
+    listEl.innerHTML = items.map(ctx => `
+        <div class="recall-context-item archived" data-id="${ctx.id}">
+            <div class="recall-context-header">
+                <span class="recall-context-type-badge ${ctx.context_type}">${typeNames[ctx.context_type] || ctx.context_type}</span>
+                <span class="recall-context-confidence">置信度: ${(ctx.confidence * 100).toFixed(0)}%</span>
+            </div>
+            <p class="recall-context-content">${escapeHtml(ctx.content)}</p>
+            <div class="recall-archive-info">
+                归档时间: ${new Date(ctx.archived_at * 1000).toLocaleString()}
+                <span class="recall-archive-reason">${reasonNames[ctx.archive_reason] || ctx.archive_reason}</span>
+            </div>
+            <div class="recall-context-footer">
+                <span>使用 ${ctx.use_count || 0} 次</span>
+                <div style="display:flex;gap:4px;">
+                    <button class="recall-action-btn recall-restore-context" data-id="${ctx.id}" title="恢复">↩️ 恢复</button>
+                    <button class="recall-delete-btn recall-delete-archived-context" data-id="${ctx.id}" title="彻底删除">✕ 删除</button>
+                </div>
+            </div>
+        </div>
+    `).join('');
+    
+    // 绑定事件
+    listEl.querySelectorAll('.recall-restore-context').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            const id = e.currentTarget.dataset.id;
+            await restoreArchivedContext(id);
+        });
+    });
+    
+    listEl.querySelectorAll('.recall-delete-archived-context').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            const id = e.currentTarget.dataset.id;
+            if (confirm('确定要彻底删除这个归档条件吗？\n\n此操作不可恢复！')) {
+                await deleteArchivedContext(id);
+            }
+        });
+    });
+}
+
+/**
+ * 渲染持久条件归档分页
+ */
+function renderContextsPagination(data) {
+    const paginationEl = document.getElementById('recall-contexts-archive-pagination');
+    if (!paginationEl) return;
+    
+    if (data.total_pages <= 1) {
+        paginationEl.innerHTML = '';
+        return;
+    }
+    
+    let html = '';
+    html += `<button ${data.page <= 1 ? 'disabled' : ''} onclick="loadArchivedContexts(${data.page - 1})">‹</button>`;
+    
+    // 显示页码
+    const maxPages = 5;
+    let startPage = Math.max(1, data.page - Math.floor(maxPages / 2));
+    let endPage = Math.min(data.total_pages, startPage + maxPages - 1);
+    startPage = Math.max(1, endPage - maxPages + 1);
+    
+    if (startPage > 1) {
+        html += `<button onclick="loadArchivedContexts(1)">1</button>`;
+        if (startPage > 2) html += '<span class="recall-pagination-info">...</span>';
+    }
+    
+    for (let i = startPage; i <= endPage; i++) {
+        html += `<button class="${i === data.page ? 'active' : ''}" onclick="loadArchivedContexts(${i})">${i}</button>`;
+    }
+    
+    if (endPage < data.total_pages) {
+        if (endPage < data.total_pages - 1) html += '<span class="recall-pagination-info">...</span>';
+        html += `<button onclick="loadArchivedContexts(${data.total_pages})">${data.total_pages}</button>`;
+    }
+    
+    html += `<button ${data.page >= data.total_pages ? 'disabled' : ''} onclick="loadArchivedContexts(${data.page + 1})">›</button>`;
+    html += `<span class="recall-pagination-info">${data.total} 条</span>`;
+    
+    paginationEl.innerHTML = html;
+}
+
+/**
+ * 恢复归档的持久条件
+ */
+async function restoreArchivedContext(contextId) {
+    try {
+        const userId = encodeURIComponent(currentCharacterId || 'default');
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/persistent-contexts/${contextId}/restore?user_id=${userId}`, {
+            method: 'POST'
+        });
+        
+        if (response.ok) {
+            loadArchivedContexts();
+            loadPersistentContexts();
+            console.log(`[Recall] 已恢复归档条件: ${contextId}`);
+        } else {
+            console.error('[Recall] 恢复归档条件失败');
+        }
+    } catch (e) {
+        console.error('[Recall] 恢复归档条件失败:', e);
+    }
+}
+
+/**
+ * 彻底删除归档的持久条件
+ */
+async function deleteArchivedContext(contextId) {
+    try {
+        const userId = encodeURIComponent(currentCharacterId || 'default');
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/persistent-contexts/archived/${contextId}?user_id=${userId}`, {
+            method: 'DELETE'
+        });
+        
+        if (response.ok) {
+            loadArchivedContexts();
+            console.log(`[Recall] 已彻底删除归档条件: ${contextId}`);
+        } else {
+            console.error('[Recall] 删除归档条件失败');
+        }
+    } catch (e) {
+        console.error('[Recall] 删除归档条件失败:', e);
+    }
+}
+
+/**
+ * 清空所有归档的持久条件
+ */
+async function onClearAllArchivedContexts() {
+    if (!isConnected) {
+        alert('请先连接 Recall 服务');
+        return;
+    }
+    
+    if (!confirm('确定要清空所有归档的持久条件吗？\n\n此操作不可恢复！')) return;
+    
+    try {
+        const userId = encodeURIComponent(currentCharacterId || 'default');
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/persistent-contexts/archived?user_id=${userId}`, {
+            method: 'DELETE'
+        });
+        
+        if (response.ok) {
+            const result = await response.json();
+            loadArchivedContexts();
+            console.log(`[Recall] 已清空 ${result.count} 个归档条件`);
+        }
+    } catch (e) {
+        console.error('[Recall] 清空归档条件失败:', e);
+    }
+}
+
+/**
+ * 手动归档活跃的持久条件
+ */
+async function archiveContext(contextId) {
+    try {
+        const userId = encodeURIComponent(currentCharacterId || 'default');
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/persistent-contexts/${contextId}/archive?user_id=${userId}`, {
+            method: 'POST'
+        });
+        
+        if (response.ok) {
+            loadPersistentContexts();
+            loadArchivedContexts();
+            console.log(`[Recall] 已归档条件: ${contextId}`);
+        }
+    } catch (e) {
+        console.error('[Recall] 归档条件失败:', e);
+    }
+}
+
+/**
+ * 加载归档的伏笔
+ */
+async function loadArchivedForeshadowings(page = archivedForeshadowingsPage) {
+    if (!isConnected) return;
+    
+    const searchEl = document.getElementById('recall-foreshadowing-archive-search');
+    const filterEl = document.getElementById('recall-foreshadowing-archive-filter');
+    const pageSizeEl = document.getElementById('recall-foreshadowing-archive-pagesize');
+    
+    const search = searchEl?.value || '';
+    const status = filterEl?.value || '';
+    const pageSize = parseInt(pageSizeEl?.value || '20');
+    
+    try {
+        const userId = encodeURIComponent(currentCharacterId || 'default');
+        let url = `${pluginSettings.apiUrl}/v1/foreshadowing/archived?user_id=${userId}&page=${page}&page_size=${pageSize}`;
+        if (search) url += `&search=${encodeURIComponent(search)}`;
+        if (status) url += `&status=${encodeURIComponent(status)}`;
+        
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        
+        const data = await response.json();
+        archivedForeshadowingsPage = data.page;
+        
+        displayArchivedForeshadowings(data.items);
+        renderForeshadowingsPagination(data);
+        
+        // 更新归档计数
+        const countEl = document.getElementById('recall-foreshadowing-archived-count');
+        if (countEl) countEl.textContent = data.total;
+    } catch (e) {
+        console.error('[Recall] 加载归档伏笔失败:', e);
+    }
+}
+
+/**
+ * 显示归档伏笔列表
+ */
+function displayArchivedForeshadowings(items) {
+    const listEl = document.getElementById('recall-archived-foreshadowing-list');
+    if (!listEl) return;
+    
+    if (!items || items.length === 0) {
+        listEl.innerHTML = `
+            <div class="recall-empty-state">
+                <div class="recall-empty-icon">📦</div>
+                <p>暂无归档伏笔</p>
+            </div>
+        `;
+        return;
+    }
+    
+    const statusNames = {
+        'resolved': '✅ 已解决',
+        'abandoned': '❌ 已放弃'
+    };
+    
+    const reasonNames = {
+        'resolved': '已解决',
+        'abandoned': '已放弃',
+        'overflow': '数量超限',
+        'manual': '手动归档'
+    };
+    
+    listEl.innerHTML = items.map(fsh => `
+        <div class="recall-foreshadowing-item archived ${fsh.status}" data-id="${fsh.id}">
+            <div class="recall-foreshadowing-header">
+                <span class="recall-foreshadowing-status">${statusNames[fsh.status] || fsh.status}</span>
+                <span class="recall-foreshadowing-importance">重要性: ${(fsh.importance * 100).toFixed(0)}%</span>
+            </div>
+            <p class="recall-foreshadowing-content">${escapeHtml(fsh.content)}</p>
+            ${fsh.resolution ? `<p class="recall-foreshadowing-resolution">解决: ${escapeHtml(fsh.resolution)}</p>` : ''}
+            <div class="recall-archive-info">
+                归档时间: ${new Date(fsh.archived_at * 1000).toLocaleString()}
+                <span class="recall-archive-reason">${reasonNames[fsh.archive_reason] || fsh.archive_reason}</span>
+            </div>
+            <div class="recall-foreshadowing-footer">
+                <div style="display:flex;gap:4px;">
+                    <button class="recall-action-btn recall-restore-foreshadowing" data-id="${fsh.id}" title="恢复">↩️ 恢复</button>
+                    <button class="recall-delete-btn recall-delete-archived-foreshadowing" data-id="${fsh.id}" title="彻底删除">✕ 删除</button>
+                </div>
+            </div>
+        </div>
+    `).join('');
+    
+    // 绑定事件
+    listEl.querySelectorAll('.recall-restore-foreshadowing').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            const id = e.currentTarget.dataset.id;
+            await restoreArchivedForeshadowing(id);
+        });
+    });
+    
+    listEl.querySelectorAll('.recall-delete-archived-foreshadowing').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            const id = e.currentTarget.dataset.id;
+            if (confirm('确定要彻底删除这个归档伏笔吗？\n\n此操作不可恢复！')) {
+                await deleteArchivedForeshadowing(id);
+            }
+        });
+    });
+}
+
+/**
+ * 渲染伏笔归档分页
+ */
+function renderForeshadowingsPagination(data) {
+    const paginationEl = document.getElementById('recall-foreshadowing-archive-pagination');
+    if (!paginationEl) return;
+    
+    if (data.total_pages <= 1) {
+        paginationEl.innerHTML = '';
+        return;
+    }
+    
+    let html = '';
+    html += `<button ${data.page <= 1 ? 'disabled' : ''} onclick="loadArchivedForeshadowings(${data.page - 1})">‹</button>`;
+    
+    const maxPages = 5;
+    let startPage = Math.max(1, data.page - Math.floor(maxPages / 2));
+    let endPage = Math.min(data.total_pages, startPage + maxPages - 1);
+    startPage = Math.max(1, endPage - maxPages + 1);
+    
+    if (startPage > 1) {
+        html += `<button onclick="loadArchivedForeshadowings(1)">1</button>`;
+        if (startPage > 2) html += '<span class="recall-pagination-info">...</span>';
+    }
+    
+    for (let i = startPage; i <= endPage; i++) {
+        html += `<button class="${i === data.page ? 'active' : ''}" onclick="loadArchivedForeshadowings(${i})">${i}</button>`;
+    }
+    
+    if (endPage < data.total_pages) {
+        if (endPage < data.total_pages - 1) html += '<span class="recall-pagination-info">...</span>';
+        html += `<button onclick="loadArchivedForeshadowings(${data.total_pages})">${data.total_pages}</button>`;
+    }
+    
+    html += `<button ${data.page >= data.total_pages ? 'disabled' : ''} onclick="loadArchivedForeshadowings(${data.page + 1})">›</button>`;
+    html += `<span class="recall-pagination-info">${data.total} 条</span>`;
+    
+    paginationEl.innerHTML = html;
+}
+
+/**
+ * 恢复归档的伏笔
+ */
+async function restoreArchivedForeshadowing(foreshadowingId) {
+    try {
+        const userId = encodeURIComponent(currentCharacterId || 'default');
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing/${foreshadowingId}/restore?user_id=${userId}`, {
+            method: 'POST'
+        });
+        
+        if (response.ok) {
+            loadArchivedForeshadowings();
+            loadForeshadowings();
+            console.log(`[Recall] 已恢复归档伏笔: ${foreshadowingId}`);
+        } else {
+            console.error('[Recall] 恢复归档伏笔失败');
+        }
+    } catch (e) {
+        console.error('[Recall] 恢复归档伏笔失败:', e);
+    }
+}
+
+/**
+ * 彻底删除归档的伏笔
+ */
+async function deleteArchivedForeshadowing(foreshadowingId) {
+    try {
+        const userId = encodeURIComponent(currentCharacterId || 'default');
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing/archived/${foreshadowingId}?user_id=${userId}`, {
+            method: 'DELETE'
+        });
+        
+        if (response.ok) {
+            loadArchivedForeshadowings();
+            console.log(`[Recall] 已彻底删除归档伏笔: ${foreshadowingId}`);
+        } else {
+            console.error('[Recall] 删除归档伏笔失败');
+        }
+    } catch (e) {
+        console.error('[Recall] 删除归档伏笔失败:', e);
+    }
+}
+
+/**
+ * 清空所有归档的伏笔
+ */
+async function onClearAllArchivedForeshadowings() {
+    if (!isConnected) {
+        alert('请先连接 Recall 服务');
+        return;
+    }
+    
+    if (!confirm('确定要清空所有归档的伏笔吗？\n\n此操作不可恢复！')) return;
+    
+    try {
+        const userId = encodeURIComponent(currentCharacterId || 'default');
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing/archived?user_id=${userId}`, {
+            method: 'DELETE'
+        });
+        
+        if (response.ok) {
+            const result = await response.json();
+            loadArchivedForeshadowings();
+            console.log(`[Recall] 已清空 ${result.count} 个归档伏笔`);
+        }
+    } catch (e) {
+        console.error('[Recall] 清空归档伏笔失败:', e);
+    }
+}
+
+/**
+ * 手动归档活跃的伏笔
+ */
+async function archiveForeshadowing(foreshadowingId) {
+    try {
+        const userId = encodeURIComponent(currentCharacterId || 'default');
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing/${foreshadowingId}/archive?user_id=${userId}`, {
+            method: 'POST'
+        });
+        
+        if (response.ok) {
+            loadForeshadowings();
+            loadArchivedForeshadowings();
+            console.log(`[Recall] 已归档伏笔: ${foreshadowingId}`);
+        }
+    } catch (e) {
+        console.error('[Recall] 归档伏笔失败:', e);
+    }
+}
+
+// ==================== 编辑功能 ====================
+
+/**
+ * 显示编辑持久条件的模态框
+ */
+function showEditContextModal(ctx) {
+    const typeOptions = [
+        { value: 'user_identity', label: '👤 身份' },
+        { value: 'user_goal', label: '🎯 目标' },
+        { value: 'user_preference', label: '❤️ 偏好' },
+        { value: 'environment', label: '💻 环境' },
+        { value: 'project', label: '📁 项目' },
+        { value: 'character_trait', label: '🎭 角色' },
+        { value: 'world_setting', label: '🌍 世界观' },
+        { value: 'relationship', label: '🤝 关系' },
+        { value: 'constraint', label: '⚠️ 约束' },
+        { value: 'custom', label: '📝 自定义' }
+    ];
+    
+    const modal = document.createElement('div');
+    modal.className = 'recall-edit-modal';
+    modal.innerHTML = `
+        <div class="recall-edit-modal-content">
+            <div class="recall-edit-modal-title">✏️ 编辑持久条件</div>
+            
+            <div class="recall-edit-form-group">
+                <label>内容</label>
+                <textarea id="recall-edit-ctx-content">${escapeHtml(ctx.content)}</textarea>
+            </div>
+            
+            <div class="recall-edit-form-group">
+                <label>类型</label>
+                <select id="recall-edit-ctx-type">
+                    ${typeOptions.map(opt => `<option value="${opt.value}" ${ctx.context_type === opt.value ? 'selected' : ''}>${opt.label}</option>`).join('')}
+                </select>
+            </div>
+            
+            <div class="recall-edit-form-group">
+                <label>置信度 (${(ctx.confidence * 100).toFixed(0)}%)</label>
+                <input type="range" id="recall-edit-ctx-confidence" min="0" max="1" step="0.01" value="${ctx.confidence}">
+            </div>
+            
+            <div class="recall-edit-form-group">
+                <label>关键词 (逗号分隔)</label>
+                <input type="text" id="recall-edit-ctx-keywords" value="${(ctx.keywords || []).join(', ')}">
+            </div>
+            
+            <div class="recall-edit-modal-actions">
+                <button class="recall-edit-cancel" onclick="this.closest('.recall-edit-modal').remove()">取消</button>
+                <button class="recall-edit-save" id="recall-edit-ctx-save">保存</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    // 置信度滑块实时显示
+    const rangeEl = modal.querySelector('#recall-edit-ctx-confidence');
+    const labelEl = modal.querySelectorAll('.recall-edit-form-group label')[2]; // 第三个 label 是置信度
+    rangeEl.addEventListener('input', () => {
+        labelEl.textContent = `置信度 (${(rangeEl.value * 100).toFixed(0)}%)`;
+    });
+    
+    // 保存事件
+    modal.querySelector('#recall-edit-ctx-save').addEventListener('click', async () => {
+        const content = modal.querySelector('#recall-edit-ctx-content').value.trim();
+        const contextType = modal.querySelector('#recall-edit-ctx-type').value;
+        const confidence = parseFloat(modal.querySelector('#recall-edit-ctx-confidence').value);
+        const keywordsStr = modal.querySelector('#recall-edit-ctx-keywords').value;
+        const keywords = keywordsStr ? keywordsStr.split(',').map(k => k.trim()).filter(k => k) : [];
+        
+        if (!content) {
+            alert('内容不能为空');
+            return;
+        }
+        
+        await updateContext(ctx.id, { content, context_type: contextType, confidence, keywords });
+        modal.remove();
+    });
+    
+    // 点击遮罩关闭
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) modal.remove();
+    });
+}
+
+/**
+ * 更新持久条件
+ */
+async function updateContext(contextId, updates) {
+    try {
+        const userId = encodeURIComponent(currentCharacterId || 'default');
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/persistent-contexts/${contextId}?user_id=${userId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(updates)
+        });
+        
+        if (response.ok) {
+            loadPersistentContexts();
+            console.log(`[Recall] 已更新条件: ${contextId}`);
+        } else {
+            console.error('[Recall] 更新条件失败');
+        }
+    } catch (e) {
+        console.error('[Recall] 更新条件失败:', e);
+    }
+}
+
+/**
+ * 显示编辑伏笔的模态框
+ */
+function showEditForeshadowingModal(fsh) {
+    const statusOptions = [
+        { value: 'planted', label: '🌱 已埋下' },
+        { value: 'developing', label: '🌿 发展中' },
+        { value: 'resolved', label: '✅ 已解决' },
+        { value: 'abandoned', label: '❌ 已放弃' }
+    ];
+    
+    const modal = document.createElement('div');
+    modal.className = 'recall-edit-modal';
+    modal.innerHTML = `
+        <div class="recall-edit-modal-content">
+            <div class="recall-edit-modal-title">✏️ 编辑伏笔</div>
+            
+            <div class="recall-edit-form-group">
+                <label>内容</label>
+                <textarea id="recall-edit-fsh-content">${escapeHtml(fsh.content)}</textarea>
+            </div>
+            
+            <div class="recall-edit-form-group">
+                <label>状态</label>
+                <select id="recall-edit-fsh-status">
+                    ${statusOptions.map(opt => `<option value="${opt.value}" ${fsh.status === opt.value ? 'selected' : ''}>${opt.label}</option>`).join('')}
+                </select>
+            </div>
+            
+            <div class="recall-edit-form-group">
+                <label>重要性 (${(fsh.importance * 100).toFixed(0)}%)</label>
+                <input type="range" id="recall-edit-fsh-importance" min="0" max="1" step="0.01" value="${fsh.importance}">
+            </div>
+            
+            <div class="recall-edit-form-group">
+                <label>提示 (每行一个)</label>
+                <textarea id="recall-edit-fsh-hints" rows="3">${(fsh.hints || []).join('\n')}</textarea>
+            </div>
+            
+            <div class="recall-edit-form-group">
+                <label>解决方案</label>
+                <input type="text" id="recall-edit-fsh-resolution" value="${fsh.resolution || ''}">
+            </div>
+            
+            <div class="recall-edit-modal-actions">
+                <button class="recall-edit-cancel" onclick="this.closest('.recall-edit-modal').remove()">取消</button>
+                <button class="recall-edit-save" id="recall-edit-fsh-save">保存</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    // 重要性滑块实时显示
+    const rangeEl = modal.querySelector('#recall-edit-fsh-importance');
+    const labelEl = modal.querySelectorAll('.recall-edit-form-group label')[2];
+    rangeEl.addEventListener('input', () => {
+        labelEl.textContent = `重要性 (${(rangeEl.value * 100).toFixed(0)}%)`;
+    });
+    
+    // 保存事件
+    modal.querySelector('#recall-edit-fsh-save').addEventListener('click', async () => {
+        const content = modal.querySelector('#recall-edit-fsh-content').value.trim();
+        const status = modal.querySelector('#recall-edit-fsh-status').value;
+        const importance = parseFloat(modal.querySelector('#recall-edit-fsh-importance').value);
+        const hintsStr = modal.querySelector('#recall-edit-fsh-hints').value;
+        const hints = hintsStr ? hintsStr.split('\n').map(h => h.trim()).filter(h => h) : [];
+        const resolution = modal.querySelector('#recall-edit-fsh-resolution').value.trim() || null;
+        
+        if (!content) {
+            alert('内容不能为空');
+            return;
+        }
+        
+        await updateForeshadowing(fsh.id, { content, status, importance, hints, resolution });
+        modal.remove();
+    });
+    
+    // 点击遮罩关闭
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) modal.remove();
+    });
+}
+
+/**
+ * 更新伏笔
+ */
+async function updateForeshadowing(foreshadowingId, updates) {
+    try {
+        const userId = encodeURIComponent(currentCharacterId || 'default');
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing/${foreshadowingId}?user_id=${userId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(updates)
+        });
+        
+        if (response.ok) {
+            loadForeshadowings();
+            console.log(`[Recall] 已更新伏笔: ${foreshadowingId}`);
+        } else {
+            console.error('[Recall] 更新伏笔失败');
+        }
+    } catch (e) {
+        console.error('[Recall] 更新伏笔失败:', e);
+    }
+}
+
+// 将分页函数暴露到全局作用域
+window.loadArchivedContexts = loadArchivedContexts;
+window.loadArchivedForeshadowings = loadArchivedForeshadowings;
 
 /**
  * 压缩合并持久条件
@@ -3386,6 +4289,12 @@ function displayForeshadowings(foreshadowings) {
         return;
     }
     
+    // 存储伏笔数据用于编辑
+    window._recallForeshadowingsData = {};
+    foreshadowings.forEach(f => {
+        window._recallForeshadowingsData[f.id] = f;
+    });
+    
     // 状态映射
     const statusDisplay = {
         'planted': '🌱 已埋下',
@@ -3406,8 +4315,10 @@ function displayForeshadowings(foreshadowings) {
             <div class="recall-memory-footer">
                 <span></span>
                 <div class="recall-foreshadowing-actions">
-                    ${isActive ? `<button class="recall-action-btn recall-resolve-foreshadowing" data-id="${f.id}" title="标记为已解决">✓ 解决</button>` : ''}
-                    ${isActive ? `<button class="recall-delete-btn recall-abandon-foreshadowing" data-id="${f.id}" title="放弃此伏笔">✕ 删除</button>` : '<span class="recall-memory-score">已完成</span>'}
+                    <button class="recall-action-btn recall-edit-foreshadowing" data-id="${f.id}" title="编辑">✏️</button>
+                    ${isActive ? `<button class="recall-action-btn recall-archive-foreshadowing" data-id="${f.id}" title="归档">📦</button>` : ''}
+                    ${isActive ? `<button class="recall-action-btn recall-resolve-foreshadowing" data-id="${f.id}" title="标记为已解决">✓</button>` : ''}
+                    ${isActive ? `<button class="recall-delete-btn recall-abandon-foreshadowing" data-id="${f.id}" title="放弃此伏笔">✕</button>` : '<span class="recall-memory-score">已完成</span>'}
                 </div>
             </div>
         </div>
@@ -3432,6 +4343,25 @@ function displayForeshadowings(foreshadowings) {
             const id = button.dataset.id;
             if (id && confirm('确定要放弃此伏笔吗？\n放弃后伏笔将被标记为"已放弃"状态。')) {
                 await abandonForeshadowing(id);
+            }
+        });
+    });
+    
+    // 绑定编辑按钮事件
+    listEl.querySelectorAll('.recall-edit-foreshadowing').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const id = e.currentTarget.dataset.id;
+            const fsh = window._recallForeshadowingsData[id];
+            if (fsh) showEditForeshadowingModal(fsh);
+        });
+    });
+    
+    // 绑定归档按钮事件
+    listEl.querySelectorAll('.recall-archive-foreshadowing').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            const id = e.currentTarget.dataset.id;
+            if (confirm('确定要归档这个伏笔吗？')) {
+                await archiveForeshadowing(id);
             }
         });
     });
