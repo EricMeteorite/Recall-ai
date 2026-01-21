@@ -925,7 +925,7 @@ class RecallEngine:
         max_tokens: int = 2000,
         include_recent: int = 5,
         include_core_facts: bool = True,
-        auto_extract_context: bool = True
+        auto_extract_context: bool = False  # 默认关闭，避免每次生成都提取条件
     ) -> str:
         """构建上下文 - 全方位记忆策略，确保不遗漏任何细节
         
@@ -943,11 +943,14 @@ class RecallEngine:
             max_tokens: 最大token数（越大能注入越多细节）
             include_recent: 包含的最近对话数
             include_core_facts: 是否包含核心事实摘要
-            auto_extract_context: 是否自动从查询中提取持久条件
+            auto_extract_context: 是否自动从查询中提取持久条件（默认False，条件提取在保存记忆时进行）
         
         Returns:
             str: 构建的上下文
         """
+        import time as _time
+        start_time = _time.time()
+        print(f"[Recall] build_context 开始: user={user_id}, query_len={len(query)}, auto_extract={auto_extract_context}")
         parts = []
         
         # ========== 0. 场景检测（决定检索策略）==========
@@ -1018,6 +1021,9 @@ class RecallEngine:
         )
         if foreshadowing_context:
             parts.append(foreshadowing_context)
+        
+        elapsed = _time.time() - start_time
+        print(f"[Recall] build_context 完成: 耗时={elapsed:.3f}s, 层数={len(parts)}, 总长度={sum(len(p) for p in parts)}")
         
         return "\n".join(parts)
     

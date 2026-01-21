@@ -328,7 +328,7 @@ class ContextRequest(BaseModel):
     max_tokens: int = Field(default=2000, description="最大token数")
     include_recent: int = Field(default=5, description="包含的最近对话数")
     include_core_facts: bool = Field(default=True, description="是否包含核心事实摘要")
-    auto_extract_context: bool = Field(default=True, description="是否自动从查询提取持久条件")
+    auto_extract_context: bool = Field(default=False, description="是否自动从查询提取持久条件（默认关闭，避免重复提取）")
 
 
 # ==================== L0 核心设定模型 ====================
@@ -584,13 +584,42 @@ async def health():
 
 @app.post("/v1/memories", response_model=AddMemoryResponse, tags=["Memories"])
 async def add_memory(request: AddMemoryRequest):
-    """添加记忆"""
+    """添加记忆
+    
+    当保存用户消息时（metadata.role='user'），会自动从内容中提取持久条件。
+    这是条件自动提取的正确时机，避免在每次生成时重复提取。
+    """
     engine = get_engine()
+    
+    # 提取 user_id 和 character_id
+    user_id = request.user_id
+    character_id = request.metadata.get('character_id', 'default') if request.metadata else 'default'
+    role = request.metadata.get('role', 'unknown') if request.metadata else 'unknown'
+    
+    print(f"[Recall] 添加记忆: user={user_id}, role={role}, content_len={len(request.content)}")
+    
     result = engine.add(
         content=request.content,
         user_id=request.user_id,
         metadata=request.metadata
     )
+    
+    # 【重要】只在保存用户消息时自动提取条件（而不是每次 build_context）
+    # 这避免了切换角色/生成时重复提取导致条件数量爆炸
+    if role == 'user' and result.success:
+        try:
+            # 在后台异步提取条件，不阻塞响应
+            loop = asyncio.get_event_loop()
+            loop.run_in_executor(
+                None,
+                lambda: engine.context_tracker.extract_from_text(
+                    request.content, user_id, character_id
+                )
+            )
+            print(f"[Recall] 已触发用户消息的条件提取 (后台)")
+        except Exception as e:
+            print(f"[Recall] 条件提取启动失败: {e}")
+    
     return AddMemoryResponse(
         id=result.id,
         success=result.success,
@@ -806,7 +835,13 @@ async def update_core_settings(request: CoreSettingsRequest):
 
 @app.post("/v1/context", tags=["Context"])
 async def build_context(request: ContextRequest):
-    """构建上下文"""
+    """构建上下文
+    
+    注意：auto_extract_context 默认为 False，条件提取已改为在保存用户消息时进行。
+    如果需要强制提取条件，请显式传入 auto_extract_context=True。
+    """
+    print(f"[Recall] /v1/context 请求: user={request.user_id}, query_len={len(request.query)}, auto_extract={request.auto_extract_context}")
+    
     engine = get_engine()
     context = engine.build_context(
         query=request.query,
@@ -817,6 +852,8 @@ async def build_context(request: ContextRequest):
         include_core_facts=request.include_core_facts,
         auto_extract_context=request.auto_extract_context
     )
+    
+    print(f"[Recall] /v1/context 响应: context_len={len(context)}")
     return {"context": context}
 
 

@@ -692,8 +692,6 @@ class ContextTracker:
         新条件可能会被立即淘汰（但仍会返回该对象，is_active=False）
         """
         import uuid
-        import logging
-        logger = logging.getLogger(__name__)
         
         cache_key = self._get_cache_key(user_id, character_id)
         if cache_key not in self.contexts:
@@ -708,15 +706,15 @@ class ContextTracker:
         )
         
         if similar:
-            # 记录合并日志
-            logger.debug(f"[ContextTracker] 发现相似条件 (方法={sim_method}, 相似度={sim_score:.3f}): "
-                        f"'{content[:30]}...' ≈ '{similar.content[:30]}...'")
+            # 发现相似条件，进行合并而不是创建新条件
+            print(f"[ContextTracker] 去重合并: '{content[:40]}...' ≈ '{similar.content[:40]}...' (方法={sim_method}, 相似度={sim_score:.3f})")
             
             # 合并策略
             if sim_method == "exact":
                 # 完全相同，只更新使用信息
                 similar.use_count += 1
                 similar.last_used = time.time()
+                print(f"[ContextTracker] 完全相同，更新使用计数: {similar.use_count}")
             elif sim_method.endswith("_uncertain"):
                 # 中等相似度，谨慎合并
                 similar.confidence = min(1.0, similar.confidence + 0.05)  # 较小增量
@@ -767,7 +765,9 @@ class ContextTracker:
         if ctx not in self.contexts[cache_key]:
             # 条件被淘汰了（因为置信度不够高），标记为不活跃
             ctx.is_active = False
-            logger.debug(f"[ContextTracker] 新条件因数量限制被淘汰: {content[:50]}...")
+            print(f"[ContextTracker] 新条件因数量限制被淘汰: {content[:50]}...")
+        else:
+            print(f"[ContextTracker] 创建新条件: type={context_type.value}, content={content[:50]}...")
         
         self._save_user(user_id, character_id)
         return ctx
@@ -856,10 +856,15 @@ class ContextTracker:
         
         优先使用 LLM，如果没有 LLM 则使用规则
         """
+        print(f"[ContextTracker] 开始提取条件: user={user_id}, text_len={len(text)}, llm_enabled={self.llm_client is not None}")
+        
         if self.llm_client:
-            return self._extract_with_llm(text, user_id, character_id)
+            result = self._extract_with_llm(text, user_id, character_id)
         else:
-            return self._extract_with_rules(text, user_id, character_id)
+            result = self._extract_with_rules(text, user_id, character_id)
+        
+        print(f"[ContextTracker] 条件提取完成: 提取了 {len(result)} 条新条件")
+        return result
     
     def _extract_with_rules(self, text: str, user_id: str,
                             character_id: str = "default") -> List[PersistentContext]:
@@ -910,8 +915,10 @@ class ContextTracker:
                           character_id: str = "default") -> List[PersistentContext]:
         """使用 LLM 提取"""
         try:
+            print(f"[ContextTracker] 正在调用 LLM 提取条件...")
             prompt = self.extraction_prompt.format(content=text)
             response = self.llm_client.complete(prompt, max_tokens=500)
+            print(f"[ContextTracker] LLM 响应: {len(response)} 字符")
             
             # 解析 JSON
             import json
@@ -919,6 +926,7 @@ class ContextTracker:
             json_match = re.search(r'\[[\s\S]*\]', response)
             if json_match:
                 items = json.loads(json_match.group(0))
+                print(f"[ContextTracker] LLM 返回 {len(items)} 条候选条件")
                 
                 extracted = []
                 for item in items:
@@ -931,10 +939,14 @@ class ContextTracker:
                             keywords=item.get('keywords', [])
                         )
                         extracted.append(ctx)
-                    except (KeyError, ValueError):
+                        print(f"[ContextTracker] 添加条件: type={item['type']}, content={item['content'][:50]}...")
+                    except (KeyError, ValueError) as e:
+                        print(f"[ContextTracker] 跳过无效条件: {e}")
                         continue
                 
                 return extracted
+            else:
+                print(f"[ContextTracker] LLM 响应中未找到 JSON 数组")
         except Exception as e:
             print(f"[ContextTracker] LLM提取失败，回退到规则提取: {e}")
         
