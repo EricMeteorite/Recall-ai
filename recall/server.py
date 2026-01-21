@@ -1000,6 +1000,26 @@ async def remove_persistent_context(
     return {"success": True, "message": "持久条件已停用"}
 
 
+@app.delete("/v1/persistent-contexts", tags=["Persistent Contexts"])
+async def clear_all_persistent_contexts(
+    user_id: str = Query(default="default", description="用户ID"),
+    character_id: str = Query(default="default", description="角色ID")
+):
+    """清空当前角色的所有持久条件"""
+    engine = get_engine()
+    
+    # 获取所有活跃条件
+    contexts = engine.get_persistent_contexts(user_id, character_id)
+    count = len(contexts)
+    
+    # 逐个删除
+    for ctx in contexts:
+        engine.remove_persistent_context(ctx['id'], user_id, character_id)
+    
+    print(f"[Recall] 清空持久条件: user={user_id}, character={character_id}, count={count}")
+    return {"success": True, "message": f"已清空 {count} 个持久条件", "count": count}
+
+
 @app.post("/v1/persistent-contexts/{context_id}/used", tags=["Persistent Contexts"])
 async def mark_context_used(
     context_id: str,
@@ -1117,6 +1137,26 @@ async def abandon_foreshadowing(
         raise HTTPException(status_code=404, detail="伏笔不存在")
     
     return {"success": True, "message": "伏笔已放弃"}
+
+
+@app.delete("/v1/foreshadowing", tags=["Foreshadowing"])
+async def clear_all_foreshadowings(
+    user_id: str = Query(default="default", description="用户ID（角色名）"),
+    character_id: str = Query(default="default", description="角色ID")
+):
+    """清空当前角色的所有伏笔"""
+    engine = get_engine()
+    
+    # 获取所有活跃伏笔
+    foreshadowings = engine.get_foreshadowings(user_id, character_id)
+    count = len(foreshadowings)
+    
+    # 逐个放弃
+    for f in foreshadowings:
+        engine.abandon_foreshadowing(f['id'], user_id, character_id)
+    
+    print(f"[Recall] 清空伏笔: user={user_id}, character={character_id}, count={count}")
+    return {"success": True, "message": f"已清空 {count} 个伏笔", "count": count}
 
 
 # ==================== 伏笔分析 API ====================

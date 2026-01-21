@@ -136,6 +136,13 @@
     border-color: var(--SmartThemeQuoteColor, #666);
 }
 
+/* 危险操作按钮（清空等） */
+.recall-icon-btn.recall-danger-icon:hover {
+    background: rgba(220, 53, 69, 0.2);
+    color: #dc3545;
+    border-color: #dc3545;
+}
+
 /* ========== 搜索栏 ========== */
 .recall-search-bar {
     display: flex;

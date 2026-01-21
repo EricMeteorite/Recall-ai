@@ -283,6 +283,7 @@ function createUI() {
                         <div class="recall-stats-actions">
                             <button id="recall-refresh-contexts-btn" class="recall-icon-btn" title="刷新">🔄</button>
                             <button id="recall-consolidate-contexts-btn" class="recall-icon-btn" title="压缩合并">📦</button>
+                            <button id="recall-clear-contexts-btn" class="recall-icon-btn recall-danger-icon" title="清空全部">🗑️</button>
                         </div>
                     </div>
                     
@@ -326,6 +327,7 @@ function createUI() {
                         <div class="recall-stats-actions">
                             <button id="recall-refresh-foreshadowing-btn" class="recall-icon-btn" title="刷新">🔄</button>
                             <button id="recall-analyze-foreshadowing-btn" class="recall-icon-btn" title="手动分析">🔍</button>
+                            <button id="recall-clear-foreshadowing-btn" class="recall-icon-btn recall-danger-icon" title="清空全部">🗑️</button>
                         </div>
                     </div>
                     
@@ -868,6 +870,7 @@ function createUI() {
     document.getElementById('recall-add-context-btn')?.addEventListener('click', safeExecute(onAddPersistentContext, '添加持久条件失败'));
     document.getElementById('recall-refresh-contexts-btn')?.addEventListener('click', safeExecute(loadPersistentContexts, '刷新持久条件失败'));
     document.getElementById('recall-consolidate-contexts-btn')?.addEventListener('click', safeExecute(consolidatePersistentContexts, '压缩持久条件失败'));
+    document.getElementById('recall-clear-contexts-btn')?.addEventListener('click', safeExecute(onClearAllContexts, '清空持久条件失败'));
     document.getElementById('recall-context-input')?.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') safeExecute(onAddPersistentContext, '添加持久条件失败')();
     });
@@ -885,6 +888,7 @@ function createUI() {
     // 伏笔标签页的新按钮
     document.getElementById('recall-refresh-foreshadowing-btn')?.addEventListener('click', safeExecute(loadForeshadowings, '刷新伏笔失败'));
     document.getElementById('recall-analyze-foreshadowing-btn')?.addEventListener('click', safeExecute(triggerForeshadowingAnalysis, '触发伏笔分析失败'));
+    document.getElementById('recall-clear-foreshadowing-btn')?.addEventListener('click', safeExecute(onClearAllForeshadowings, '清空伏笔失败'));
     
     // 核心设定相关事件绑定
     document.getElementById('recall-load-core-settings')?.addEventListener('click', safeExecute(loadCoreSettings, '加载核心设定失败'));
@@ -3080,6 +3084,39 @@ async function loadForeshadowings() {
 }
 
 /**
+ * 清空全部伏笔
+ */
+async function onClearAllForeshadowings() {
+    if (!isConnected) {
+        alert('请先连接 Recall 服务');
+        return;
+    }
+    
+    const confirmMsg = currentCharacterId 
+        ? `确定要清空「${currentCharacterId}」的所有伏笔吗？\n\n此操作不可恢复！`
+        : '确定要清空所有伏笔吗？\n\n此操作不可恢复！';
+    
+    if (!confirm(confirmMsg)) return;
+    
+    try {
+        const userId = encodeURIComponent(currentCharacterId || 'default');
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing?user_id=${userId}`, {
+            method: 'DELETE'
+        });
+        
+        if (response.ok) {
+            const result = await response.json();
+            loadForeshadowings();
+            console.log(`[Recall] 已清空 ${result.count} 个伏笔 (角色: ${currentCharacterId})`);
+        } else {
+            console.error('[Recall] 清空伏笔失败');
+        }
+    } catch (e) {
+        console.error('[Recall] 清空伏笔失败:', e);
+    }
+}
+
+/**
  * 加载持久条件列表
  */
 async function loadPersistentContexts() {
@@ -3216,6 +3253,39 @@ async function removePersistentContext(contextId) {
         }
     } catch (e) {
         console.error('[Recall] 移除持久条件失败:', e);
+    }
+}
+
+/**
+ * 清空全部持久条件
+ */
+async function onClearAllContexts() {
+    if (!isConnected) {
+        alert('请先连接 Recall 服务');
+        return;
+    }
+    
+    const confirmMsg = currentCharacterId 
+        ? `确定要清空「${currentCharacterId}」的所有持久条件吗？\n\n此操作不可恢复！`
+        : '确定要清空所有持久条件吗？\n\n此操作不可恢复！';
+    
+    if (!confirm(confirmMsg)) return;
+    
+    try {
+        const userId = encodeURIComponent(currentCharacterId || 'default');
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/persistent-contexts?user_id=${userId}`, {
+            method: 'DELETE'
+        });
+        
+        if (response.ok) {
+            const result = await response.json();
+            loadPersistentContexts();
+            console.log(`[Recall] 已清空 ${result.count} 个持久条件 (角色: ${currentCharacterId})`);
+        } else {
+            console.error('[Recall] 清空持久条件失败');
+        }
+    } catch (e) {
+        console.error('[Recall] 清空持久条件失败:', e);
     }
 }
 
