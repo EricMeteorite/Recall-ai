@@ -629,7 +629,7 @@ class RecallEngine:
                 'created_at': time.time()
             }
             
-            # 存储到作用域
+            # 存储到作用域（核心存储）
             scope = self.storage.get_scope(user_id)
             scope.add(content, metadata={
                 'id': memory_id,
@@ -638,63 +638,79 @@ class RecallEngine:
                 **(metadata or {})
             })
             
-            # 4.5 Archive原文保存（确保100%不遗忘）
-            # 将完整对话存入分卷存储，支持任意轮次的O(1)定位
-            turn_number = self.volume_manager.append_turn({
-                'memory_id': memory_id,
-                'user_id': user_id,
-                'content': content,
-                'entities': entity_names,
-                'keywords': keywords,
-                'metadata': metadata or {},
-                'created_at': time.time()
-            })
+            # === 以下操作失败不影响主流程 ===
+            try:
+                # 4.5 Archive原文保存（确保100%不遗忘）
+                # 将完整对话存入分卷存储，支持任意轮次的O(1)定位
+                turn_number = self.volume_manager.append_turn({
+                    'memory_id': memory_id,
+                    'user_id': user_id,
+                    'content': content,
+                    'entities': entity_names,
+                    'keywords': keywords,
+                    'metadata': metadata or {},
+                    'created_at': time.time()
+                })
+            except Exception as e:
+                print(f"[Recall] Archive保存失败（不影响主流程）: {e}")
             
-            # 5. 更新索引
-            if self._entity_index:
-                for entity in entities:
-                    self._entity_index.add_entity_occurrence(
-                        entity_name=entity.name,
-                        turn_id=memory_id,
-                        context=content[:200]
-                    )
-            
-            if self._inverted_index:
-                self._inverted_index.add_batch(keywords, memory_id)
-            
-            if self._ngram_index:
-                # NgamIndex.add 接受 (turn_id, content)
-                self._ngram_index.add(memory_id, content)
-            
-            if self._vector_index:
-                # VectorIndex.add_text 接受 (turn_id, text)
-                self._vector_index.add_text(memory_id, content)
+            # 5. 更新索引（失败不影响主流程）
+            try:
+                if self._entity_index:
+                    for entity in entities:
+                        self._entity_index.add_entity_occurrence(
+                            entity_name=entity.name,
+                            turn_id=memory_id,
+                            context=content[:200]
+                        )
+                
+                if self._inverted_index:
+                    self._inverted_index.add_batch(keywords, memory_id)
+                
+                if self._ngram_index:
+                    # NgamIndex.add 接受 (turn_id, content)
+                    self._ngram_index.add(memory_id, content)
+                
+                if self._vector_index:
+                    # VectorIndex.add_text 接受 (turn_id, text)
+                    self._vector_index.add_text(memory_id, content)
+            except Exception as e:
+                print(f"[Recall] 索引更新失败（不影响主流程）: {e}")
             
             # 5.5 缓存内容到检索器（确保检索时能获取内容）
-            self.retriever.cache_content(memory_id, content)
+            try:
+                self.retriever.cache_content(memory_id, content)
+            except Exception as e:
+                print(f"[Recall] 缓存更新失败（不影响主流程）: {e}")
             
             # 5.6 更新长期记忆（L1 ConsolidatedMemory）
             # 每个实体都会被自动整合和验证
-            for entity in entities:
-                consolidated_entity = ConsolidatedEntity(
-                    id=f"entity_{entity.name.lower().replace(' ', '_')}",
+            try:
+                for entity in entities:
+                    consolidated_entity = ConsolidatedEntity(
+                        id=f"entity_{entity.name.lower().replace(' ', '_')}",
                     name=entity.name,
                     entity_type=entity.entity_type if hasattr(entity, 'entity_type') else "UNKNOWN",
                     source_turns=[memory_id],
                     last_verified=time.strftime('%Y-%m-%dT%H:%M:%S')
                 )
                 self.consolidated_memory.add_or_update(consolidated_entity)
+            except Exception as e:
+                print(f"[Recall] 长期记忆更新失败（不影响主流程）: {e}")
             
-            # 6. 更新知识图谱
-            relations = self.relation_extractor.extract(content, 0)  # 传入turn=0
-            for rel in relations:
-                source_id, relation_type, target_id, source_text = rel
-                self.knowledge_graph.add_relation(
-                    source_id=source_id,
-                    target_id=target_id,
-                    relation_type=relation_type,
-                    source_text=source_text
-                )
+            # 6. 更新知识图谱（失败不影响主流程）
+            try:
+                relations = self.relation_extractor.extract(content, 0)  # 传入turn=0
+                for rel in relations:
+                    source_id, relation_type, target_id, source_text = rel
+                    self.knowledge_graph.add_relation(
+                        source_id=source_id,
+                        target_id=target_id,
+                        relation_type=relation_type,
+                        source_text=source_text
+                    )
+            except Exception as e:
+                print(f"[Recall] 知识图谱更新失败（不影响主流程）: {e}")
             
             # 7. 自动提取持久条件（如果内容包含身份、目标、环境等信息）
             try:
@@ -730,6 +746,9 @@ class RecallEngine:
             )
         
         except Exception as e:
+            print(f"[Recall] 添加记忆异常: {type(e).__name__}: {e}")
+            import traceback
+            traceback.print_exc()
             return AddResult(
                 id="",
                 success=False,
