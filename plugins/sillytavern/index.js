@@ -1918,6 +1918,9 @@ async function checkConnection() {
                     loadMemories();
                     loadForeshadowings();
                 }
+                
+                // 【新增】同步本地缓存的记忆（解决离线期间的保存）
+                memorySaveQueue.syncLocalStorage();
             }
         } else {
             throw new Error(`API 响应异常: ${response.status}`);
@@ -2140,8 +2143,156 @@ function notifyForeshadowingAnalyzer(content, role) {
     });
 }
 
+// ==================== 记忆保存队列（解决 API 限流问题） ====================
+
+/**
+ * 记忆保存队列 - 防止 API 限流
+ * 使用队列 + 延迟批量处理，减少 API 调用次数
+ */
+const memorySaveQueue = {
+    queue: [],           // 待保存的记忆队列
+    isProcessing: false, // 是否正在处理
+    minInterval: 1000,   // 最小处理间隔（毫秒）
+    lastSaveTime: 0,     // 上次保存时间
+    retryQueue: [],      // 重试队列（保存失败的记忆）
+    maxRetries: 3,       // 最大重试次数
+    
+    /**
+     * 添加记忆到队列
+     * @param {Object} memory 记忆对象 {content, user_id, metadata}
+     * @returns {Promise} 完成时 resolve
+     */
+    add(memory) {
+        return new Promise((resolve, reject) => {
+            this.queue.push({
+                memory,
+                resolve,
+                reject,
+                retries: 0,
+                addedAt: Date.now()
+            });
+            this._scheduleProcess();
+        });
+    },
+    
+    /**
+     * 调度处理
+     */
+    _scheduleProcess() {
+        if (this.isProcessing) return;
+        
+        const now = Date.now();
+        const timeSinceLastSave = now - this.lastSaveTime;
+        const delay = Math.max(0, this.minInterval - timeSinceLastSave);
+        
+        setTimeout(() => this._process(), delay);
+    },
+    
+    /**
+     * 处理队列中的记忆
+     */
+    async _process() {
+        if (this.isProcessing || this.queue.length === 0) return;
+        
+        this.isProcessing = true;
+        this.lastSaveTime = Date.now();
+        
+        // 取出一条记忆
+        const item = this.queue.shift();
+        
+        try {
+            const response = await fetch(`${pluginSettings.apiUrl}/v1/memories`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(item.memory)
+            });
+            
+            if (response.ok) {
+                item.resolve({ success: true });
+                console.log('[Recall] 记忆保存成功（队列处理）');
+            } else if (response.status === 429) {
+                // API 限流，延长间隔并重试
+                console.warn('[Recall] API 限流，将延迟重试');
+                this.minInterval = Math.min(this.minInterval * 2, 10000); // 最多 10 秒
+                item.retries++;
+                if (item.retries < this.maxRetries) {
+                    this.queue.unshift(item); // 放回队首
+                } else {
+                    // 保存到本地存储，等待下次启动时重试
+                    this._saveToLocalStorage(item.memory);
+                    item.resolve({ success: false, queued: true });
+                }
+            } else {
+                throw new Error(`HTTP ${response.status}`);
+            }
+        } catch (e) {
+            console.warn('[Recall] 记忆保存失败:', e.message);
+            item.retries++;
+            if (item.retries < this.maxRetries) {
+                this.queue.push(item); // 放回队尾
+            } else {
+                // 保存到本地存储
+                this._saveToLocalStorage(item.memory);
+                item.resolve({ success: false, queued: true });
+            }
+        }
+        
+        this.isProcessing = false;
+        
+        // 继续处理队列
+        if (this.queue.length > 0) {
+            this._scheduleProcess();
+        }
+    },
+    
+    /**
+     * 保存到本地存储（离线备份）
+     */
+    _saveToLocalStorage(memory) {
+        try {
+            const key = 'recall_pending_memories';
+            const pending = JSON.parse(localStorage.getItem(key) || '[]');
+            pending.push({
+                ...memory,
+                savedAt: Date.now()
+            });
+            // 最多保存 100 条
+            if (pending.length > 100) {
+                pending.shift();
+            }
+            localStorage.setItem(key, JSON.stringify(pending));
+            console.log('[Recall] 记忆已缓存到本地，等待后续同步');
+        } catch (e) {
+            console.warn('[Recall] 本地缓存保存失败:', e);
+        }
+    },
+    
+    /**
+     * 同步本地缓存的记忆
+     */
+    async syncLocalStorage() {
+        try {
+            const key = 'recall_pending_memories';
+            const pending = JSON.parse(localStorage.getItem(key) || '[]');
+            if (pending.length === 0) return;
+            
+            console.log(`[Recall] 发现 ${pending.length} 条待同步的本地记忆`);
+            
+            for (const memory of pending) {
+                this.add(memory);
+            }
+            
+            // 清空本地缓存
+            localStorage.removeItem(key);
+        } catch (e) {
+            console.warn('[Recall] 同步本地缓存失败:', e);
+        }
+    }
+};
+
 /**
  * 消息发送时
+ * 【优化】使用队列保存，不阻塞消息发送
  */
 async function onMessageSent(messageIndex) {
     if (!pluginSettings.enabled || !isConnected) return;
@@ -2153,26 +2304,28 @@ async function onMessageSent(messageIndex) {
         
         if (!message || !message.mes) return;
         
-        // 保存用户消息作为记忆（必须 await 确保保存成功）
-        await fetch(`${pluginSettings.apiUrl}/v1/memories`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                content: message.mes,
-                user_id: currentCharacterId || 'default',
-                metadata: { 
-                    role: 'user', 
-                    source: 'sillytavern',
-                    timestamp: Date.now()
-                }
-            })
+        // 【关键改动】使用队列保存，不阻塞
+        // 先将记忆加入队列，立即返回让消息显示
+        memorySaveQueue.add({
+            content: message.mes,
+            user_id: currentCharacterId || 'default',
+            metadata: { 
+                role: 'user', 
+                source: 'sillytavern',
+                timestamp: Date.now()
+            }
+        }).then(result => {
+            if (result.success) {
+                console.log('[Recall] 已保存用户消息');
+            } else if (result.queued) {
+                console.log('[Recall] 用户消息已加入队列/本地缓存');
+            }
         });
-        console.log('[Recall] 已保存用户消息');
         
         // 发送到伏笔分析器进行分析（非阻塞，不等待）
         notifyForeshadowingAnalyzer(message.mes, 'user');
     } catch (e) {
-        console.warn('[Recall] 保存用户消息失败:', e);
+        console.warn('[Recall] 处理用户消息失败:', e);
     }
 }
 
@@ -2233,6 +2386,7 @@ function chunkLongText(text, maxSize = 2000) {
 
 /**
  * 消息接收时
+ * 【优化】使用队列保存，不阻塞 AI 响应显示
  */
 async function onMessageReceived(messageIndex) {
     if (!pluginSettings.enabled || !isConnected) return;
@@ -2268,40 +2422,36 @@ async function onMessageReceived(messageIndex) {
             console.log(`[Recall] 长文本(${contentToSave.length}字)分成${chunks.length}段保存`);
         }
         
-        // 保存所有分段（必须 await 确保每段都保存成功）
+        // 【关键改动】使用队列保存所有分段，不阻塞
         const timestamp = Date.now();
         for (let i = 0; i < chunks.length; i++) {
             const chunk = chunks[i];
             const isMultiPart = chunks.length > 1;
             
-            await fetch(`${pluginSettings.apiUrl}/v1/memories`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    content: chunk,
-                    user_id: currentCharacterId || 'default',
-                    metadata: { 
-                        role: 'assistant', 
-                        source: 'sillytavern',
-                        character: message.name || 'AI',
-                        timestamp: timestamp,
-                        // 分段信息
-                        ...(isMultiPart && {
-                            chunk_index: i + 1,
-                            chunk_total: chunks.length,
-                            original_length: contentToSave.length
-                        })
-                    }
-                })
+            memorySaveQueue.add({
+                content: chunk,
+                user_id: currentCharacterId || 'default',
+                metadata: { 
+                    role: 'assistant', 
+                    source: 'sillytavern',
+                    character: message.name || 'AI',
+                    timestamp: timestamp,
+                    // 分段信息
+                    ...(isMultiPart && {
+                        chunk_index: i + 1,
+                        chunk_total: chunks.length,
+                        original_length: contentToSave.length
+                    })
+                }
             });
         }
         
-        console.log(`[Recall] 已保存AI响应 (${chunks.length}段, 共${contentToSave.length}字)`);
+        console.log(`[Recall] AI响应已加入保存队列 (${chunks.length}段, 共${contentToSave.length}字)`);
         
         // 发送到伏笔分析器进行分析（非阻塞，不等待）
         notifyForeshadowingAnalyzer(contentToSave, 'assistant');
     } catch (e) {
-        console.warn('[Recall] 保存AI响应失败:', e);
+        console.warn('[Recall] 处理AI响应失败:', e);
     }
 }
 

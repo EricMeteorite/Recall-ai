@@ -1,10 +1,66 @@
 """API Embedding 后端 - 支持 OpenAI 和硅基流动"""
 
 import os
+import time
+import threading
 from typing import List, Optional
 import numpy as np
 
 from .base import EmbeddingBackend, EmbeddingConfig, EmbeddingBackendType
+
+
+class RateLimiter:
+    """简单的速率限制器
+    
+    限制单位时间内的请求次数，超限时自动等待。
+    """
+    
+    def __init__(self, max_requests: int = 5, window_seconds: int = 60):
+        """
+        Args:
+            max_requests: 时间窗口内最大请求数
+            window_seconds: 时间窗口长度（秒）
+        """
+        self.max_requests = max_requests
+        self.window_seconds = window_seconds
+        self.requests: List[float] = []
+        self._lock = threading.Lock()
+    
+    def acquire(self, timeout: float = 120.0) -> bool:
+        """获取许可，超限时阻塞等待
+        
+        Args:
+            timeout: 最大等待时间（秒）
+        
+        Returns:
+            bool: 是否成功获取许可
+        """
+        start_time = time.time()
+        
+        while True:
+            with self._lock:
+                now = time.time()
+                
+                # 清理过期的请求记录
+                self.requests = [t for t in self.requests if now - t < self.window_seconds]
+                
+                # 检查是否可以发送
+                if len(self.requests) < self.max_requests:
+                    self.requests.append(now)
+                    return True
+                
+                # 计算需要等待的时间
+                oldest = min(self.requests) if self.requests else now
+                wait_time = self.window_seconds - (now - oldest) + 0.1
+            
+            # 检查是否超时
+            if time.time() - start_time + wait_time > timeout:
+                print(f"[Embedding] 速率限制等待超时 ({timeout}秒)")
+                return False
+            
+            # 等待
+            print(f"[Embedding] API 限流，等待 {wait_time:.1f} 秒...")
+            time.sleep(min(wait_time, 10))  # 最多等待10秒后重新检查
 
 
 class APIEmbeddingBackend(EmbeddingBackend):
@@ -66,6 +122,11 @@ class APIEmbeddingBackend(EmbeddingBackend):
             config.api_model, 
             1536  # 默认
         )
+        
+        # 【新增】速率限制器 - 从环境变量读取配置
+        rate_limit = int(os.environ.get('EMBEDDING_RATE_LIMIT', '10'))  # 默认每分钟10次
+        rate_window = int(os.environ.get('EMBEDDING_RATE_WINDOW', '60'))  # 默认60秒窗口
+        self._rate_limiter = RateLimiter(max_requests=rate_limit, window_seconds=rate_window)
     
     def _get_api_key_from_env(self) -> Optional[str]:
         """从环境变量获取 API key"""
@@ -111,35 +172,82 @@ class APIEmbeddingBackend(EmbeddingBackend):
         return self._client
     
     def encode(self, text: str) -> np.ndarray:
-        """编码单个文本"""
-        response = self.client.embeddings.create(
-            model=self.config.api_model,
-            input=text
-        )
-        embedding = np.array(response.data[0].embedding, dtype='float32')
+        """编码单个文本（带速率限制和重试）"""
+        max_retries = 3
         
-        if self.config.normalize:
-            embedding = embedding / np.linalg.norm(embedding)
+        for attempt in range(max_retries):
+            # 等待速率限制许可
+            if not self._rate_limiter.acquire():
+                raise RuntimeError("Embedding API 速率限制超时")
+            
+            try:
+                response = self.client.embeddings.create(
+                    model=self.config.api_model,
+                    input=text
+                )
+                embedding = np.array(response.data[0].embedding, dtype='float32')
+                
+                if self.config.normalize:
+                    embedding = embedding / np.linalg.norm(embedding)
+                
+                return embedding
+                
+            except Exception as e:
+                error_str = str(e).lower()
+                
+                # 处理 429 错误（速率限制）
+                if '429' in error_str or 'rate limit' in error_str:
+                    if attempt < max_retries - 1:
+                        wait_time = (attempt + 1) * 15  # 指数退避: 15, 30, 45 秒
+                        print(f"[Embedding] API 限流 (429)，等待 {wait_time} 秒后重试 ({attempt + 1}/{max_retries})")
+                        time.sleep(wait_time)
+                        continue
+                
+                # 其他错误直接抛出
+                raise
         
-        return embedding
+        raise RuntimeError(f"Embedding API 调用失败，已重试 {max_retries} 次")
     
     def encode_batch(self, texts: List[str]) -> np.ndarray:
-        """批量编码"""
+        """批量编码（带速率限制和重试）"""
         # API 通常有批量限制，分批处理
         all_embeddings = []
         batch_size = min(self.config.batch_size, 100)  # OpenAI 限制
         
         for i in range(0, len(texts), batch_size):
             batch = texts[i:i + batch_size]
-            response = self.client.embeddings.create(
-                model=self.config.api_model,
-                input=batch
-            )
             
-            for item in response.data:
-                embedding = np.array(item.embedding, dtype='float32')
-                if self.config.normalize:
-                    embedding = embedding / np.linalg.norm(embedding)
-                all_embeddings.append(embedding)
+            max_retries = 3
+            for attempt in range(max_retries):
+                # 等待速率限制许可
+                if not self._rate_limiter.acquire():
+                    raise RuntimeError("Embedding API 速率限制超时")
+                
+                try:
+                    response = self.client.embeddings.create(
+                        model=self.config.api_model,
+                        input=batch
+                    )
+                    
+                    for item in response.data:
+                        embedding = np.array(item.embedding, dtype='float32')
+                        if self.config.normalize:
+                            embedding = embedding / np.linalg.norm(embedding)
+                        all_embeddings.append(embedding)
+                    
+                    break  # 成功，跳出重试循环
+                    
+                except Exception as e:
+                    error_str = str(e).lower()
+                    
+                    # 处理 429 错误
+                    if '429' in error_str or 'rate limit' in error_str:
+                        if attempt < max_retries - 1:
+                            wait_time = (attempt + 1) * 15
+                            print(f"[Embedding] API 限流 (429)，等待 {wait_time} 秒后重试")
+                            time.sleep(wait_time)
+                            continue
+                    
+                    raise
         
         return np.array(all_embeddings)

@@ -307,6 +307,18 @@ EMBEDDING_DIMENSION=1024
 RECALL_EMBEDDING_MODE=auto
 
 # ----------------------------------------------------------------------------
+# Embedding API 速率限制
+# Embedding API Rate Limiting
+# ----------------------------------------------------------------------------
+# 每时间窗口最大请求数（默认10，设为0禁用）
+# Max requests per time window (default 10, set 0 to disable)
+EMBEDDING_RATE_LIMIT=10
+
+# 速率限制时间窗口（秒，默认60）
+# Rate limit time window in seconds (default 60)
+EMBEDDING_RATE_WINDOW=60
+
+# ----------------------------------------------------------------------------
 # LLM 配置 (OpenAI 兼容接口)
 # LLM Configuration (OpenAI Compatible API)
 # ----------------------------------------------------------------------------

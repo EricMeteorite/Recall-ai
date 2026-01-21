@@ -92,7 +92,7 @@ class LLMClient:
         stop: Optional[List[str]] = None,
         **kwargs
     ) -> LLMResponse:
-        """聊天补全 - 使用 OpenAI SDK"""
+        """聊天补全 - 使用 OpenAI SDK，带速率限制处理"""
         start_time = time.time()
         
         for attempt in range(self.max_retries):
@@ -121,9 +121,23 @@ class LLMClient:
                 )
                 
             except Exception as e:
+                error_str = str(e).lower()
+                
+                # 特殊处理 429 错误（API 限流）
+                if '429' in error_str or 'rate limit' in error_str or 'too many requests' in error_str:
+                    if attempt < self.max_retries - 1:
+                        # 指数退避：15, 30, 45 秒
+                        wait_time = (attempt + 1) * 15
+                        print(f"[LLM] API 限流 (429)，等待 {wait_time} 秒后重试 ({attempt + 1}/{self.max_retries})")
+                        time.sleep(wait_time)
+                        continue
+                    else:
+                        raise RuntimeError(f"LLM API 限流，已重试 {self.max_retries} 次: {e}")
+                
+                # 其他错误
                 if attempt == self.max_retries - 1:
                     raise
-                time.sleep(1 * (attempt + 1))  # 指数退避
+                time.sleep(1 * (attempt + 1))  # 普通重试间隔
         
         raise RuntimeError("LLM调用失败")
     

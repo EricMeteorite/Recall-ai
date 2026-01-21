@@ -24,6 +24,9 @@ SUPPORTED_CONFIG_KEYS = {
     'EMBEDDING_API_BASE',
     'EMBEDDING_MODEL',
     'EMBEDDING_DIMENSION',
+    # Embedding 速率限制
+    'EMBEDDING_RATE_LIMIT',       # 每时间窗口最大请求数
+    'EMBEDDING_RATE_WINDOW',      # 速率限制时间窗口（秒）
     # Embedding 模式
     'RECALL_EMBEDDING_MODE',
     # LLM 配置（用于伏笔分析器等功能）
@@ -81,6 +84,18 @@ EMBEDDING_DIMENSION=1024
 # Embedding 模式: auto(自动检测), local(本地), api(远程API)
 # Embedding Mode: auto(auto detect), local(local model), api(remote API)
 RECALL_EMBEDDING_MODE=auto
+
+# ----------------------------------------------------------------------------
+# Embedding API 速率限制
+# Embedding API Rate Limiting
+# ----------------------------------------------------------------------------
+# 每时间窗口最大请求数（默认10，设为0禁用）
+# Max requests per time window (default 10, set 0 to disable)
+EMBEDDING_RATE_LIMIT=10
+
+# 速率限制时间窗口（秒，默认60）
+# Rate limit time window in seconds (default 60)
+EMBEDDING_RATE_WINDOW=60
 
 # ----------------------------------------------------------------------------
 # LLM 配置 (OpenAI 兼容接口)
