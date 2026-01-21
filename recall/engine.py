@@ -580,6 +580,21 @@ class RecallEngine:
         consistency_warnings = []  # 收集一致性警告
         
         try:
+            # 【新增】去重检查：检查是否已存在完全相同内容的记忆
+            scope = self.storage.get_scope(user_id)
+            existing_memories = scope.get_all(limit=100)  # 检查最近100条
+            content_normalized = content.strip()
+            for mem in existing_memories:
+                existing_content = mem.get('content', '').strip()
+                if existing_content == content_normalized:
+                    print(f"[Recall] 跳过重复记忆: content_len={len(content)}, user={user_id}")
+                    return AddResult(
+                        id=mem.get('metadata', {}).get('id', 'unknown'),
+                        success=False,
+                        entities=[],
+                        message="记忆内容已存在，跳过重复保存"
+                    )
+            
             # 1. 提取实体
             entities = self.entity_extractor.extract(content)
             entity_names = [e.name for e in entities]

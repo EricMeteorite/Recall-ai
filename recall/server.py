@@ -596,13 +596,19 @@ async def add_memory(request: AddMemoryRequest):
     character_id = request.metadata.get('character_id', 'default') if request.metadata else 'default'
     role = request.metadata.get('role', 'unknown') if request.metadata else 'unknown'
     
-    print(f"[Recall] 添加记忆: user={user_id}, role={role}, content_len={len(request.content)}")
+    print(f"[Recall] 添加记忆请求: user={user_id}, role={role}, content_len={len(request.content)}")
     
     result = engine.add(
         content=request.content,
         user_id=request.user_id,
         metadata=request.metadata
     )
+    
+    # 记录结果（包括去重跳过的情况）
+    if result.success:
+        print(f"[Recall] 记忆已保存: id={result.id}")
+    else:
+        print(f"[Recall] 记忆保存跳过: {result.message}")
     
     # 【重要】只在保存用户消息时自动提取条件（而不是每次 build_context）
     # 这避免了切换角色/生成时重复提取导致条件数量爆炸
