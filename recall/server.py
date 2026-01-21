@@ -1036,6 +1036,9 @@ async def list_foreshadowing(
     """获取活跃伏笔"""
     engine = get_engine()
     active = engine.get_active_foreshadowings(user_id, character_id)
+    print(f"[Recall] 获取伏笔列表: user={user_id}, character={character_id}, count={len(active)}")
+    if active:
+        print(f"[Recall] 伏笔内容摘要: {[f.content[:30] + '...' if len(f.content) > 30 else f.content for f in active]}")
     return [
         ForeshadowingItem(
             id=f.id,
