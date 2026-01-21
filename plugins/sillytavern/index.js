@@ -2208,8 +2208,16 @@ const memorySaveQueue = {
             });
             
             if (response.ok) {
-                item.resolve({ success: true });
-                console.log('[Recall] 记忆保存成功（队列处理）');
+                // 【修复】解析服务器返回的实际结果，检查是否真的保存成功
+                const result = await response.json();
+                if (result.success) {
+                    item.resolve({ success: true, id: result.id });
+                    console.log('[Recall] 记忆保存成功（队列处理）');
+                } else {
+                    // 服务器返回成功状态码，但业务上未保存（如重复内容）
+                    item.resolve({ success: false, message: result.message });
+                    console.log('[Recall] 记忆跳过:', result.message);
+                }
             } else if (response.status === 429) {
                 // API 限流，延长间隔并重试
                 console.warn('[Recall] API 限流，将延迟重试');
@@ -2317,13 +2325,14 @@ async function onMessageSent(messageIndex) {
         }).then(result => {
             if (result.success) {
                 console.log('[Recall] 已保存用户消息');
+                // 【修复】只有记忆保存成功（非重复）才触发伏笔分析
+                notifyForeshadowingAnalyzer(message.mes, 'user');
             } else if (result.queued) {
                 console.log('[Recall] 用户消息已加入队列/本地缓存');
+            } else {
+                console.log('[Recall] 用户消息跳过（重复）');
             }
         });
-        
-        // 发送到伏笔分析器进行分析（非阻塞，不等待）
-        notifyForeshadowingAnalyzer(message.mes, 'user');
     } catch (e) {
         console.warn('[Recall] 处理用户消息失败:', e);
     }
@@ -2422,13 +2431,15 @@ async function onMessageReceived(messageIndex) {
             console.log(`[Recall] 长文本(${contentToSave.length}字)分成${chunks.length}段保存`);
         }
         
-        // 【关键改动】使用队列保存所有分段，不阻塞
+        // 【修复】使用队列保存，并跟踪第一段的保存结果来决定是否触发伏笔分析
         const timestamp = Date.now();
+        let firstChunkPromise = null;
+        
         for (let i = 0; i < chunks.length; i++) {
             const chunk = chunks[i];
             const isMultiPart = chunks.length > 1;
             
-            memorySaveQueue.add({
+            const promise = memorySaveQueue.add({
                 content: chunk,
                 user_id: currentCharacterId || 'default',
                 metadata: { 
@@ -2444,12 +2455,26 @@ async function onMessageReceived(messageIndex) {
                     })
                 }
             });
+            
+            // 保存第一段的 Promise
+            if (i === 0) {
+                firstChunkPromise = promise;
+            }
         }
         
         console.log(`[Recall] AI响应已加入保存队列 (${chunks.length}段, 共${contentToSave.length}字)`);
         
-        // 发送到伏笔分析器进行分析（非阻塞，不等待）
-        notifyForeshadowingAnalyzer(contentToSave, 'assistant');
+        // 【修复】等待第一段保存结果，只有成功（非重复）才触发伏笔分析
+        if (firstChunkPromise) {
+            firstChunkPromise.then(result => {
+                if (result.success) {
+                    // 记忆保存成功（非重复），触发伏笔分析
+                    notifyForeshadowingAnalyzer(contentToSave, 'assistant');
+                } else {
+                    console.log('[Recall] AI响应跳过伏笔分析（重复内容）');
+                }
+            });
+        }
     } catch (e) {
         console.warn('[Recall] 处理AI响应失败:', e);
     }
