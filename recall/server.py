@@ -1384,6 +1384,26 @@ async def get_config():
             return key[:4] + '****' + key[-4:]
         return '****'
     
+    def safe_int(val: str, default: int) -> int:
+        """安全转换整数"""
+        try:
+            return int(val) if val else default
+        except (ValueError, TypeError):
+            return default
+    
+    def safe_float(val: str, default: float) -> float:
+        """安全转换浮点数"""
+        try:
+            return float(val) if val else default
+        except (ValueError, TypeError):
+            return default
+    
+    def safe_bool(val: str, default: bool) -> bool:
+        """安全转换布尔值"""
+        if not val:
+            return default
+        return val.lower() in ('true', '1', 'yes', 'on')
+    
     # Embedding 配置
     embedding_key = os.environ.get('EMBEDDING_API_KEY', '')
     embedding_base = os.environ.get('EMBEDDING_API_BASE', '')
@@ -1395,6 +1415,21 @@ async def get_config():
     llm_key = os.environ.get('LLM_API_KEY', '')
     llm_base = os.environ.get('LLM_API_BASE', '')
     llm_model = os.environ.get('LLM_MODEL', '')
+    
+    # 容量限制配置
+    context_max_per_type = safe_int(os.environ.get('CONTEXT_MAX_PER_TYPE', ''), 30)
+    context_max_total = safe_int(os.environ.get('CONTEXT_MAX_TOTAL', ''), 100)
+    context_decay_days = safe_int(os.environ.get('CONTEXT_DECAY_DAYS', ''), 7)
+    context_decay_rate = safe_float(os.environ.get('CONTEXT_DECAY_RATE', ''), 0.1)
+    context_min_confidence = safe_float(os.environ.get('CONTEXT_MIN_CONFIDENCE', ''), 0.3)
+    
+    foreshadowing_max_return = safe_int(os.environ.get('FORESHADOWING_MAX_RETURN', ''), 5)
+    foreshadowing_max_active = safe_int(os.environ.get('FORESHADOWING_MAX_ACTIVE', ''), 50)
+    
+    # 智能去重配置
+    dedup_embedding_enabled = safe_bool(os.environ.get('DEDUP_EMBEDDING_ENABLED', ''), True)
+    dedup_high_threshold = safe_float(os.environ.get('DEDUP_HIGH_THRESHOLD', ''), 0.92)
+    dedup_low_threshold = safe_float(os.environ.get('DEDUP_LOW_THRESHOLD', ''), 0.75)
     
     return {
         "config_file": str(config_file),
@@ -1412,6 +1447,24 @@ async def get_config():
             "api_base": llm_base or "未配置",
             "model": llm_model or "未配置",
             "status": "已配置" if llm_key else "未配置"
+        },
+        "capacity_limits": {
+            "context": {
+                "max_per_type": context_max_per_type,
+                "max_total": context_max_total,
+                "decay_days": context_decay_days,
+                "decay_rate": context_decay_rate,
+                "min_confidence": context_min_confidence
+            },
+            "foreshadowing": {
+                "max_return": foreshadowing_max_return,
+                "max_active": foreshadowing_max_active
+            },
+            "dedup": {
+                "embedding_enabled": dedup_embedding_enabled,
+                "high_threshold": dedup_high_threshold,
+                "low_threshold": dedup_low_threshold
+            }
         },
         "hint": "编辑配置文件后调用 POST /v1/config/reload 热更新，测试连接 GET /v1/config/test"
     }
@@ -1921,6 +1974,19 @@ class ConfigUpdateRequest(BaseModel):
     llm_api_key: Optional[str] = Field(default=None, description="LLM API Key")
     llm_api_base: Optional[str] = Field(default=None, description="LLM API 地址")
     llm_model: Optional[str] = Field(default=None, description="LLM 模型")
+    # 持久条件容量配置
+    context_max_per_type: Optional[int] = Field(default=None, description="每类型条件上限")
+    context_max_total: Optional[int] = Field(default=None, description="条件总数上限")
+    context_decay_days: Optional[int] = Field(default=None, description="衰减开始天数")
+    context_decay_rate: Optional[float] = Field(default=None, description="每次衰减比例 (0-1)")
+    context_min_confidence: Optional[float] = Field(default=None, description="最低置信度 (0-1)")
+    # 伏笔系统容量配置
+    foreshadowing_max_return: Optional[int] = Field(default=None, description="伏笔召回数量")
+    foreshadowing_max_active: Optional[int] = Field(default=None, description="活跃伏笔数量上限")
+    # 智能去重配置
+    dedup_embedding_enabled: Optional[bool] = Field(default=None, description="启用语义去重")
+    dedup_high_threshold: Optional[float] = Field(default=None, description="高相似度阈值 (0-1)")
+    dedup_low_threshold: Optional[float] = Field(default=None, description="低相似度阈值 (0-1)")
 
 
 @app.put("/v1/config", tags=["Admin"])
@@ -1957,6 +2023,19 @@ async def update_config(request: ConfigUpdateRequest):
         'llm_api_key': 'LLM_API_KEY',
         'llm_api_base': 'LLM_API_BASE',
         'llm_model': 'LLM_MODEL',
+        # 持久条件容量配置
+        'context_max_per_type': 'CONTEXT_MAX_PER_TYPE',
+        'context_max_total': 'CONTEXT_MAX_TOTAL',
+        'context_decay_days': 'CONTEXT_DECAY_DAYS',
+        'context_decay_rate': 'CONTEXT_DECAY_RATE',
+        'context_min_confidence': 'CONTEXT_MIN_CONFIDENCE',
+        # 伏笔系统容量配置
+        'foreshadowing_max_return': 'FORESHADOWING_MAX_RETURN',
+        'foreshadowing_max_active': 'FORESHADOWING_MAX_ACTIVE',
+        # 智能去重配置
+        'dedup_embedding_enabled': 'DEDUP_EMBEDDING_ENABLED',
+        'dedup_high_threshold': 'DEDUP_HIGH_THRESHOLD',
+        'dedup_low_threshold': 'DEDUP_LOW_THRESHOLD',
     }
     
     # 更新配置

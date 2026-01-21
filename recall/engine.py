@@ -276,23 +276,26 @@ class RecallEngine:
     def _check_and_rebuild_index(self):
         """检查并为已有伏笔/条件补建 VectorIndex 索引
         
-        使用标记文件 .index_rebuilt_v2 来判断是否已经迁移过。
+        使用标记文件 .index_rebuilt_v3 来判断是否已经迁移过。
+        v3 版本支持索引归档文件 (archive/*.jsonl)。
         如果没有 VectorIndex 或已禁用，则跳过。
         """
         if not self._vector_index or not self._vector_index.enabled:
             return
         
-        marker_file = os.path.join(self.data_root, 'data', '.index_rebuilt_v2')
+        marker_file = os.path.join(self.data_root, 'data', '.index_rebuilt_v3')
         if os.path.exists(marker_file):
             return  # 已经迁移过
         
         import logging
+        import glob
         logger = logging.getLogger(__name__)
-        logger.info("[Recall] 检测到首次升级，开始为已有伏笔/条件补建 VectorIndex 索引...")
+        logger.info("[Recall] 检测到首次升级或版本更新，开始为已有伏笔/条件补建 VectorIndex 索引...")
         
         indexed_count = 0
+        archived_count = 0
         
-        # 1. 索引所有伏笔
+        # 1. 索引所有伏笔和条件（包括活跃的和归档的）
         data_path = os.path.join(self.data_root, 'data')
         if os.path.exists(data_path):
             for user_id in os.listdir(data_path):
@@ -304,7 +307,7 @@ class RecallEngine:
                     if not os.path.isdir(char_path):
                         continue
                     
-                    # 索引伏笔
+                    # 1.1 索引活跃伏笔 (foreshadowings.json)
                     fsh_file = os.path.join(char_path, 'foreshadowings.json')
                     if os.path.exists(fsh_file):
                         try:
@@ -323,7 +326,7 @@ class RecallEngine:
                         except Exception as e:
                             logger.warning(f"[Recall] 索引伏笔失败 ({user_id}/{character_id}): {e}")
                     
-                    # 索引条件
+                    # 1.2 索引活跃条件 (contexts.json)
                     ctx_file = os.path.join(char_path, 'contexts.json')
                     if os.path.exists(ctx_file):
                         try:
@@ -340,15 +343,60 @@ class RecallEngine:
                                         indexed_count += 1
                         except Exception as e:
                             logger.warning(f"[Recall] 索引条件失败 ({user_id}/{character_id}): {e}")
+                    
+                    # 1.3 索引归档伏笔 (archive/foreshadowings*.jsonl)
+                    archive_dir = os.path.join(char_path, 'archive')
+                    if os.path.isdir(archive_dir):
+                        # 匹配 foreshadowings.jsonl 和 foreshadowings_001.jsonl 等
+                        fsh_archive_files = glob.glob(os.path.join(archive_dir, 'foreshadowings*.jsonl'))
+                        for archive_file in fsh_archive_files:
+                            try:
+                                with open(archive_file, 'r', encoding='utf-8') as f:
+                                    for line in f:
+                                        line = line.strip()
+                                        if not line:
+                                            continue
+                                        fsh = json.loads(line)
+                                        fsh_id = fsh.get('id', '')
+                                        content = fsh.get('content', '')
+                                        if content and fsh_id:
+                                            doc_id = f"{user_id}_{character_id}_{fsh_id}"
+                                            self._vector_index.add_text(doc_id, content)
+                                            archived_count += 1
+                            except Exception as e:
+                                logger.warning(f"[Recall] 索引归档伏笔失败 ({archive_file}): {e}")
+                        
+                        # 1.4 索引归档条件 (archive/contexts*.jsonl)
+                        ctx_archive_files = glob.glob(os.path.join(archive_dir, 'contexts*.jsonl'))
+                        for archive_file in ctx_archive_files:
+                            try:
+                                with open(archive_file, 'r', encoding='utf-8') as f:
+                                    for line in f:
+                                        line = line.strip()
+                                        if not line:
+                                            continue
+                                        ctx = json.loads(line)
+                                        ctx_id = ctx.get('id', '')
+                                        content = ctx.get('content', '')
+                                        if content and ctx_id:
+                                            doc_id = f"ctx_{user_id}_{character_id}_{ctx_id}"
+                                            self._vector_index.add_text(doc_id, content)
+                                            archived_count += 1
+                            except Exception as e:
+                                logger.warning(f"[Recall] 索引归档条件失败 ({archive_file}): {e}")
         
         # 创建标记文件
         os.makedirs(os.path.dirname(marker_file), exist_ok=True)
+        total_count = indexed_count + archived_count
         with open(marker_file, 'w') as f:
-            f.write(f"indexed_at: {time.time()}\ncount: {indexed_count}\n")
+            f.write(f"indexed_at: {time.time()}\n")
+            f.write(f"active_count: {indexed_count}\n")
+            f.write(f"archived_count: {archived_count}\n")
+            f.write(f"total_count: {total_count}\n")
         
-        logger.info(f"[Recall] VectorIndex 索引补建完成，共索引 {indexed_count} 条记录")
+        logger.info(f"[Recall] VectorIndex 索引补建完成，共索引 {total_count} 条记录 (活跃: {indexed_count}, 归档: {archived_count})")
         
-        return indexed_count
+        return total_count
 
     def rebuild_vector_index(self, force: bool = False) -> int:
         """手动重建 VectorIndex 索引
@@ -368,9 +416,14 @@ class RecallEngine:
             int: 索引的记录数量
         """
         if force:
-            marker_file = os.path.join(self.data_root, 'data', '.index_rebuilt_v2')
-            if os.path.exists(marker_file):
-                os.remove(marker_file)
+            # 删除 v3 标记文件（当前版本）
+            marker_file_v3 = os.path.join(self.data_root, 'data', '.index_rebuilt_v3')
+            if os.path.exists(marker_file_v3):
+                os.remove(marker_file_v3)
+            # 兼容：也删除旧版本标记文件
+            marker_file_v2 = os.path.join(self.data_root, 'data', '.index_rebuilt_v2')
+            if os.path.exists(marker_file_v2):
+                os.remove(marker_file_v2)
         
         return self._check_and_rebuild_index() or 0
 

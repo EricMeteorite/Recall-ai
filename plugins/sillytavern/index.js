@@ -640,6 +640,110 @@ function createUI() {
                         </div>
                     </div>
                     
+                    <!-- 容量限制配置 -->
+                    <div class="recall-settings-section recall-api-section">
+                        <div class="recall-settings-section-title">
+                            📊 容量限制配置
+                        </div>
+                        <div class="recall-setting-hint" style="margin-top:-5px;margin-bottom:10px;">控制持久条件和伏笔的数量上限、衰减和去重行为</div>
+                        
+                        <!-- 持久条件限制 -->
+                        <div class="recall-setting-group" style="margin-bottom:15px;">
+                            <div style="font-weight:bold;margin-bottom:8px;">📌 持久条件</div>
+                            
+                            <div class="recall-setting-row" style="display:flex;gap:10px;margin-bottom:8px;">
+                                <div style="flex:1;">
+                                    <label class="recall-setting-title">每类型上限</label>
+                                    <input type="number" id="recall-context-max-per-type" class="text_pole" 
+                                           min="1" max="100" value="30" placeholder="30">
+                                </div>
+                                <div style="flex:1;">
+                                    <label class="recall-setting-title">总数上限</label>
+                                    <input type="number" id="recall-context-max-total" class="text_pole" 
+                                           min="1" max="500" value="100" placeholder="100">
+                                </div>
+                            </div>
+                            
+                            <div class="recall-setting-row" style="display:flex;gap:10px;margin-bottom:8px;">
+                                <div style="flex:1;">
+                                    <label class="recall-setting-title">衰减开始天数</label>
+                                    <input type="number" id="recall-context-decay-days" class="text_pole" 
+                                           min="1" max="365" value="7" placeholder="7">
+                                </div>
+                                <div style="flex:1;">
+                                    <label class="recall-setting-title">衰减比例</label>
+                                    <input type="number" id="recall-context-decay-rate" class="text_pole" 
+                                           min="0.01" max="0.5" step="0.01" value="0.1" placeholder="0.1">
+                                </div>
+                            </div>
+                            
+                            <div class="recall-setting-group">
+                                <label class="recall-setting-title">最低置信度（低于此自动归档）</label>
+                                <input type="number" id="recall-context-min-confidence" class="text_pole" 
+                                       min="0.1" max="0.9" step="0.05" value="0.3" placeholder="0.3">
+                            </div>
+                        </div>
+                        
+                        <!-- 伏笔限制 -->
+                        <div class="recall-setting-group" style="margin-bottom:15px;">
+                            <div style="font-weight:bold;margin-bottom:8px;">🎭 伏笔系统</div>
+                            
+                            <div class="recall-setting-row" style="display:flex;gap:10px;">
+                                <div style="flex:1;">
+                                    <label class="recall-setting-title">召回数量</label>
+                                    <input type="number" id="recall-foreshadowing-max-return" class="text_pole" 
+                                           min="1" max="20" value="5" placeholder="5">
+                                    <div class="recall-setting-hint">每次注入到上下文的伏笔数量</div>
+                                </div>
+                                <div style="flex:1;">
+                                    <label class="recall-setting-title">活跃上限</label>
+                                    <input type="number" id="recall-foreshadowing-max-active" class="text_pole" 
+                                           min="10" max="200" value="50" placeholder="50">
+                                    <div class="recall-setting-hint">超过则自动归档旧伏笔</div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- 智能去重 -->
+                        <div class="recall-setting-group" style="margin-bottom:15px;">
+                            <div style="font-weight:bold;margin-bottom:8px;">🔄 智能去重</div>
+                            
+                            <div class="recall-setting-group">
+                                <label class="recall-checkbox-label">
+                                    <input type="checkbox" id="recall-dedup-embedding-enabled" checked>
+                                    <span>启用语义去重</span>
+                                </label>
+                                <div class="recall-setting-hint">基于 Embedding 检测相似内容（需配置 Embedding API）</div>
+                            </div>
+                            
+                            <div class="recall-setting-row" style="display:flex;gap:10px;">
+                                <div style="flex:1;">
+                                    <label class="recall-setting-title">高相似度阈值</label>
+                                    <input type="number" id="recall-dedup-high-threshold" class="text_pole" 
+                                           min="0.8" max="0.99" step="0.01" value="0.92" placeholder="0.92">
+                                    <div class="recall-setting-hint">≥此值视为重复，自动跳过</div>
+                                </div>
+                                <div style="flex:1;">
+                                    <label class="recall-setting-title">低相似度阈值</label>
+                                    <input type="number" id="recall-dedup-low-threshold" class="text_pole" 
+                                           min="0.5" max="0.9" step="0.01" value="0.75" placeholder="0.75">
+                                    <div class="recall-setting-hint">≥此值提示可能重复</div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="recall-setting-actions">
+                            <button id="recall-load-capacity-config" class="menu_button">
+                                <i class="fa-solid fa-refresh"></i>
+                                <span>刷新配置</span>
+                            </button>
+                            <button id="recall-save-capacity-config" class="menu_button menu_button_icon">
+                                <i class="fa-solid fa-save"></i>
+                                <span>保存配置</span>
+                            </button>
+                        </div>
+                    </div>
+                    
                     <!-- 系统管理 -->
                     <div class="recall-settings-section recall-api-section">
                         <div class="recall-settings-section-title">
@@ -752,6 +856,10 @@ function createUI() {
     document.getElementById('recall-load-core-settings')?.addEventListener('click', safeExecute(loadCoreSettings, '加载核心设定失败'));
     document.getElementById('recall-save-core-settings')?.addEventListener('click', safeExecute(saveCoreSettings, '保存核心设定失败'));
     
+    // 容量限制配置相关事件绑定
+    document.getElementById('recall-load-capacity-config')?.addEventListener('click', safeExecute(loadCapacityConfig, '加载容量限制配置失败'));
+    document.getElementById('recall-save-capacity-config')?.addEventListener('click', safeExecute(saveCapacityConfig, '保存容量限制配置失败'));
+    
     // 系统管理相关事件绑定
     document.getElementById('recall-reload-config')?.addEventListener('click', safeExecute(reloadServerConfig, '热更新配置失败'));
     document.getElementById('recall-consolidate-memories')?.addEventListener('click', safeExecute(consolidateMemories, '整合记忆失败'));
@@ -787,6 +895,9 @@ function createUI() {
     
     // 初始化加载伏笔分析器配置
     loadForeshadowingAnalyzerConfig();
+    
+    // 初始化加载容量限制配置
+    loadCapacityConfig();
     
     // 回车键快捷搜索
     document.getElementById('recall-search-input')?.addEventListener('keypress', (e) => {
@@ -841,6 +952,92 @@ async function loadApiConfig() {
         console.log('[Recall] API 配置加载完成');
     } catch (e) {
         console.warn('[Recall] 加载 API 配置失败:', e);
+    }
+}
+
+/**
+ * 加载容量限制配置
+ */
+async function loadCapacityConfig() {
+    try {
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/config`);
+        const config = await response.json();
+        
+        if (config.capacity_limits) {
+            const limits = config.capacity_limits;
+            
+            // 持久条件配置
+            if (limits.context) {
+                document.getElementById('recall-context-max-per-type').value = limits.context.max_per_type || 30;
+                document.getElementById('recall-context-max-total').value = limits.context.max_total || 100;
+                document.getElementById('recall-context-decay-days').value = limits.context.decay_days || 7;
+                document.getElementById('recall-context-decay-rate').value = limits.context.decay_rate || 0.1;
+                document.getElementById('recall-context-min-confidence').value = limits.context.min_confidence || 0.3;
+            }
+            
+            // 伏笔配置
+            if (limits.foreshadowing) {
+                document.getElementById('recall-foreshadowing-max-return').value = limits.foreshadowing.max_return || 5;
+                document.getElementById('recall-foreshadowing-max-active').value = limits.foreshadowing.max_active || 50;
+            }
+            
+            // 去重配置
+            if (limits.dedup) {
+                document.getElementById('recall-dedup-embedding-enabled').checked = limits.dedup.embedding_enabled !== false;
+                document.getElementById('recall-dedup-high-threshold').value = limits.dedup.high_threshold || 0.92;
+                document.getElementById('recall-dedup-low-threshold').value = limits.dedup.low_threshold || 0.75;
+            }
+        }
+        
+        showToast('容量限制配置已加载', 'success');
+        console.log('[Recall] 容量限制配置加载完成');
+    } catch (e) {
+        console.warn('[Recall] 加载容量限制配置失败:', e);
+        showToast('加载容量限制配置失败: ' + e.message, 'error');
+    }
+}
+
+/**
+ * 保存容量限制配置
+ */
+async function saveCapacityConfig() {
+    try {
+        const configData = {
+            // 持久条件配置
+            context_max_per_type: parseInt(document.getElementById('recall-context-max-per-type').value) || 30,
+            context_max_total: parseInt(document.getElementById('recall-context-max-total').value) || 100,
+            context_decay_days: parseInt(document.getElementById('recall-context-decay-days').value) || 7,
+            context_decay_rate: parseFloat(document.getElementById('recall-context-decay-rate').value) || 0.1,
+            context_min_confidence: parseFloat(document.getElementById('recall-context-min-confidence').value) || 0.3,
+            // 伏笔配置
+            foreshadowing_max_return: parseInt(document.getElementById('recall-foreshadowing-max-return').value) || 5,
+            foreshadowing_max_active: parseInt(document.getElementById('recall-foreshadowing-max-active').value) || 50,
+            // 去重配置
+            dedup_embedding_enabled: document.getElementById('recall-dedup-embedding-enabled').checked,
+            dedup_high_threshold: parseFloat(document.getElementById('recall-dedup-high-threshold').value) || 0.92,
+            dedup_low_threshold: parseFloat(document.getElementById('recall-dedup-low-threshold').value) || 0.75
+        };
+        
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/config`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(configData)
+        });
+        
+        const result = await response.json();
+        
+        if (result.success !== false) {
+            showToast('容量限制配置已保存', 'success');
+            console.log('[Recall] 容量限制配置保存成功:', result);
+            
+            // 热更新配置
+            await fetch(`${pluginSettings.apiUrl}/v1/config/reload`, { method: 'POST' });
+        } else {
+            showToast('保存失败: ' + (result.message || '未知错误'), 'error');
+        }
+    } catch (e) {
+        console.error('[Recall] 保存容量限制配置失败:', e);
+        showToast('保存容量限制配置失败: ' + e.message, 'error');
     }
 }
 
