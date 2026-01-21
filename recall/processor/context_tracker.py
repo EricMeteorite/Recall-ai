@@ -246,26 +246,30 @@ class ContextTracker:
         # LLM 提取提示
         self.extraction_prompt = """分析以下对话内容，提取出应该作为"持久前提条件"的信息。
 
+【重要】只提取对话中**明确提到**的信息，**不要推测、脑补或添加对话中没有的内容**。
+如果对话内容很短或没有明确的背景信息，请返回空数组 []。
+
 持久前提条件是指：一旦确立就应该在后续所有对话中默认成立的背景信息。
 
-例如：
-- "我是一个大学毕业生，想创业" → 后续所有建议都应基于这个身份
-- "我在Windows上开发，但要部署到Ubuntu" → 后续所有代码建议都应考虑这个环境
-- "这个角色是一个冷酷的剑士" → 后续角色行为都应符合这个设定
-- "截止日期是下周五" → 所有建议都应考虑这个时间约束
-- "角色目前处于愤怒状态" → 后续对话应体现这个情绪
-- "角色会治愈魔法" → 后续可以使用这个技能
-- "角色携带一把魔法剑" → 后续可以使用这个道具
+合适的例子（对话中明确提到的）：
+- 对话说"我是一个大学毕业生，想创业" → 可以提取
+- 对话说"角色拿起了魔法剑" → 可以提取"角色携带魔法剑"
+- 对话说"露西有黑客技能" → 可以提取技能信息
+
+不合适的例子（对话中没有明确提到的）：
+- 对话只是普通聊天 → 不要编造角色特征
+- 对话没有提到具体技能 → 不要猜测角色可能有什么技能
+- 对话没有提到关系 → 不要推测角色之间的关系
 
 对话内容：
 {content}
 
-请以JSON格式返回提取的条件（如果没有则返回空数组）：
+请以JSON格式返回提取的条件（如果没有明确的条件则返回空数组 []）：
 [
-  {{"type": "user_identity|user_goal|user_preference|environment|project|time_constraint|character_trait|world_setting|relationship|emotional_state|skill_ability|item_prop|assumption|constraint|custom", "content": "条件内容", "keywords": ["关键词1", "关键词2"]}}
+  {{"type": "user_identity|user_goal|user_preference|environment|project|time_constraint|character_trait|world_setting|relationship|emotional_state|skill_ability|item_prop|assumption|constraint|custom", "content": "条件内容（必须是对话中明确提到的）", "keywords": ["关键词1", "关键词2"]}}
 ]
 
-只返回JSON，不要其他解释。"""
+只返回JSON，不要其他解释。如果没有找到明确的条件，返回 []。"""
     
     def _sanitize_path_component(self, name: str) -> str:
         """清理路径组件中的非法字符"""

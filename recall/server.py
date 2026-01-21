@@ -610,8 +610,9 @@ async def add_memory(request: AddMemoryRequest):
     else:
         print(f"[Recall] 记忆保存跳过: {result.message}")
     
-    # 【重要】只在保存用户消息时自动提取条件（而不是每次 build_context）
-    # 这避免了切换角色/生成时重复提取导致条件数量爆炸
+    # 【重要】自动提取条件 - 只处理用户消息，避免AI回复产生大量无意义条件
+    # AI 回复中的角色特征等信息应该来自角色卡设定，不需要重复提取
+    # 只在成功保存的用户消息中提取条件
     if role == 'user' and result.success:
         try:
             # 在后台异步提取条件，不阻塞响应

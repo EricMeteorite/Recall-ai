@@ -715,21 +715,10 @@ class RecallEngine:
             except Exception as e:
                 print(f"[Recall] 知识图谱更新失败（不影响主流程）: {e}")
             
-            # 7. 自动提取持久条件（如果内容包含身份、目标、环境等信息）
-            try:
-                self.context_tracker.extract_from_text(content, user_id)
-                
-                # 每添加10条记忆，检查一次是否需要压缩持久条件
-                if not hasattr(self, '_add_count'):
-                    self._add_count = {}
-                self._add_count[user_id] = self._add_count.get(user_id, 0) + 1
-                
-                if self._add_count[user_id] % 10 == 0:
-                    reduced = self.context_tracker.consolidate_contexts(user_id=user_id)
-                    if reduced > 0:
-                        print(f"[Recall] 持久条件压缩: 减少了 {reduced} 个冗余条件")
-            except Exception:
-                pass  # 静默失败，不影响主流程
+            # 7. 自动提取持久条件（已移至 server.py 中处理，避免 character_id 传递问题）
+            # 注意：之前这里调用 extract_from_text 时没有传递 character_id，
+            # 导致所有条件都存储到 "default" 角色下，与其他角色数据混淆。
+            # 现在由 server.py 在添加记忆后正确传递 character_id 来提取条件。
             
             # 记录性能
             try:

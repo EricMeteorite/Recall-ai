@@ -2376,6 +2376,7 @@ async function onMessageSent(messageIndex) {
             metadata: { 
                 role: 'user', 
                 source: 'sillytavern',
+                character_id: currentCharacterId || 'default',
                 timestamp: Date.now()
             }
         }).then(result => {
@@ -2502,6 +2503,7 @@ async function onMessageReceived(messageIndex) {
                     role: 'assistant', 
                     source: 'sillytavern',
                     character: message.name || 'AI',
+                    character_id: currentCharacterId || 'default',
                     timestamp: timestamp,
                     // 分段信息
                     ...(isMultiPart && {
