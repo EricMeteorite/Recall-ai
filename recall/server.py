@@ -676,6 +676,8 @@ async def list_memories(
         limit=limit
     )
     
+    print(f"[Recall] 获取记忆列表: user={user_id}, offset={offset}, limit={limit}, 返回={len(memories)}, total={total_count}")
+    
     return {
         "memories": memories, 
         "count": len(memories),
@@ -741,12 +743,14 @@ async def clear_memories(
     
     # 使用高效的计数方法获取数量
     count = engine.count_memories(user_id=user_id)
+    print(f"[Recall] 清空记忆请求: user={user_id}, 后端计数={count}")
     
     if count == 0:
         return {"success": True, "message": "该角色没有记忆数据", "deleted_count": 0}
     
     # 清空
     success = engine.clear(user_id=user_id)
+    print(f"[Recall] 清空记忆完成: user={user_id}, success={success}")
     
     if success:
         return {
