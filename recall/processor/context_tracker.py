@@ -513,11 +513,10 @@ class ContextTracker:
         
         # 如果启用了Embedding去重
         if dedup_config['enabled']:
-            # 尝试获取缺失的Embedding
-            if emb1 is None:
-                emb1 = self._get_embedding(text1)
-            if emb2 is None:
-                emb2 = self._get_embedding(text2)
+            # 优化：只有当新内容的 embedding 已经计算好时，才使用 embedding 比较
+            # 不要为旧数据（没有存储 embedding）调用 API，避免 N 次调用
+            # emb2 是新内容的 embedding（调用方应该预先计算好）
+            # emb1 是现有条件的 embedding（应该从存储中读取，如果没有就跳过）
             
             # 如果两边都有Embedding，使用余弦相似度
             if emb1 is not None and emb2 is not None:

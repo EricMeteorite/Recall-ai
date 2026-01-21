@@ -2,7 +2,7 @@
 
 import os
 import json
-from typing import List, Tuple, Optional, Any
+from typing import List, Tuple, Optional, Any, Dict
 
 import numpy as np
 
@@ -227,6 +227,60 @@ class VectorIndex:
                 results.append((doc_id, float(dist)))
         
         return results
+    
+    def get_vector_by_doc_id(self, doc_id: Any) -> Optional[np.ndarray]:
+        """通过文档ID获取已存储的向量
+        
+        用于 L6 精排等场景，避免重复调用 encode() API
+        
+        Args:
+            doc_id: 文档ID
+            
+        Returns:
+            存储的向量，如果不存在则返回 None
+        """
+        if not self._enabled or self._index is None:
+            return None
+        
+        try:
+            # 查找 doc_id 在 turn_mapping 中的索引位置
+            if doc_id in self.turn_mapping:
+                idx = self.turn_mapping.index(doc_id)
+                # 使用 FAISS 的 reconstruct 方法获取已存储的向量
+                return self.index.reconstruct(idx)
+        except Exception:
+            pass
+        return None
+    
+    def get_vectors_by_doc_ids(self, doc_ids: List[Any]) -> Dict[Any, np.ndarray]:
+        """批量获取已存储的向量
+        
+        Args:
+            doc_ids: 文档ID列表
+            
+        Returns:
+            文档ID到向量的映射
+        """
+        if not self._enabled or self._index is None:
+            return {}
+        
+        result = {}
+        # 构建 doc_id -> index 的映射（避免重复查找）
+        doc_id_to_idx = {}
+        for idx, did in enumerate(self.turn_mapping):
+            if did in doc_ids:
+                doc_id_to_idx[did] = idx
+        
+        # 批量获取向量
+        for doc_id in doc_ids:
+            if doc_id in doc_id_to_idx:
+                try:
+                    idx = doc_id_to_idx[doc_id]
+                    result[doc_id] = self.index.reconstruct(idx)
+                except Exception:
+                    pass
+        
+        return result
     
     def close(self):
         """关闭并保存"""

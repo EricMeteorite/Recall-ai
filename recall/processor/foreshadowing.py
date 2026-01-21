@@ -235,16 +235,16 @@ class ForeshadowingTracker:
             
             # 计算相似度
             if dedup_config['enabled']:
-                # 尝试获取缺失的Embedding
+                # 优化：直接使用传入的 embedding，不在循环内调用 API
+                # emb1: 已有伏笔的 embedding（从存储中读取）
+                # new_embedding: 新内容的 embedding（调用方预先计算好）
                 emb1 = fsh._embedding
-                emb2 = new_embedding
-                if emb2 is None:
-                    emb2 = self._get_embedding(content)
                 
-                if emb1 is not None and emb2 is not None:
-                    sim = self._compute_embedding_similarity(emb1, emb2)
+                if emb1 is not None and new_embedding is not None:
+                    sim = self._compute_embedding_similarity(emb1, new_embedding)
                     method = "embedding"
                 else:
+                    # 如果任意一方没有 embedding，回退到词重叠
                     sim = self._compute_word_similarity(fsh.content, content)
                     method = "word"
             else:

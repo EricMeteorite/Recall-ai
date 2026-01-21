@@ -294,10 +294,10 @@ class EightLayerRetriever:
         query: str,
         results: List[RetrievalResult]
     ) -> List[RetrievalResult]:
-        """L6 向量精排 - 重新计算精确的余弦相似度
+        """L6 向量精排 - 使用已存储的向量计算精确相似度
         
-        对 L5 粗筛的候选结果，使用查询向量和文档向量计算精确相似度。
-        这比 L5 的近似最近邻搜索更精确。
+        优化：直接从 FAISS 索引获取已存储的文档向量，
+        避免重复调用 encode() API（这会消耗大量配额）。
         
         Args:
             query: 查询文本
@@ -313,34 +313,37 @@ class EightLayerRetriever:
         try:
             import numpy as np
             
-            # 1. 获取查询向量
+            # 1. 获取查询向量（只需要编码一次）
             query_embedding = self.vector_index.encode(query)
             query_embedding = query_embedding / np.linalg.norm(query_embedding)  # 归一化
             
-            # 2. 对每个候选文档计算精确相似度
+            # 2. 批量获取候选文档的已存储向量（不调用 API！）
+            doc_ids = [r.id for r in results]
+            stored_vectors = {}
+            if hasattr(self.vector_index, 'get_vectors_by_doc_ids'):
+                stored_vectors = self.vector_index.get_vectors_by_doc_ids(doc_ids)
+            
+            # 3. 对每个候选文档计算精确相似度
             for result in results:
-                content = result.content
-                if not content:
-                    continue
+                doc_id = result.id
                 
-                try:
-                    # 计算文档向量
-                    doc_embedding = self.vector_index.encode(content)
+                # 优先使用已存储的向量
+                if doc_id in stored_vectors:
+                    doc_embedding = stored_vectors[doc_id]
                     doc_embedding = doc_embedding / np.linalg.norm(doc_embedding)  # 归一化
                     
-                    # 计算余弦相似度（归一化后的内积）
+                    # 计算余弦相似度
                     cosine_sim = float(np.dot(query_embedding, doc_embedding))
                     
-                    # 更新分数（保留原始分数的一部分作为参考）
-                    # 新分数 = 0.7 * 精确相似度 + 0.3 * 原始分数
+                    # 更新分数
                     result.score = 0.7 * cosine_sim + 0.3 * result.score
                     result.metadata['l6_cosine_sim'] = cosine_sim
-                    
-                except Exception as e:
-                    # 单个文档编码失败，保持原分数
-                    result.metadata['l6_error'] = str(e)
+                    result.metadata['l6_source'] = 'stored_vector'
+                else:
+                    # 没有存储的向量（可能是旧数据），保持原分数
+                    result.metadata['l6_source'] = 'no_vector'
             
-            # 3. 按新分数排序
+            # 4. 按新分数排序
             return sorted(results, key=lambda r: -r.score)
             
         except Exception as e:
