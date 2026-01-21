@@ -675,13 +675,16 @@ class RecallEngine:
                     # VectorIndex.add_text 接受 (turn_id, text)
                     self._vector_index.add_text(memory_id, content)
             except Exception as e:
-                print(f"[Recall] 索引更新失败（不影响主流程）: {e}")
+                # 打印更详细的错误信息
+                import traceback
+                print(f"[Recall] 索引更新失败（不影响主流程）: {type(e).__name__}: {e}")
+                traceback.print_exc()
             
             # 5.5 缓存内容到检索器（确保检索时能获取内容）
             try:
                 self.retriever.cache_content(memory_id, content)
             except Exception as e:
-                print(f"[Recall] 缓存更新失败（不影响主流程）: {e}")
+                print(f"[Recall] 缓存更新失败（不影响主流程）: {type(e).__name__}: {e}")
             
             # 5.6 更新长期记忆（L1 ConsolidatedMemory）
             # 每个实体都会被自动整合和验证
