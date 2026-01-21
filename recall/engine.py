@@ -172,10 +172,16 @@ class RecallEngine:
         llm_api_key: Optional[str]
     ):
         """初始化各组件"""
-        # LLM客户端
-        model = llm_model or self.config.get('llm', {}).get('model', 'gpt-3.5-turbo')
-        api_key = llm_api_key or os.environ.get('OPENAI_API_KEY')
-        self.llm_client = LLMClient(model=model, api_key=api_key) if api_key else None
+        # LLM客户端（优先使用 LLM_API_KEY，兼容旧的 OPENAI_API_KEY）
+        model = llm_model or os.environ.get('LLM_MODEL') or self.config.get('llm', {}).get('model', 'gpt-4o-mini')
+        api_key = llm_api_key or os.environ.get('LLM_API_KEY') or os.environ.get('OPENAI_API_KEY')
+        api_base = os.environ.get('LLM_API_BASE')
+        self.llm_client = LLMClient(model=model, api_key=api_key, api_base=api_base) if api_key else None
+        
+        if self.llm_client:
+            print(f"[Recall] LLM 客户端已初始化 (模型: {model})")
+        else:
+            print("[Recall] LLM 客户端未初始化（未配置 LLM_API_KEY）")
         
         # 存储层
         self.storage = MultiTenantStorage(

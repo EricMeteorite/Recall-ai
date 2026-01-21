@@ -35,8 +35,9 @@ class LLMClient:
         max_retries: int = 3
     ):
         self.model = model
-        self.api_key = api_key or os.environ.get('OPENAI_API_KEY')
-        self.api_base = api_base
+        # 优先使用 LLM_API_KEY，兼容旧的 OPENAI_API_KEY
+        self.api_key = api_key or os.environ.get('LLM_API_KEY') or os.environ.get('OPENAI_API_KEY')
+        self.api_base = api_base or os.environ.get('LLM_API_BASE')
         self.timeout = timeout
         self.max_retries = max_retries
         

@@ -97,8 +97,8 @@ class RecallInit:
         print("   不会在用户目录或系统目录创建任何文件。")
         print("   你需要自己的 AI API key 来调用大模型。\n")
         
-        # 获取 API key
-        api_key = os.environ.get('OPENAI_API_KEY')
+        # 获取 API key（优先 LLM_API_KEY，兼容 OPENAI_API_KEY）
+        api_key = os.environ.get('LLM_API_KEY') or os.environ.get('OPENAI_API_KEY')
         if not api_key:
             print("支持的 API 提供商：")
             print("  - OpenAI (sk-xxx)")

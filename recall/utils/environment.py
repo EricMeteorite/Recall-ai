@@ -92,8 +92,8 @@ class EnvironmentManager:
                 'version': '3.0.0',
                 'data_root': str(self.data_root),
                 'llm': {
-                    'model': 'gpt-3.5-turbo',
-                    'api_key_env': 'OPENAI_API_KEY'
+                    'model': 'gpt-4o-mini',
+                    'api_key_env': 'LLM_API_KEY'  # 优先使用 LLM_API_KEY，兼容 OPENAI_API_KEY
                 },
                 'storage': {
                     'max_memories_per_user': 10000,
