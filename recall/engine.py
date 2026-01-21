@@ -1585,6 +1585,71 @@ class RecallEngine:
     
     # ==================== 管理 API ====================
     
+    def rebuild_vector_index(self, user_id: Optional[str] = None) -> Dict[str, Any]:
+        """重建向量索引
+        
+        从现有记忆数据重新生成向量索引，用于修复维度不匹配等问题。
+        
+        Args:
+            user_id: 可选，指定只重建某个用户的索引。为 None 时重建所有用户。
+            
+        Returns:
+            Dict: 包含 success, message, indexed_count 等信息
+        """
+        if self._vector_index is None:
+            return {
+                'success': False,
+                'message': '向量索引未启用',
+                'indexed_count': 0
+            }
+        
+        # 收集需要索引的记忆
+        memories_to_index = []
+        
+        if user_id:
+            # 只重建指定用户
+            scope = self.storage.get_scope(user_id)
+            for m in scope.get_all():
+                memory_id = m.get('id', '')
+                content = m.get('content', m.get('memory', ''))
+                if memory_id and content:
+                    memories_to_index.append((memory_id, content))
+            print(f"[Recall] 重建向量索引: user={user_id}, 记忆数={len(memories_to_index)}")
+        else:
+            # 重建所有用户
+            for scope_key, scope in self.storage._scopes.items():
+                for m in scope.get_all():
+                    memory_id = m.get('id', '')
+                    content = m.get('content', m.get('memory', ''))
+                    if memory_id and content:
+                        memories_to_index.append((memory_id, content))
+            print(f"[Recall] 重建向量索引: 全部用户, 记忆数={len(memories_to_index)}")
+        
+        if not memories_to_index:
+            return {
+                'success': True,
+                'message': '没有需要索引的记忆',
+                'indexed_count': 0
+            }
+        
+        # 调用向量索引的重建方法
+        try:
+            indexed_count = self._vector_index.rebuild_from_memories(memories_to_index)
+            return {
+                'success': True,
+                'message': f'向量索引重建完成',
+                'indexed_count': indexed_count,
+                'total_memories': len(memories_to_index)
+            }
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return {
+                'success': False,
+                'message': f'重建失败: {e}',
+                'indexed_count': 0
+            }
+    
     def get_stats(self, user_id: Optional[str] = None) -> Dict[str, Any]:
         """获取详细统计信息
         

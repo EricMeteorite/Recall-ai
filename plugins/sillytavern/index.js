@@ -524,6 +524,36 @@ function createUI() {
                             <div class="recall-setting-hint">💡 可手动填写，或点击"测试连接"自动检测</div>
                         </div>
                         
+                        <div class="recall-setting-group">
+                            <label class="recall-setting-title">Embedding 模式</label>
+                            <select id="recall-embedding-mode" class="text_pole">
+                                <option value="">自动选择</option>
+                                <option value="custom">自定义 API（推荐）</option>
+                                <option value="siliconflow">硅基流动</option>
+                                <option value="openai">OpenAI</option>
+                                <option value="local">本地模型</option>
+                                <option value="none">禁用（仅关键词搜索）</option>
+                            </select>
+                            <div class="recall-setting-hint">选择 Embedding 后端，自定义 API 适用于中转站等</div>
+                        </div>
+                        
+                        <div class="recall-setting-group">
+                            <div style="font-weight:bold;margin-bottom:8px;">⚡ API 速率限制</div>
+                            <div class="recall-setting-row" style="display:flex;gap:10px;">
+                                <div style="flex:1;">
+                                    <label class="recall-setting-title">最大请求数</label>
+                                    <input type="number" id="recall-embedding-rate-limit" class="text_pole" 
+                                           placeholder="60" min="1" max="1000">
+                                </div>
+                                <div style="flex:1;">
+                                    <label class="recall-setting-title">时间窗口（秒）</label>
+                                    <input type="number" id="recall-embedding-rate-window" class="text_pole" 
+                                           placeholder="60" min="1" max="3600">
+                                </div>
+                            </div>
+                            <div class="recall-setting-hint">限制 API 调用频率，适合免费或有配额限制的 API</div>
+                        </div>
+                        
                         <div class="recall-setting-actions">
                             <button id="recall-test-embedding" class="menu_button">
                                 <i class="fa-solid fa-flask-vial"></i>
@@ -759,6 +789,10 @@ function createUI() {
                                 <i class="fa-solid fa-compress"></i>
                                 <span>整合记忆</span>
                             </button>
+                            <button id="recall-rebuild-vector-index" class="menu_button" title="重建向量索引">
+                                <i class="fa-solid fa-database"></i>
+                                <span>重建向量索引</span>
+                            </button>
                             <button id="recall-show-stats" class="menu_button" title="查看统计">
                                 <i class="fa-solid fa-chart-bar"></i>
                                 <span>系统统计</span>
@@ -856,6 +890,9 @@ function createUI() {
     document.getElementById('recall-load-core-settings')?.addEventListener('click', safeExecute(loadCoreSettings, '加载核心设定失败'));
     document.getElementById('recall-save-core-settings')?.addEventListener('click', safeExecute(saveCoreSettings, '保存核心设定失败'));
     
+    // 重建向量索引
+    document.getElementById('recall-rebuild-vector-index')?.addEventListener('click', safeExecute(onRebuildVectorIndex, '重建向量索引失败'));
+    
     // 容量限制配置相关事件绑定
     document.getElementById('recall-load-capacity-config')?.addEventListener('click', safeExecute(loadCapacityConfig, '加载容量限制配置失败'));
     document.getElementById('recall-save-capacity-config')?.addEventListener('click', safeExecute(saveCapacityConfig, '保存容量限制配置失败'));
@@ -931,6 +968,19 @@ async function loadApiConfig() {
             // 维度：如果已配置则显示，否则留空让用户通过测试连接自动检测
             const dimValue = emb.dimension && emb.dimension !== '未配置' ? emb.dimension : '';
             document.getElementById('recall-embedding-dimension').value = dimValue;
+            
+            // 加载模式
+            if (emb.mode) {
+                document.getElementById('recall-embedding-mode').value = emb.mode;
+            }
+            
+            // 加载速率限制
+            if (emb.rate_limit) {
+                document.getElementById('recall-embedding-rate-limit').value = emb.rate_limit;
+            }
+            if (emb.rate_window) {
+                document.getElementById('recall-embedding-rate-window').value = emb.rate_window;
+            }
             
             // 更新状态指示器
             updateEmbeddingStatus(emb.api_key_status);
@@ -1383,6 +1433,9 @@ async function onSaveEmbeddingConfig() {
     const embBase = document.getElementById('recall-embedding-api-base').value.trim();
     const embModel = getModelSelectValue('recall-embedding-model', 'recall-embedding-model-custom');
     const embDim = document.getElementById('recall-embedding-dimension').value.trim();
+    const embMode = document.getElementById('recall-embedding-mode').value;
+    const embRateLimit = document.getElementById('recall-embedding-rate-limit').value.trim();
+    const embRateWindow = document.getElementById('recall-embedding-rate-window').value.trim();
     
     const configData = {};
     
@@ -1393,6 +1446,9 @@ async function onSaveEmbeddingConfig() {
     if (embBase) configData.embedding_api_base = embBase;
     if (embModel) configData.embedding_model = embModel;
     if (embDim) configData.embedding_dimension = parseInt(embDim);
+    if (embMode) configData.recall_embedding_mode = embMode;
+    if (embRateLimit) configData.embedding_rate_limit = parseInt(embRateLimit);
+    if (embRateWindow) configData.embedding_rate_window = parseInt(embRateWindow);
     
     if (Object.keys(configData).length === 0) {
         alert('请填写配置项');
@@ -3184,6 +3240,59 @@ async function consolidatePersistentContexts() {
         }
     } catch (e) {
         console.error('[Recall] 压缩持久条件失败:', e);
+    }
+}
+
+/**
+ * 重建向量索引
+ */
+async function onRebuildVectorIndex() {
+    if (!isConnected) {
+        alert('请先连接 Recall 服务');
+        return;
+    }
+    
+    // 确认对话框
+    const confirmMsg = currentCharacterId 
+        ? `确定要重建「${currentCharacterId}」的向量索引吗？\n\n这将从现有记忆重新生成向量索引，用于修复语义搜索问题。` 
+        : '确定要重建所有用户的向量索引吗？\n\n这将从现有记忆重新生成向量索引，用于修复语义搜索问题。';
+    
+    if (!confirm(confirmMsg)) return;
+    
+    const btn = document.getElementById('recall-rebuild-vector-index');
+    const originalText = btn?.innerHTML;
+    
+    try {
+        // 显示加载状态
+        if (btn) {
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>重建中...</span>';
+            btn.disabled = true;
+        }
+        
+        const userId = currentCharacterId ? encodeURIComponent(currentCharacterId) : '';
+        const url = userId 
+            ? `${pluginSettings.apiUrl}/v1/indexes/rebuild-vector?user_id=${userId}`
+            : `${pluginSettings.apiUrl}/v1/indexes/rebuild-vector`;
+        
+        const response = await fetch(url, { method: 'POST' });
+        const result = await response.json();
+        
+        if (result.success) {
+            alert(`✅ 向量索引重建完成！\n\n成功索引: ${result.indexed_count}/${result.total_memories} 条记忆`);
+            console.log('[Recall] 向量索引重建完成:', result);
+        } else {
+            alert(`❌ 重建失败: ${result.message}`);
+            console.error('[Recall] 向量索引重建失败:', result);
+        }
+    } catch (e) {
+        console.error('[Recall] 重建向量索引失败:', e);
+        alert('重建向量索引失败: ' + e.message);
+    } finally {
+        // 恢复按钮状态
+        if (btn && originalText) {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        }
     }
 }
 

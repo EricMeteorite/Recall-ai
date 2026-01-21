@@ -1346,6 +1346,24 @@ async def get_stats():
     return engine.get_stats()
 
 
+@app.post("/v1/indexes/rebuild-vector", tags=["Admin"])
+async def rebuild_vector_index(user_id: Optional[str] = None):
+    """重建向量索引
+    
+    从现有记忆数据重新生成向量索引。
+    用于修复维度不匹配、索引损坏等问题。
+    
+    Args:
+        user_id: 可选，指定只重建某个用户的索引。为空时重建所有用户。
+        
+    注意：重建过程会消耗较多时间和 API 调用（如果使用 API embedding）。
+    """
+    engine = get_engine()
+    print(f"[Recall] 收到重建向量索引请求: user_id={user_id}")
+    result = engine.rebuild_vector_index(user_id)
+    return result
+
+
 @app.get("/v1/users", tags=["Admin"])
 async def list_users():
     """列出所有用户（角色）
@@ -2037,6 +2055,8 @@ class ConfigUpdateRequest(BaseModel):
     embedding_model: Optional[str] = Field(default=None, description="Embedding 模型")
     embedding_dimension: Optional[int] = Field(default=None, description="向量维度")
     recall_embedding_mode: Optional[str] = Field(default=None, description="Embedding 模式")
+    embedding_rate_limit: Optional[int] = Field(default=None, description="API 速率限制（每时间窗口最大请求数）")
+    embedding_rate_window: Optional[int] = Field(default=None, description="速率限制时间窗口（秒）")
     # LLM 配置
     llm_api_key: Optional[str] = Field(default=None, description="LLM API Key")
     llm_api_base: Optional[str] = Field(default=None, description="LLM API 地址")
@@ -2087,6 +2107,8 @@ async def update_config(request: ConfigUpdateRequest):
         'embedding_model': 'EMBEDDING_MODEL',
         'embedding_dimension': 'EMBEDDING_DIMENSION',
         'recall_embedding_mode': 'RECALL_EMBEDDING_MODE',
+        'embedding_rate_limit': 'EMBEDDING_RATE_LIMIT',
+        'embedding_rate_window': 'EMBEDDING_RATE_WINDOW',
         'llm_api_key': 'LLM_API_KEY',
         'llm_api_base': 'LLM_API_BASE',
         'llm_model': 'LLM_MODEL',
@@ -2221,7 +2243,9 @@ async def get_full_config():
         "api_base": os.environ.get('EMBEDDING_API_BASE', ''),
         "model": os.environ.get('EMBEDDING_MODEL', ''),
         "dimension": os.environ.get('EMBEDDING_DIMENSION', ''),
-        "mode": os.environ.get('RECALL_EMBEDDING_MODE', 'auto'),
+        "mode": os.environ.get('RECALL_EMBEDDING_MODE', ''),
+        "rate_limit": os.environ.get('EMBEDDING_RATE_LIMIT', ''),
+        "rate_window": os.environ.get('EMBEDDING_RATE_WINDOW', ''),
     }
     
     # LLM 配置

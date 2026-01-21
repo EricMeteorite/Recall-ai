@@ -167,6 +167,16 @@ class VectorIndex:
         if embedding.ndim == 1:
             embedding = embedding.reshape(1, -1)
         
+        # 检查维度是否匹配，不匹配则重建索引
+        embedding_dim = embedding.shape[1]
+        if self.index.d != embedding_dim:
+            import faiss
+            print(f"[VectorIndex] 运行时维度不匹配: 索引维度={self.index.d}, 向量维度={embedding_dim}")
+            print(f"[VectorIndex] 正在重建索引...")
+            self._index = faiss.IndexFlatIP(embedding_dim)
+            self.turn_mapping = []
+            self._save_config()
+        
         self.index.add(embedding)
         self.turn_mapping.append(doc_id)
         
@@ -190,6 +200,12 @@ class VectorIndex:
             return []
         
         query_embedding = self.encode(query).reshape(1, -1)
+        
+        # 检查维度是否匹配
+        if query_embedding.shape[1] != self.index.d:
+            print(f"[VectorIndex] 搜索时维度不匹配: 索引维度={self.index.d}, 查询维度={query_embedding.shape[1]}")
+            print(f"[VectorIndex] 向量索引需要重建，暂时返回空结果")
+            return []
         
         distances, indices = self.index.search(
             query_embedding, 
@@ -287,6 +303,50 @@ class VectorIndex:
         self._save()
         if self._embedding_backend:
             self._embedding_backend.clear_cache()
+    
+    def rebuild_from_memories(self, memories: List[Tuple[str, str]]) -> int:
+        """从记忆数据重建向量索引
+        
+        Args:
+            memories: [(memory_id, content), ...] 记忆列表
+            
+        Returns:
+            成功索引的记忆数量
+        """
+        if not self._enabled:
+            print("[VectorIndex] 向量索引未启用，跳过重建")
+            return 0
+        
+        import faiss
+        
+        # 清空现有索引
+        self._index = faiss.IndexFlatIP(self.dimension)
+        self.turn_mapping = []
+        
+        print(f"[VectorIndex] 开始重建向量索引，共 {len(memories)} 条记忆...")
+        
+        success_count = 0
+        for i, (memory_id, content) in enumerate(memories):
+            try:
+                embedding = self.encode(content)
+                if embedding.ndim == 1:
+                    embedding = embedding.reshape(1, -1)
+                self._index.add(embedding)
+                self.turn_mapping.append(memory_id)
+                success_count += 1
+                
+                # 每 50 条打印进度
+                if (i + 1) % 50 == 0:
+                    print(f"[VectorIndex] 重建进度: {i + 1}/{len(memories)}")
+            except Exception as e:
+                print(f"[VectorIndex] 记忆 {memory_id} 索引失败: {e}")
+        
+        # 保存
+        self._save()
+        self._save_config()
+        
+        print(f"[VectorIndex] 重建完成: 成功 {success_count}/{len(memories)}")
+        return success_count
     
     def get_stats(self) -> dict:
         """获取统计信息"""
