@@ -1082,9 +1082,10 @@ async def _background_foreshadowing_analysis(engine: RecallEngine, content: str,
     设置 60 秒超时，防止 LLM 调用卡住导致线程池耗尽。
     """
     try:
+        print(f"[Recall] 后台伏笔分析任务开始: user={user_id}, role={role}, content_len={len(content)}")
         # 在线程池中运行同步的分析方法，避免阻塞事件循环
         loop = asyncio.get_event_loop()
-        await asyncio.wait_for(
+        result = await asyncio.wait_for(
             loop.run_in_executor(
                 None,  # 使用默认线程池
                 lambda: engine.on_foreshadowing_turn(
@@ -1096,6 +1097,7 @@ async def _background_foreshadowing_analysis(engine: RecallEngine, content: str,
             ),
             timeout=60.0  # 60秒超时
         )
+        print(f"[Recall] 后台伏笔分析任务完成: triggered={result.triggered}, error={result.error}")
     except asyncio.TimeoutError:
         print(f"[Recall] 后台伏笔分析超时 (>60s)")
     except Exception as e:

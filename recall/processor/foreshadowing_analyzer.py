@@ -430,7 +430,9 @@ Important:
         
         # 检查是否应该触发分析（仅 LLM 模式）
         if self.config.backend == AnalyzerBackend.LLM:
-            if self._turn_counters[cache_key] >= self.config.trigger_interval:
+            current_count = self._turn_counters[cache_key]
+            if current_count >= self.config.trigger_interval:
+                print(f"[Recall] 伏笔分析触发: user={cache_key}, turn_count={current_count}, interval={self.config.trigger_interval}")
                 self._turn_counters[cache_key] = 0
                 return self._trigger_llm_analysis(user_id, character_id)
         
@@ -571,11 +573,13 @@ Important:
             )
             
             # 调用 LLM
+            print(f"[Recall] 正在调用 LLM 分析伏笔... (user={cache_key}, 对话数={len(conversations)})")
             response = self._llm_client.chat(
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.3,  # 低温度，更确定性
                 max_tokens=1000
             )
+            print(f"[Recall] LLM 响应已收到 ({len(response.content)} 字符)")
             
             # 解析结果
             result = self._parse_llm_response(response.content)
@@ -624,9 +628,12 @@ Important:
             # 清空已分析的缓冲区
             self._buffers[cache_key] = []
             
+            print(f"[Recall] 伏笔分析完成: 新伏笔={len(result.new_foreshadowings)}, 可能解决={len(result.potentially_resolved)}")
+            
             return result
             
         except Exception as e:
+            print(f"[Recall] 伏笔 LLM 分析异常: {e}")
             return AnalysisResult(
                 triggered=True,
                 error=f"LLM 分析失败: {str(e)}"
