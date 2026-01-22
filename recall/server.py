@@ -1929,7 +1929,6 @@ async def get_config():
         "capacity_limits": {
             "context": {
                 "trigger_interval": context_trigger_interval,
-                "max_context_turns": context_max_context_turns,
                 "max_per_type": context_max_per_type,
                 "max_total": context_max_total,
                 "decay_days": context_decay_days,
@@ -1937,6 +1936,7 @@ async def get_config():
                 "min_confidence": context_min_confidence
             },
             "build_context": {
+                "max_context_turns": context_max_context_turns,
                 "include_recent": build_context_include_recent,
                 "proactive_reminder_enabled": proactive_reminder_enabled,
                 "proactive_reminder_turns": proactive_reminder_turns
