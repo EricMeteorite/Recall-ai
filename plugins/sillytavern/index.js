@@ -1238,11 +1238,11 @@ async function loadCapacityConfig() {
             }
         }
         
-        showToast('容量限制配置已加载', 'success');
+        toastr.success('容量限制配置已加载', 'Recall');
         console.log('[Recall] 容量限制配置加载完成');
     } catch (e) {
         console.warn('[Recall] 加载容量限制配置失败:', e);
-        showToast('加载容量限制配置失败: ' + e.message, 'error');
+        toastr.error('加载容量限制配置失败: ' + e.message, 'Recall');
     }
 }
 
@@ -1282,17 +1282,17 @@ async function saveCapacityConfig() {
         const result = await response.json();
         
         if (result.success !== false) {
-            showToast('容量限制配置已保存', 'success');
+            toastr.success('容量限制配置已保存', 'Recall');
             console.log('[Recall] 容量限制配置保存成功:', result);
             
             // 热更新配置
             await fetch(`${pluginSettings.apiUrl}/v1/config/reload`, { method: 'POST' });
         } else {
-            showToast('保存失败: ' + (result.message || '未知错误'), 'error');
+            toastr.error('保存失败: ' + (result.message || '未知错误'), 'Recall');
         }
     } catch (e) {
         console.error('[Recall] 保存容量限制配置失败:', e);
-        showToast('保存容量限制配置失败: ' + e.message, 'error');
+        toastr.error('保存容量限制配置失败: ' + e.message, 'Recall');
     }
 }
 
