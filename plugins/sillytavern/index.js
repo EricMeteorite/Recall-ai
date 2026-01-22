@@ -2507,17 +2507,36 @@ const memorySaveQueue = {
  * 【优化】使用队列保存，不阻塞消息发送
  */
 async function onMessageSent(messageIndex) {
-    if (!pluginSettings.enabled || !isConnected) return;
+    console.log(`[Recall] MESSAGE_SENT 事件触发, messageIndex=${messageIndex}, enabled=${pluginSettings.enabled}, connected=${isConnected}`);
+    
+    if (!pluginSettings.enabled || !isConnected) {
+        console.log('[Recall] 消息保存跳过: 插件未启用或未连接');
+        return;
+    }
     
     try {
         const context = SillyTavern.getContext();
         const chat = context.chat;
         const message = chat[messageIndex];
         
-        if (!message || !message.mes) return;
+        console.log(`[Recall] 获取到消息:`, {
+            hasMessage: !!message,
+            hasMes: message?.mes ? true : false,
+            mesLength: message?.mes?.length,
+            mesPreview: message?.mes?.substring(0, 50),
+            isUser: message?.is_user,
+            characterId: currentCharacterId
+        });
+        
+        if (!message || !message.mes) {
+            console.log('[Recall] 消息为空，跳过');
+            return;
+        }
         
         // 【关键改动】使用队列保存，不阻塞
         // 先将记忆加入队列，立即返回让消息显示
+        console.log(`[Recall] 正在将用户消息加入保存队列: "${message.mes.substring(0, 50)}..."`);
+        
         memorySaveQueue.add({
             content: message.mes,
             user_id: currentCharacterId || 'default',
@@ -2535,8 +2554,10 @@ async function onMessageSent(messageIndex) {
             } else if (result.queued) {
                 console.log('[Recall] 用户消息已加入队列/本地缓存');
             } else {
-                console.log('[Recall] 用户消息跳过（重复）');
+                console.log('[Recall] 用户消息跳过（重复）:', result.message);
             }
+        }).catch(err => {
+            console.error('[Recall] 消息保存队列错误:', err);
         });
     } catch (e) {
         console.warn('[Recall] 处理用户消息失败:', e);

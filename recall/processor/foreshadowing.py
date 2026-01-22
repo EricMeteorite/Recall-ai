@@ -846,6 +846,11 @@ class ForeshadowingTracker:
         import logging
         logger = logging.getLogger(__name__)
         
+        content_preview = content[:50].replace('\n', ' ') if len(content) > 50 else content.replace('\n', ' ')
+        print(f"[ForeshadowingTracker] 🌱 埋下伏笔: user={user_id}, char={character_id}")
+        print(f"[ForeshadowingTracker]    内容: {content_preview}{'...' if len(content) > 50 else ''}")
+        print(f"[ForeshadowingTracker]    重要性={importance}, 实体={related_entities}")
+        
         # 1. 预计算Embedding
         new_embedding = self._get_embedding(content)
         
@@ -855,8 +860,10 @@ class ForeshadowingTracker:
         )
         
         if similar:
-            logger.debug(f"[ForeshadowingTracker] 发现相似伏笔 (方法={sim_method}, 相似度={sim_score:.3f}): "
-                        f"'{content[:30]}...' ≈ '{similar.content[:30]}...'")
+            similar_preview = similar.content[:40].replace('\n', ' ')
+            print(f"[ForeshadowingTracker] 🔄 发现相似伏笔:")
+            print(f"[ForeshadowingTracker]    方法={sim_method}, 相似度={sim_score:.3f}")
+            print(f"[ForeshadowingTracker]    已有: {similar_preview}...")
             
             # 合并策略：增加重要性
             if sim_method == "exact":
@@ -908,6 +915,8 @@ class ForeshadowingTracker:
         user_data['foreshadowings'][foreshadowing_id] = foreshadowing
         self._save_user_data(user_id, character_id)
         
+        print(f"[ForeshadowingTracker] ✅ 新伏笔已创建: id={foreshadowing_id}")
+        
         # 检查是否超出活跃伏笔数量限制，如果超出则归档最旧的
         self._archive_overflow_foreshadowings(user_id, character_id)
         
@@ -940,12 +949,17 @@ class ForeshadowingTracker:
         foreshadowings = user_data.get('foreshadowings', {})
         
         if foreshadowing_id not in foreshadowings:
+            print(f"[ForeshadowingTracker] ❌ 解决失败: 伏笔不存在 id={foreshadowing_id}")
             return False
         
         fsh = foreshadowings[foreshadowing_id]
         fsh.status = ForeshadowingStatus.RESOLVED
         fsh.resolution = resolution
         fsh.resolved_at = time.time()
+        
+        print(f"[ForeshadowingTracker] ✅ 伏笔已解决: id={foreshadowing_id}")
+        print(f"[ForeshadowingTracker]    内容: {fsh.content[:50]}...")
+        print(f"[ForeshadowingTracker]    解决: {resolution[:50]}..." if len(resolution) > 50 else f"[ForeshadowingTracker]    解决: {resolution}")
         
         # 归档已解决的伏笔并从活跃列表移除
         self._archive_foreshadowing(fsh, user_id, character_id)
@@ -961,10 +975,14 @@ class ForeshadowingTracker:
         foreshadowings = user_data.get('foreshadowings', {})
         
         if foreshadowing_id not in foreshadowings:
+            print(f"[ForeshadowingTracker] ❌ 放弃失败: 伏笔不存在 id={foreshadowing_id}")
             return False
         
         fsh = foreshadowings[foreshadowing_id]
         fsh.status = ForeshadowingStatus.ABANDONED
+        
+        print(f"[ForeshadowingTracker] 🗑️ 伏笔已放弃: id={foreshadowing_id}")
+        print(f"[ForeshadowingTracker]    内容: {fsh.content[:50]}...")
         
         # 归档已放弃的伏笔并从活跃列表移除
         self._archive_foreshadowing(fsh, user_id, character_id)

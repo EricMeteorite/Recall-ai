@@ -596,7 +596,9 @@ async def add_memory(request: AddMemoryRequest):
     character_id = request.metadata.get('character_id', 'default') if request.metadata else 'default'
     role = request.metadata.get('role', 'unknown') if request.metadata else 'unknown'
     
-    print(f"[Recall] 添加记忆请求: user={user_id}, role={role}, content_len={len(request.content)}")
+    content_preview = request.content[:80].replace('\n', ' ') if len(request.content) > 80 else request.content.replace('\n', ' ')
+    print(f"[Recall][Memory] 📥 添加请求: user={user_id}, char={character_id}, role={role}")
+    print(f"[Recall][Memory]    内容({len(request.content)}字): {content_preview}{'...' if len(request.content) > 80 else ''}")
     
     result = engine.add(
         content=request.content,
@@ -606,15 +608,16 @@ async def add_memory(request: AddMemoryRequest):
     
     # 记录结果（包括去重跳过的情况）
     if result.success:
-        print(f"[Recall] 记忆已保存: id={result.id}")
+        print(f"[Recall][Memory] ✅ 保存成功: id={result.id}, entities={result.entities}")
     else:
-        print(f"[Recall] 记忆保存跳过: {result.message}")
+        print(f"[Recall][Memory] ⏭️ 跳过: {result.message}")
     
     # 【重要】自动提取条件 - 只处理用户消息，避免AI回复产生大量无意义条件
     # AI 回复中的角色特征等信息应该来自角色卡设定，不需要重复提取
     # 只在成功保存的用户消息中提取条件
     if role == 'user' and result.success:
         try:
+            print(f"[Recall][Context] 🔍 触发条件提取: user={user_id}, char={character_id}, content_len={len(request.content)}")
             # 在后台异步提取条件，不阻塞响应
             loop = asyncio.get_event_loop()
             loop.run_in_executor(
@@ -623,9 +626,12 @@ async def add_memory(request: AddMemoryRequest):
                     request.content, user_id, character_id
                 )
             )
-            print(f"[Recall] 已触发用户消息的条件提取 (后台)")
         except Exception as e:
-            print(f"[Recall] 条件提取启动失败: {e}")
+            print(f"[Recall][Context] ❌ 条件提取启动失败: {e}")
+    elif role == 'assistant':
+        print(f"[Recall][Context] ⏭️ AI消息不触发条件提取")
+    elif not result.success:
+        print(f"[Recall][Context] ⏭️ 记忆未保存(重复)，跳过条件提取")
     
     return AddMemoryResponse(
         id=result.id,
@@ -639,6 +645,10 @@ async def add_memory(request: AddMemoryRequest):
 @app.post("/v1/memories/search", response_model=List[SearchResultItem], tags=["Memories"])
 async def search_memories(request: SearchRequest):
     """搜索记忆"""
+    query_preview = request.query[:50].replace('\n', ' ') if len(request.query) > 50 else request.query.replace('\n', ' ')
+    print(f"[Recall][Memory] 🔍 搜索请求: user={request.user_id}, top_k={request.top_k}")
+    print(f"[Recall][Memory]    查询: {query_preview}{'...' if len(request.query) > 50 else ''}")
+    
     engine = get_engine()
     results = engine.search(
         query=request.query,
@@ -646,6 +656,12 @@ async def search_memories(request: SearchRequest):
         top_k=request.top_k,
         filters=request.filters
     )
+    
+    print(f"[Recall][Memory] 📊 搜索结果: 找到 {len(results)} 条记忆")
+    for i, r in enumerate(results[:3]):  # 只打印前3条
+        content_preview = r.content[:40].replace('\n', ' ')
+        print(f"[Recall][Memory]    [{i+1}] score={r.score:.3f}: {content_preview}...")
+    
     return [
         SearchResultItem(
             id=r.id,
@@ -683,7 +699,8 @@ async def list_memories(
         limit=limit
     )
     
-    print(f"[Recall] 获取记忆列表: user={user_id}, offset={offset}, limit={limit}, 返回={len(memories)}, total={total_count}")
+    print(f"[Recall][Memory] 📋 获取列表: user={user_id}, offset={offset}, limit={limit}")
+    print(f"[Recall][Memory]    返回 {len(memories)}/{total_count} 条记忆")
     
     return {
         "memories": memories, 
@@ -750,14 +767,14 @@ async def clear_memories(
     
     # 使用高效的计数方法获取数量
     count = engine.count_memories(user_id=user_id)
-    print(f"[Recall] 清空记忆请求: user={user_id}, 后端计数={count}")
+    print(f"[Recall][Memory] 🗑️ 清空请求: user={user_id}, 后端计数={count}")
     
     if count == 0:
         return {"success": True, "message": "该角色没有记忆数据", "deleted_count": 0}
     
     # 清空
     success = engine.clear(user_id=user_id)
-    print(f"[Recall] 清空记忆完成: user={user_id}, success={success}")
+    print(f"[Recall][Memory] {'✅' if success else '❌'} 清空完成: user={user_id}, success={success}")
     
     if success:
         return {
@@ -851,7 +868,9 @@ async def build_context(request: ContextRequest):
     注意：auto_extract_context 默认为 False，条件提取已改为在保存用户消息时进行。
     如果需要强制提取条件，请显式传入 auto_extract_context=True。
     """
-    print(f"[Recall] /v1/context 请求: user={request.user_id}, query_len={len(request.query)}, auto_extract={request.auto_extract_context}")
+    query_preview = request.query[:60].replace('\n', ' ') if len(request.query) > 60 else request.query.replace('\n', ' ')
+    print(f"[Recall][Context] 📦 构建上下文: user={request.user_id}, auto_extract={request.auto_extract_context}")
+    print(f"[Recall][Context]    查询: {query_preview}{'...' if len(request.query) > 60 else ''}")
     
     engine = get_engine()
     context = engine.build_context(
@@ -864,7 +883,7 @@ async def build_context(request: ContextRequest):
         auto_extract_context=request.auto_extract_context
     )
     
-    print(f"[Recall] /v1/context 响应: context_len={len(context)}")
+    print(f"[Recall][Context] ✅ 上下文构建完成: 总长度={len(context)}字符")
     return {"context": context}
 
 
@@ -922,7 +941,14 @@ async def list_persistent_contexts(
     if context_type:
         contexts = [c for c in contexts if c['context_type'] == context_type]
     
-    print(f"[Recall] 获取持久条件列表: user={user_id}, character={character_id}, count={len(contexts)}")
+    print(f"[Recall][Context] 📋 获取条件列表: user={user_id}, char={character_id}")
+    print(f"[Recall][Context]    活跃条件: {len(contexts)} 条")
+    if contexts:
+        types_summary = {}
+        for c in contexts:
+            t = c.get('context_type', 'unknown')
+            types_summary[t] = types_summary.get(t, 0) + 1
+        print(f"[Recall][Context]    类型分布: {types_summary}")
     
     return [
         PersistentContextItem(
@@ -1018,7 +1044,7 @@ async def clear_all_persistent_contexts(
     for ctx in contexts:
         engine.remove_persistent_context(ctx['id'], user_id, character_id)
     
-    print(f"[Recall] 清空持久条件: user={user_id}, character={character_id}, count={count}")
+    print(f"[Recall][Context] 🗑️ 清空条件: user={user_id}, char={character_id}, 删除={count}条")
     return {"success": True, "message": f"已清空 {count} 个持久条件", "count": count}
 
 
@@ -1197,9 +1223,17 @@ async def list_foreshadowing(
     """获取活跃伏笔"""
     engine = get_engine()
     active = engine.get_active_foreshadowings(user_id, character_id)
-    print(f"[Recall] 获取伏笔列表: user={user_id}, character={character_id}, count={len(active)}")
+    print(f"[Recall][Foreshadow] 📋 获取伏笔列表: user={user_id}, char={character_id}")
+    print(f"[Recall][Foreshadow]    活跃伏笔: {len(active)} 条")
     if active:
-        print(f"[Recall] 伏笔内容摘要: {[f.content[:30] + '...' if len(f.content) > 30 else f.content for f in active]}")
+        status_summary = {}
+        for f in active:
+            s = f.status.value
+            status_summary[s] = status_summary.get(s, 0) + 1
+        print(f"[Recall][Foreshadow]    状态分布: {status_summary}")
+        for i, f in enumerate(active[:3]):
+            preview = f.content[:40].replace('\n', ' ')
+            print(f"[Recall][Foreshadow]    [{i+1}] {f.status.value}: {preview}...")
     return [
         ForeshadowingItem(
             id=f.id,
@@ -1285,7 +1319,7 @@ async def clear_all_foreshadowings(
     for f in foreshadowings:
         engine.abandon_foreshadowing(f['id'], user_id, character_id)
     
-    print(f"[Recall] 清空伏笔: user={user_id}, character={character_id}, count={count}")
+    print(f"[Recall][Foreshadow] 🗑️ 清空伏笔: user={user_id}, char={character_id}, 删除={count}条")
     return {"success": True, "message": f"已清空 {count} 个伏笔", "count": count}
 
 
@@ -1434,7 +1468,9 @@ async def _background_foreshadowing_analysis(engine: RecallEngine, content: str,
     设置 60 秒超时，防止 LLM 调用卡住导致线程池耗尽。
     """
     try:
-        print(f"[Recall] 后台伏笔分析任务开始: user={user_id}, role={role}, content_len={len(content)}")
+        content_preview = content[:60].replace('\n', ' ') if len(content) > 60 else content.replace('\n', ' ')
+        print(f"[Recall][Foreshadow] 🔄 开始分析: user={user_id}, role={role}")
+        print(f"[Recall][Foreshadow]    内容({len(content)}字): {content_preview}{'...' if len(content) > 60 else ''}")
         # 在线程池中运行同步的分析方法，避免阻塞事件循环
         loop = asyncio.get_event_loop()
         result = await asyncio.wait_for(
@@ -1449,11 +1485,18 @@ async def _background_foreshadowing_analysis(engine: RecallEngine, content: str,
             ),
             timeout=60.0  # 60秒超时
         )
-        print(f"[Recall] 后台伏笔分析任务完成: triggered={result.triggered}, error={result.error}")
+        if result.triggered:
+            print(f"[Recall][Foreshadow] ✅ 分析完成: 新伏笔={len(result.new_foreshadowings)}, 可能解决={len(result.potentially_resolved)}")
+            for f in result.new_foreshadowings[:2]:
+                print(f"[Recall][Foreshadow]    🌱 新伏笔: {f[:50]}..." if len(f) > 50 else f"[Recall][Foreshadow]    🌱 新伏笔: {f}")
+        else:
+            print(f"[Recall][Foreshadow] ⏭️ 分析跳过: 未达到触发条件")
+        if result.error:
+            print(f"[Recall][Foreshadow] ⚠️ 分析警告: {result.error}")
     except asyncio.TimeoutError:
-        print(f"[Recall] 后台伏笔分析超时 (>60s)")
+        print(f"[Recall][Foreshadow] ⏱️ 分析超时 (>60s)")
     except Exception as e:
-        print(f"[Recall] 后台伏笔分析失败: {e}")
+        print(f"[Recall][Foreshadow] ❌ 分析失败: {e}")
 
 
 @app.post("/v1/foreshadowing/analyze/turn", response_model=ForeshadowingAnalysisResult, tags=["Foreshadowing Analysis"])

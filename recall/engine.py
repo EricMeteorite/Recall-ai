@@ -976,7 +976,10 @@ class RecallEngine:
         """
         import time as _time
         start_time = _time.time()
-        print(f"[Recall] build_context 开始: user={user_id}, query_len={len(query)}, auto_extract={auto_extract_context}")
+        query_preview = query[:50].replace('\n', ' ') if len(query) > 50 else query.replace('\n', ' ')
+        print(f"[Recall][Engine] 📦 构建上下文: user={user_id}, char={character_id}")
+        print(f"[Recall][Engine]    查询: {query_preview}{'...' if len(query) > 50 else ''}")
+        print(f"[Recall][Engine]    参数: max_tokens={max_tokens}, recent={include_recent}, auto_extract={auto_extract_context}")
         parts = []
         
         # ========== 0. 场景检测（决定检索策略）==========
@@ -1049,7 +1052,11 @@ class RecallEngine:
             parts.append(foreshadowing_context)
         
         elapsed = _time.time() - start_time
-        print(f"[Recall] build_context 完成: 耗时={elapsed:.3f}s, 层数={len(parts)}, 总长度={sum(len(p) for p in parts)}")
+        total_len = sum(len(p) for p in parts)
+        print(f"[Recall][Engine] ✅ 构建完成: 耗时={elapsed:.3f}s")
+        print(f"[Recall][Engine]    层数={len(parts)}, 总长度={total_len}字符")
+        if parts:
+            print(f"[Recall][Engine]    包含: {[p[:20] + '...' for p in parts]}")
         
         return "\n".join(parts)
     

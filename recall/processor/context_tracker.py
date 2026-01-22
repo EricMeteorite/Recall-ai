@@ -1059,14 +1059,19 @@ class ContextTracker:
         
         if similar:
             # 发现相似条件，进行合并而不是创建新条件
-            print(f"[ContextTracker] 去重合并: '{content[:40]}...' ≈ '{similar.content[:40]}...' (方法={sim_method}, 相似度={sim_score:.3f})")
+            content_preview = content[:35].replace('\n', ' ')
+            similar_preview = similar.content[:35].replace('\n', ' ')
+            print(f"[ContextTracker] 🔄 去重合并:")
+            print(f"[ContextTracker]    新: {content_preview}...")
+            print(f"[ContextTracker]    旧: {similar_preview}...")
+            print(f"[ContextTracker]    方法={sim_method}, 相似度={sim_score:.3f}")
             
             # 合并策略
             if sim_method == "exact":
                 # 完全相同，只更新使用信息
                 similar.use_count += 1
                 similar.last_used = time.time()
-                print(f"[ContextTracker] 完全相同，更新使用计数: {similar.use_count}")
+                print(f"[ContextTracker]    ✅ 完全相同，更新使用计数: {similar.use_count}")
             elif sim_method.endswith("_uncertain"):
                 # 中等相似度，谨慎合并
                 similar.confidence = min(1.0, similar.confidence + 0.05)  # 较小增量
@@ -1208,14 +1213,23 @@ class ContextTracker:
         
         优先使用 LLM，如果没有 LLM 则使用规则
         """
-        print(f"[ContextTracker] 开始提取条件: user={user_id}, text_len={len(text)}, llm_enabled={self.llm_client is not None}")
+        text_preview = text[:60].replace('\n', ' ') if len(text) > 60 else text.replace('\n', ' ')
+        print(f"[ContextTracker] 🔍 开始提取: user={user_id}, char={character_id}")
+        print(f"[ContextTracker]    文本({len(text)}字): {text_preview}{'...' if len(text) > 60 else ''}")
+        print(f"[ContextTracker]    模式: {'LLM' if self.llm_client else '规则'}")
         
         if self.llm_client:
             result = self._extract_with_llm(text, user_id, character_id)
         else:
             result = self._extract_with_rules(text, user_id, character_id)
         
-        print(f"[ContextTracker] 条件提取完成: 提取了 {len(result)} 条新条件")
+        if result:
+            print(f"[ContextTracker] ✅ 提取完成: 新增 {len(result)} 条条件")
+            for ctx in result:
+                print(f"[ContextTracker]    🌱 [{ctx.context_type.value}] {ctx.content[:50]}{'...' if len(ctx.content) > 50 else ''}")
+        else:
+            print(f"[ContextTracker] ⏭️ 提取完成: 未发现新条件")
+        
         return result
     
     def _extract_with_rules(self, text: str, user_id: str,
@@ -1267,10 +1281,10 @@ class ContextTracker:
                           character_id: str = "default") -> List[PersistentContext]:
         """使用 LLM 提取"""
         try:
-            print(f"[ContextTracker] 正在调用 LLM 提取条件...")
+            print(f"[ContextTracker] 🤖 调用 LLM 提取条件...")
             prompt = self.extraction_prompt.format(content=text)
             response = self.llm_client.complete(prompt, max_tokens=500)
-            print(f"[ContextTracker] LLM 响应: {len(response)} 字符")
+            print(f"[ContextTracker]    LLM 响应: {len(response)} 字符")
             
             # 解析 JSON
             import json
@@ -1278,7 +1292,7 @@ class ContextTracker:
             json_match = re.search(r'\[[\s\S]*\]', response)
             if json_match:
                 items = json.loads(json_match.group(0))
-                print(f"[ContextTracker] LLM 返回 {len(items)} 条候选条件")
+                print(f"[ContextTracker]    解析到 {len(items)} 条候选条件")
                 
                 extracted = []
                 for item in items:
@@ -1291,16 +1305,15 @@ class ContextTracker:
                             keywords=item.get('keywords', [])
                         )
                         extracted.append(ctx)
-                        print(f"[ContextTracker] 添加条件: type={item['type']}, content={item['content'][:50]}...")
                     except (KeyError, ValueError) as e:
-                        print(f"[ContextTracker] 跳过无效条件: {e}")
+                        print(f"[ContextTracker]    ⚠️ 跳过无效条件: {e}")
                         continue
                 
                 return extracted
             else:
-                print(f"[ContextTracker] LLM 响应中未找到 JSON 数组")
+                print(f"[ContextTracker]    ⚠️ LLM 响应中未找到 JSON 数组")
         except Exception as e:
-            print(f"[ContextTracker] LLM提取失败，回退到规则提取: {e}")
+            print(f"[ContextTracker] ❌ LLM提取失败，回退到规则: {e}")
         
         # 回退到规则提取
         return self._extract_with_rules(text, user_id, character_id)
