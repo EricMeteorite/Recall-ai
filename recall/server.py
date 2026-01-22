@@ -406,6 +406,14 @@ class PersistentContextRequest(BaseModel):
     keywords: Optional[List[str]] = Field(default=None, description="关键词")
 
 
+class PersistentContextUpdateRequest(BaseModel):
+    """更新持久条件请求"""
+    content: Optional[str] = Field(default=None, description="新内容")
+    context_type: Optional[str] = Field(default=None, description="新类型")
+    confidence: Optional[float] = Field(default=None, ge=0, le=1, description="新置信度")
+    keywords: Optional[List[str]] = Field(default=None, description="新关键词")
+
+
 class PersistentContextItem(BaseModel):
     """持久条件项"""
     id: str
@@ -1170,10 +1178,7 @@ async def archive_context(
 @app.put("/v1/persistent-contexts/{context_id}", tags=["Persistent Contexts"])
 async def update_persistent_context(
     context_id: str,
-    content: Optional[str] = Body(default=None, description="新内容"),
-    context_type: Optional[str] = Body(default=None, description="新类型"),
-    confidence: Optional[float] = Body(default=None, ge=0, le=1, description="新置信度"),
-    keywords: Optional[List[str]] = Body(default=None, description="新关键词"),
+    request: PersistentContextUpdateRequest,
     user_id: str = Query(default="default", description="用户ID"),
     character_id: str = Query(default="default", description="角色ID")
 ):
@@ -1183,10 +1188,10 @@ async def update_persistent_context(
         context_id=context_id,
         user_id=user_id,
         character_id=character_id,
-        content=content,
-        context_type=context_type,
-        confidence=confidence,
-        keywords=keywords
+        content=request.content,
+        context_type=request.context_type,
+        confidence=request.confidence,
+        keywords=request.keywords
     )
     
     if not ctx:
