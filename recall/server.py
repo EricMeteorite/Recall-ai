@@ -922,6 +922,8 @@ async def list_persistent_contexts(
     if context_type:
         contexts = [c for c in contexts if c['context_type'] == context_type]
     
+    print(f"[Recall] 获取持久条件列表: user={user_id}, character={character_id}, count={len(contexts)}")
+    
     return [
         PersistentContextItem(
             id=c['id'],
