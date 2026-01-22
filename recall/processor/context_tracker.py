@@ -228,7 +228,8 @@ class ContextTracker:
         
         if base_path:
             os.makedirs(base_path, exist_ok=True)
-        self._load_all()
+        # 改为按需加载（lazy loading），避免缓存键不一致问题
+        # self._load_all()  # 已废弃，改用 _ensure_loaded()
         
         # 条件检测模式（用于自动从对话中提取条件）
         # 使用更精确的模式，避免误匹配
@@ -314,22 +315,26 @@ class ContextTracker:
         return os.path.join(self.base_path, safe_user_id, safe_char_id, 'contexts.json')
     
     def _load_all(self):
-        """加载所有用户/角色的上下文（新结构）"""
-        if not self.base_path or not os.path.exists(self.base_path):
-            return
+        """[已废弃] 预加载所有数据 - 不再使用
         
-        # 新结构：遍历 {base_path}/{user_id}/{character_id}/contexts.json
-        for user_id in os.listdir(self.base_path):
-            user_path = os.path.join(self.base_path, user_id)
-            if not os.path.isdir(user_path) or user_id.startswith('.'):
-                continue
-            for character_id in os.listdir(user_path):
-                char_path = os.path.join(user_path, character_id)
-                if not os.path.isdir(char_path):
-                    continue
-                ctx_file = os.path.join(char_path, 'contexts.json')
-                if os.path.exists(ctx_file):
-                    self._load_user(user_id, character_id)
+        问题：预加载时使用文件夹名（已清理）作为 user_id，
+        但前端请求时使用原始 ID，导致缓存键不匹配。
+        改用 _ensure_loaded() 按需加载。
+        """
+        pass  # 不再预加载
+    
+    def _ensure_loaded(self, user_id: str, character_id: str = "default"):
+        """确保用户/角色的数据已加载（按需加载）
+        
+        类似 ForeshadowingTracker 的按需加载方式，
+        使用原始 user_id 作为缓存键，保证一致性。
+        """
+        cache_key = self._get_cache_key(user_id, character_id)
+        if cache_key in self.contexts:
+            return  # 已加载
+        
+        # 尝试从文件加载
+        self._load_user(user_id, character_id)
     
     def _load_user(self, user_id: str, character_id: str = "default"):
         """加载用户/角色的上下文"""
@@ -566,6 +571,9 @@ class ContextTracker:
         
         优先从活跃条件中查找，找不到再去归档中找（包括分卷文件）
         """
+        # 确保数据已加载
+        self._ensure_loaded(user_id, character_id)
+        
         # 先从活跃条件中找
         cache_key = self._get_cache_key(user_id, character_id)
         if cache_key in self.contexts:
@@ -866,6 +874,9 @@ class ContextTracker:
         import logging
         logger = logging.getLogger(__name__)
         
+        # 确保数据已加载
+        self._ensure_loaded(user_id, character_id)
+        
         cache_key = self._get_cache_key(user_id, character_id)
         if cache_key not in self.contexts:
             return False
@@ -914,6 +925,9 @@ class ContextTracker:
         """
         import logging
         logger = logging.getLogger(__name__)
+        
+        # 确保数据已加载
+        self._ensure_loaded(user_id, character_id)
         
         cache_key = self._get_cache_key(user_id, character_id)
         if cache_key not in self.contexts:
@@ -1208,6 +1222,9 @@ class ContextTracker:
         """
         import uuid
         
+        # 确保数据已加载
+        self._ensure_loaded(user_id, character_id)
+        
         cache_key = self._get_cache_key(user_id, character_id)
         if cache_key not in self.contexts:
             self.contexts[cache_key] = []
@@ -1294,6 +1311,9 @@ class ContextTracker:
     
     def get_active(self, user_id: str = "default", character_id: str = "default") -> List[PersistentContext]:
         """获取所有活跃的持久上下文"""
+        # 确保数据已加载
+        self._ensure_loaded(user_id, character_id)
+        
         cache_key = self._get_cache_key(user_id, character_id)
         if cache_key not in self.contexts:
             return []
@@ -1321,6 +1341,9 @@ class ContextTracker:
     def deactivate(self, context_id: str, user_id: str = "default",
                    character_id: str = "default") -> bool:
         """停用某个上下文"""
+        # 确保数据已加载
+        self._ensure_loaded(user_id, character_id)
+        
         cache_key = self._get_cache_key(user_id, character_id)
         if cache_key not in self.contexts:
             return False
@@ -1342,6 +1365,9 @@ class ContextTracker:
             character_id: 角色ID
             save: 是否立即保存（批量操作时设为False，最后统一保存）
         """
+        # 确保数据已加载
+        self._ensure_loaded(user_id, character_id)
+        
         cache_key = self._get_cache_key(user_id, character_id)
         if cache_key not in self.contexts:
             return
@@ -1357,6 +1383,9 @@ class ContextTracker:
     def mark_used_batch(self, context_ids: List[str], user_id: str = "default",
                         character_id: str = "default"):
         """批量标记上下文被使用（只保存一次）"""
+        # 确保数据已加载
+        self._ensure_loaded(user_id, character_id)
+        
         cache_key = self._get_cache_key(user_id, character_id)
         if cache_key not in self.contexts or not context_ids:
             return
@@ -1611,6 +1640,9 @@ class ContextTracker:
         Returns:
             减少的条件数量
         """
+        # 确保数据已加载
+        self._ensure_loaded(user_id, character_id)
+        
         cache_key = self._get_cache_key(user_id, character_id)
         
         if cache_key not in self.contexts:
@@ -1717,6 +1749,9 @@ class ContextTracker:
     
     def get_stats(self, user_id: str = "default", character_id: str = "default") -> Dict[str, Any]:
         """获取持久条件的统计信息"""
+        # 确保数据已加载
+        self._ensure_loaded(user_id, character_id)
+        
         cache_key = self._get_cache_key(user_id, character_id)
         
         if cache_key not in self.contexts:
