@@ -4142,20 +4142,28 @@ function showEditContextModal(ctx) {
 async function updateContext(contextId, updates) {
     try {
         const userId = encodeURIComponent(currentCharacterId || 'default');
-        const response = await fetch(`${pluginSettings.apiUrl}/v1/persistent-contexts/${contextId}?user_id=${userId}`, {
+        const url = `${pluginSettings.apiUrl}/v1/persistent-contexts/${contextId}?user_id=${userId}`;
+        console.log(`[Recall] 更新条件请求: ${url}`, updates);
+        
+        const response = await fetch(url, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(updates)
         });
         
         if (response.ok) {
+            const result = await response.json();
+            console.log(`[Recall] 已更新条件: ${contextId}`, result);
+            toastr.success('持久条件已更新', 'Recall');
             loadPersistentContexts();
-            console.log(`[Recall] 已更新条件: ${contextId}`);
         } else {
-            console.error('[Recall] 更新条件失败');
+            const errorText = await response.text();
+            console.error('[Recall] 更新条件失败:', response.status, errorText);
+            toastr.error(`更新失败: ${response.status} ${errorText}`, 'Recall');
         }
     } catch (e) {
         console.error('[Recall] 更新条件失败:', e);
+        toastr.error(`更新失败: ${e.message}`, 'Recall');
     }
 }
 

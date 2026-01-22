@@ -522,7 +522,7 @@
     color: #f44336;
 }
 
-/* 动作按钮（解决伏笔等）*/
+/* 动作按钮（编辑、归档、解决伏笔等）*/
 .recall-action-btn {
     padding: 3px 8px;
     background: transparent;
@@ -535,7 +535,8 @@
     transition: all 0.2s;
 }
 
-.recall-foreshadowing-item:hover .recall-action-btn {
+.recall-foreshadowing-item:hover .recall-action-btn,
+.recall-context-item:hover .recall-action-btn {
     opacity: 1;
 }
 
