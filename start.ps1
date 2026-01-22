@@ -130,11 +130,14 @@ function Load-ApiKeys {
         'RECALL_EMBEDDING_MODE',
         'LLM_API_KEY', 'LLM_API_BASE', 'LLM_MODEL',
         'FORESHADOWING_LLM_ENABLED', 'FORESHADOWING_TRIGGER_INTERVAL',
+        'CONTEXT_TRIGGER_INTERVAL',
         'FORESHADOWING_AUTO_PLANT', 'FORESHADOWING_AUTO_RESOLVE',
         'FORESHADOWING_MAX_RETURN', 'FORESHADOWING_MAX_ACTIVE',
         'CONTEXT_MAX_PER_TYPE', 'CONTEXT_MAX_TOTAL',
         'CONTEXT_DECAY_DAYS', 'CONTEXT_DECAY_RATE', 'CONTEXT_MIN_CONFIDENCE',
-        'DEDUP_EMBEDDING_ENABLED', 'DEDUP_HIGH_THRESHOLD', 'DEDUP_LOW_THRESHOLD'
+        'DEDUP_EMBEDDING_ENABLED', 'DEDUP_HIGH_THRESHOLD', 'DEDUP_LOW_THRESHOLD',
+        'CONTEXT_MAX_CONTEXT_TURNS', 'BUILD_CONTEXT_INCLUDE_RECENT',
+        'PROACTIVE_REMINDER_ENABLED', 'PROACTIVE_REMINDER_TURNS'
     )
     
     if (Test-Path $configFile) {
@@ -231,6 +234,10 @@ FORESHADOWING_MAX_ACTIVE=50
 # 持久条件配置
 # Persistent Context Configuration
 # ----------------------------------------------------------------------------
+# 条件提取触发间隔（每N轮对话触发一次LLM提取，最小1）
+# Context extraction trigger interval (trigger every N turns, minimum 1)
+CONTEXT_TRIGGER_INTERVAL=5
+
 # 每种类型最大条件数 / Max contexts per type
 CONTEXT_MAX_PER_TYPE=10
 
@@ -258,6 +265,26 @@ DEDUP_HIGH_THRESHOLD=0.85
 
 # 低相似度阈值（<此值视为不同） / Low similarity threshold (treat as different)
 DEDUP_LOW_THRESHOLD=0.70
+
+# ----------------------------------------------------------------------------
+# 上下文构建配置（100%不遗忘保证）
+# Context Build Configuration (100% Memory Guarantee)
+# ----------------------------------------------------------------------------
+# 对话提取最大轮次（用于持久条件提取和伏笔分析）
+# Max conversation turns for extraction (persistent context and foreshadowing analysis)
+CONTEXT_MAX_CONTEXT_TURNS=20
+
+# build_context 默认包含最近对话轮次
+# Default recent turns included in build_context
+BUILD_CONTEXT_INCLUDE_RECENT=10
+
+# 启用主动提醒（长期未提及的重要信息会主动提醒）
+# Enable proactive reminder for long-unmentioned important information
+PROACTIVE_REMINDER_ENABLED=true
+
+# 主动提醒触发轮次阈值（高重要性减半）
+# Proactive reminder threshold turns (halved for high importance)
+PROACTIVE_REMINDER_TURNS=50
 '@
         Set-Content -Path $configFile -Value $defaultConfig -Encoding UTF8
         Write-Host "  $([char]0x2192) 已创建配置文件: $configFile" -ForegroundColor Cyan

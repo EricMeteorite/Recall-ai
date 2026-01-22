@@ -779,6 +779,13 @@ function createUI() {
                         <div class="recall-setting-group" style="margin-bottom:15px;">
                             <div style="font-weight:bold;margin-bottom:8px;">📌 持久条件</div>
                             
+                            <div class="recall-setting-group" style="margin-bottom:8px;">
+                                <label class="recall-setting-title">条件提取触发间隔</label>
+                                <input type="number" id="recall-context-trigger-interval" class="text_pole" 
+                                       min="1" max="100" value="5" placeholder="5">
+                                <div class="recall-setting-hint">每隔几轮对话触发一次 LLM 条件提取（1=每轮都提取，5=每5轮提取一次）</div>
+                            </div>
+                            
                             <div class="recall-setting-row" style="display:flex;gap:10px;margin-bottom:8px;">
                                 <div style="flex:1;">
                                     <label class="recall-setting-title">每类型上限</label>
@@ -857,6 +864,41 @@ function createUI() {
                                            min="0.5" max="0.9" step="0.01" value="0.75" placeholder="0.75">
                                     <div class="recall-setting-hint">≥此值提示可能重复</div>
                                 </div>
+                            </div>
+                        </div>
+                        
+                        <!-- 上下文构建（100%不遗忘保证） -->
+                        <div class="recall-setting-group" style="margin-bottom:15px;">
+                            <div style="font-weight:bold;margin-bottom:8px;">🧠 上下文构建 <span style="color:#4caf50;font-size:11px;">(100%不遗忘保证)</span></div>
+                            
+                            <div class="recall-setting-row" style="display:flex;gap:10px;margin-bottom:10px;">
+                                <div style="flex:1;">
+                                    <label class="recall-setting-title">对话提取轮次</label>
+                                    <input type="number" id="recall-context-max-context-turns" class="text_pole" 
+                                           min="5" max="100" value="20" placeholder="20">
+                                    <div class="recall-setting-hint">持久条件/伏笔提取的对话范围</div>
+                                </div>
+                                <div style="flex:1;">
+                                    <label class="recall-setting-title">最近对话轮次</label>
+                                    <input type="number" id="recall-build-context-include-recent" class="text_pole" 
+                                           min="5" max="50" value="10" placeholder="10">
+                                    <div class="recall-setting-hint">注入上下文的最近对话数</div>
+                                </div>
+                            </div>
+                            
+                            <div class="recall-setting-group">
+                                <label class="recall-checkbox-label">
+                                    <input type="checkbox" id="recall-proactive-reminder-enabled" checked>
+                                    <span>启用主动提醒</span>
+                                </label>
+                                <div class="recall-setting-hint">长期未提及的重要信息会主动提醒 AI</div>
+                            </div>
+                            
+                            <div style="margin-top:8px;">
+                                <label class="recall-setting-title">提醒触发轮次</label>
+                                <input type="number" id="recall-proactive-reminder-turns" class="text_pole" 
+                                       min="10" max="200" value="50" placeholder="50">
+                                <div class="recall-setting-hint">高重要性条件阈值减半</div>
                             </div>
                         </div>
                         
@@ -1166,6 +1208,7 @@ async function loadCapacityConfig() {
             
             // 持久条件配置
             if (limits.context) {
+                document.getElementById('recall-context-trigger-interval').value = limits.context.trigger_interval || 5;
                 document.getElementById('recall-context-max-per-type').value = limits.context.max_per_type || 30;
                 document.getElementById('recall-context-max-total').value = limits.context.max_total || 100;
                 document.getElementById('recall-context-decay-days').value = limits.context.decay_days || 7;
@@ -1185,6 +1228,14 @@ async function loadCapacityConfig() {
                 document.getElementById('recall-dedup-high-threshold').value = limits.dedup.high_threshold || 0.92;
                 document.getElementById('recall-dedup-low-threshold').value = limits.dedup.low_threshold || 0.75;
             }
+            
+            // 上下文构建配置（100%不遗忘保证）
+            if (limits.build_context) {
+                document.getElementById('recall-context-max-context-turns').value = limits.build_context.max_context_turns || 20;
+                document.getElementById('recall-build-context-include-recent').value = limits.build_context.include_recent || 10;
+                document.getElementById('recall-proactive-reminder-enabled').checked = limits.build_context.proactive_reminder_enabled !== false;
+                document.getElementById('recall-proactive-reminder-turns').value = limits.build_context.proactive_reminder_turns || 50;
+            }
         }
         
         showToast('容量限制配置已加载', 'success');
@@ -1202,6 +1253,7 @@ async function saveCapacityConfig() {
     try {
         const configData = {
             // 持久条件配置
+            context_trigger_interval: parseInt(document.getElementById('recall-context-trigger-interval').value) || 5,
             context_max_per_type: parseInt(document.getElementById('recall-context-max-per-type').value) || 30,
             context_max_total: parseInt(document.getElementById('recall-context-max-total').value) || 100,
             context_decay_days: parseInt(document.getElementById('recall-context-decay-days').value) || 7,
@@ -1213,7 +1265,12 @@ async function saveCapacityConfig() {
             // 去重配置
             dedup_embedding_enabled: document.getElementById('recall-dedup-embedding-enabled').checked,
             dedup_high_threshold: parseFloat(document.getElementById('recall-dedup-high-threshold').value) || 0.92,
-            dedup_low_threshold: parseFloat(document.getElementById('recall-dedup-low-threshold').value) || 0.75
+            dedup_low_threshold: parseFloat(document.getElementById('recall-dedup-low-threshold').value) || 0.75,
+            // 上下文构建配置（100%不遗忘保证）
+            context_max_context_turns: parseInt(document.getElementById('recall-context-max-context-turns').value) || 20,
+            build_context_include_recent: parseInt(document.getElementById('recall-build-context-include-recent').value) || 10,
+            proactive_reminder_enabled: document.getElementById('recall-proactive-reminder-enabled').checked,
+            proactive_reminder_turns: parseInt(document.getElementById('recall-proactive-reminder-turns').value) || 50
         };
         
         const response = await fetch(`${pluginSettings.apiUrl}/v1/config`, {

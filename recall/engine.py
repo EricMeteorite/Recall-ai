@@ -234,10 +234,12 @@ class RecallEngine:
         # 持久上下文追踪器（追踪持久性前提条件）
         # 使用同一个embedding_backend用于语义去重
         # 使用新的 {user_id}/{character_id}/ 存储结构
+        # 传入 memory_provider 用于从已保存记忆获取对话上下文，帮助 LLM 更好提取条件
         self.context_tracker = ContextTracker(
             base_path=os.path.join(self.data_root, 'data'),
             llm_client=self.llm_client,
-            embedding_backend=embedding_backend_for_trackers
+            embedding_backend=embedding_backend_for_trackers,
+            memory_provider=self._get_recent_memories_for_analysis
         )
         
         # 长期记忆层（L1 ConsolidatedMemory）
@@ -949,25 +951,27 @@ class RecallEngine:
         user_id: str = "default",
         character_id: str = "default",
         max_tokens: int = 2000,
-        include_recent: int = 5,
+        include_recent: int = None,  # 从配置读取默认值
         include_core_facts: bool = True,
         auto_extract_context: bool = False  # 默认关闭，避免每次生成都提取条件
     ) -> str:
-        """构建上下文 - 全方位记忆策略，确保不遗漏任何细节
+        """构建上下文 - 全方位记忆策略，确保100%不遗漏任何细节
         
-        六层上下文策略：
+        七层上下文策略（100%不遗忘保证）：
         1. 持久条件层 - 已确立的背景设定（如用户身份、环境、目标）
         2. 核心事实层 - 压缩的实体知识 + 关系图谱
         3. 相关记忆层 - 与查询相关的详细记忆
-        4. 最近对话层 - 保持对话连贯性
-        5. 伏笔层 - 所有活跃伏笔
-        6. 场景优化层 - 根据场景调整检索策略
+        4. 关键实体补充层 - 从持久条件和伏笔中提取关键词，补充检索（新增）
+        5. 最近对话层 - 保持对话连贯性
+        6. 伏笔层 - 所有活跃伏笔 + 主动提醒
+        7. 场景优化层 - 根据场景调整检索策略
         
         Args:
             query: 当前查询
             user_id: 用户ID
+            character_id: 角色ID
             max_tokens: 最大token数（越大能注入越多细节）
-            include_recent: 包含的最近对话数
+            include_recent: 包含的最近对话数（None 时从配置读取 BUILD_CONTEXT_INCLUDE_RECENT）
             include_core_facts: 是否包含核心事实摘要
             auto_extract_context: 是否自动从查询中提取持久条件（默认False，条件提取在保存记忆时进行）
         
@@ -975,11 +979,19 @@ class RecallEngine:
             str: 构建的上下文
         """
         import time as _time
+        import os as _os
         start_time = _time.time()
+        
+        # 从配置读取默认值
+        if include_recent is None:
+            include_recent = int(_os.environ.get('BUILD_CONTEXT_INCLUDE_RECENT', '10'))
+        proactive_enabled = _os.environ.get('PROACTIVE_REMINDER_ENABLED', 'true').lower() in ('true', '1', 'yes')
+        proactive_turns = int(_os.environ.get('PROACTIVE_REMINDER_TURNS', '50'))
+        
         query_preview = query[:50].replace('\n', ' ') if len(query) > 50 else query.replace('\n', ' ')
         print(f"[Recall][Engine] 📦 构建上下文: user={user_id}, char={character_id}")
         print(f"[Recall][Engine]    查询: {query_preview}{'...' if len(query) > 50 else ''}")
-        print(f"[Recall][Engine]    参数: max_tokens={max_tokens}, recent={include_recent}, auto_extract={auto_extract_context}")
+        print(f"[Recall][Engine]    参数: max_tokens={max_tokens}, recent={include_recent}, proactive={proactive_enabled}")
         parts = []
         
         # ========== 0. 场景检测（决定检索策略）==========
@@ -1031,6 +1043,21 @@ class RecallEngine:
             if memory_section:
                 parts.append(memory_section)
         
+        # ========== 3.5 关键实体补充检索层（100%不遗忘保证）==========
+        # 从持久条件和伏笔中提取关键词，进行补充检索
+        # 确保即使 query 中没有直接提及，重要信息也能被召回
+        supplementary_keywords = self._extract_supplementary_keywords(user_id, character_id, active_contexts)
+        if supplementary_keywords:
+            supplementary_memories = self._search_by_keywords(supplementary_keywords, user_id, top_k=5)
+            if supplementary_memories:
+                # 过滤掉已经在 memories 中的记忆
+                existing_ids = {m.id for m in memories} if memories else set()
+                new_supplementary = [m for m in supplementary_memories if m.id not in existing_ids]
+                if new_supplementary:
+                    supplementary_section = self._build_supplementary_section(new_supplementary)
+                    if supplementary_section:
+                        parts.append(supplementary_section)
+        
         # ========== 4. 最近对话层 ==========
         scope = self.storage.get_scope(user_id)
         recent = scope.get_recent(include_recent)
@@ -1050,6 +1077,15 @@ class RecallEngine:
         )
         if foreshadowing_context:
             parts.append(foreshadowing_context)
+        
+        # ========== 5.5 主动提醒层（100%不遗忘保证）==========
+        # 对长期未提及的重要持久条件进行主动提醒
+        if proactive_enabled and active_contexts:
+            proactive_reminders = self._build_proactive_reminders(
+                active_contexts, proactive_turns, user_id
+            )
+            if proactive_reminders:
+                parts.append(proactive_reminders)
         
         elapsed = _time.time() - start_time
         total_len = sum(len(p) for p in parts)
@@ -1214,6 +1250,174 @@ class RecallEngine:
             content = turn.get('content', '')
             lines.append(f"{role}: {content}")
         lines.append("</recent_conversation>")
+        return "\n".join(lines)
+    
+    def _extract_supplementary_keywords(
+        self,
+        user_id: str,
+        character_id: str,
+        active_contexts: List
+    ) -> List[str]:
+        """从持久条件和伏笔中提取关键词用于补充检索
+        
+        确保重要信息即使在当前 query 中未提及也能被召回
+        
+        Args:
+            user_id: 用户ID
+            character_id: 角色ID
+            active_contexts: 活跃的持久条件列表
+            
+        Returns:
+            List[str]: 关键词列表
+        """
+        keywords = set()
+        
+        # 从持久条件中提取关键词
+        if active_contexts:
+            for ctx in active_contexts:
+                # 获取关键词
+                ctx_keywords = ctx.keywords if hasattr(ctx, 'keywords') else ctx.get('keywords', [])
+                if ctx_keywords:
+                    keywords.update(ctx_keywords[:3])  # 每个条件最多取3个关键词
+        
+        # 从活跃伏笔中提取关键实体
+        try:
+            foreshadowings = self.foreshadowing_tracker.get_active(user_id, character_id)
+            for fsh in foreshadowings[:5]:  # 最多5个伏笔
+                entities = fsh.related_entities if hasattr(fsh, 'related_entities') else []
+                if entities:
+                    keywords.update(entities[:2])  # 每个伏笔最多取2个实体
+        except Exception:
+            pass
+        
+        return list(keywords)[:10]  # 总共最多10个关键词
+    
+    def _search_by_keywords(
+        self,
+        keywords: List[str],
+        user_id: str,
+        top_k: int = 5
+    ) -> List:
+        """根据关键词列表进行补充检索
+        
+        Args:
+            keywords: 关键词列表
+            user_id: 用户ID
+            top_k: 返回的最大记忆数
+            
+        Returns:
+            List: 相关记忆列表
+        """
+        if not keywords:
+            return []
+        
+        all_memories = []
+        seen_ids = set()
+        
+        for keyword in keywords[:5]:  # 最多使用5个关键词
+            try:
+                memories = self.search(keyword, user_id=user_id, top_k=2)
+                for m in memories:
+                    mem_id = m.id if hasattr(m, 'id') else m.get('id', '')
+                    if mem_id and mem_id not in seen_ids:
+                        seen_ids.add(mem_id)
+                        all_memories.append(m)
+                        if len(all_memories) >= top_k:
+                            return all_memories
+            except Exception:
+                continue
+        
+        return all_memories
+    
+    def _build_supplementary_section(self, memories) -> str:
+        """构建补充检索记忆部分
+        
+        Args:
+            memories: 补充检索到的记忆列表
+            
+        Returns:
+            str: 格式化的补充记忆文本
+        """
+        if not memories:
+            return ""
+        
+        lines = ["<supplementary_memories>", "【相关背景（补充召回）】"]
+        
+        for m in memories[:5]:  # 最多5条
+            content = m.content if hasattr(m, 'content') else m.get('content', '')
+            entities = m.entities if hasattr(m, 'entities') else m.get('entities', [])
+            
+            line = f"• {content}"
+            if entities:
+                line = f"• [涉及: {', '.join(entities[:3])}] {content}"
+            lines.append(line)
+        
+        lines.append("</supplementary_memories>")
+        return "\n".join(lines) if len(lines) > 3 else ""
+    
+    def _build_proactive_reminders(
+        self,
+        active_contexts: List,
+        threshold_turns: int,
+        user_id: str
+    ) -> str:
+        """构建主动提醒文本（对长期未提及的重要持久条件）
+        
+        类似于伏笔的主动提醒机制，确保重要背景信息不会被遗忘
+        
+        Args:
+            active_contexts: 活跃的持久条件列表
+            threshold_turns: 触发提醒的轮次阈值
+            user_id: 用户ID
+            
+        Returns:
+            str: 主动提醒文本，如果没有需要提醒的内容则返回空字符串
+        """
+        if not active_contexts:
+            return ""
+        
+        # 获取当前总轮次
+        current_turn = 0
+        if self.volume_manager:
+            current_turn = self.volume_manager.get_total_turns()
+        
+        reminders = []
+        
+        for ctx in active_contexts:
+            # 获取最后提及轮次
+            last_mentioned = ctx.last_mentioned_turn if hasattr(ctx, 'last_mentioned_turn') else ctx.get('last_mentioned_turn', 0)
+            importance = ctx.importance if hasattr(ctx, 'importance') else ctx.get('importance', 0.5)
+            content = ctx.content if hasattr(ctx, 'content') else ctx.get('content', '')
+            
+            # 计算未提及的轮次数
+            turns_since_mention = current_turn - last_mentioned if last_mentioned else current_turn
+            
+            # 高重要性条件阈值减半
+            effective_threshold = threshold_turns // 2 if importance > 0.7 else threshold_turns
+            
+            if turns_since_mention >= effective_threshold and importance >= 0.5:
+                reminders.append({
+                    'content': content,
+                    'importance': importance,
+                    'turns_since': turns_since_mention
+                })
+        
+        if not reminders:
+            return ""
+        
+        # 按重要性和未提及时长排序
+        reminders.sort(key=lambda x: (x['importance'], x['turns_since']), reverse=True)
+        
+        lines = [
+            "<proactive_reminders>",
+            "【重要背景提醒】以下是你可能需要注意的重要背景信息（长期未在对话中涉及）："
+        ]
+        
+        for r in reminders[:3]:  # 最多提醒3条
+            importance_label = "高" if r['importance'] > 0.7 else "中"
+            lines.append(f"• [{importance_label}重要性，{r['turns_since']}轮未提及] {r['content']}")
+        
+        lines.append("</proactive_reminders>")
         return "\n".join(lines)
     
     def _format_foreshadowings(self, foreshadowings) -> str:

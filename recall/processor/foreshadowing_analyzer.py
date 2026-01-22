@@ -70,7 +70,7 @@ class ForeshadowingAnalyzerConfig:
     include_resolved_check: bool = True  # 同时检查已有伏笔是否被解决
     
     # 高级配置
-    max_context_turns: int = 20     # 发送给 LLM 的最大轮次数
+    max_context_turns: int = field(default_factory=lambda: int(os.environ.get('CONTEXT_MAX_CONTEXT_TURNS', '20')))     # 发送给 LLM 的最大轮次数（从环境变量读取，与持久条件统一）
     language: str = "zh"            # 提示词语言（zh/en）
     
     def __post_init__(self):
@@ -127,6 +127,9 @@ class ForeshadowingAnalyzerConfig:
         backend_str = data.get('backend', 'manual')
         backend = AnalyzerBackend(backend_str) if backend_str in ('manual', 'llm') else AnalyzerBackend.MANUAL
         
+        # 从环境变量读取默认值，保持一致性
+        default_max_context_turns = int(os.environ.get('CONTEXT_MAX_CONTEXT_TURNS', '20'))
+        
         return cls(
             backend=backend,
             trigger_interval=data.get('trigger_interval', 10),
@@ -136,7 +139,7 @@ class ForeshadowingAnalyzerConfig:
             auto_plant=data.get('auto_plant', True),
             auto_resolve=data.get('auto_resolve', False),
             include_resolved_check=data.get('include_resolved_check', True),
-            max_context_turns=data.get('max_context_turns', 20),
+            max_context_turns=data.get('max_context_turns', default_max_context_turns),
             language=data.get('language', 'zh')
         )
 

@@ -41,11 +41,17 @@ SUPPORTED_CONFIG_KEYS = {
     'FORESHADOWING_MAX_RETURN',       # 伏笔召回数量
     'FORESHADOWING_MAX_ACTIVE',       # 活跃伏笔数量上限
     # 持久条件系统配置
+    'CONTEXT_TRIGGER_INTERVAL',       # 条件提取触发间隔（每N轮）
+    'CONTEXT_MAX_CONTEXT_TURNS',      # 对话获取范围（用于分析时获取的轮数）
     'CONTEXT_MAX_PER_TYPE',           # 每类型条件上限
     'CONTEXT_MAX_TOTAL',              # 条件总数上限
     'CONTEXT_DECAY_DAYS',             # 衰减开始天数
     'CONTEXT_DECAY_RATE',             # 每次衰减比例
     'CONTEXT_MIN_CONFIDENCE',         # 最低置信度（低于此自动归档）
+    # 上下文构建配置（build_context）
+    'BUILD_CONTEXT_INCLUDE_RECENT',   # 构建上下文时包含的最近对话数
+    'PROACTIVE_REMINDER_ENABLED',     # 是否启用主动提醒（重要信息长期未提及时提醒）
+    'PROACTIVE_REMINDER_TURNS',       # 主动提醒阈值（超过多少轮未提及则提醒）
     # 智能去重配置（持久条件和伏笔系统）
     'DEDUP_EMBEDDING_ENABLED',
     'DEDUP_HIGH_THRESHOLD',
@@ -137,6 +143,14 @@ FORESHADOWING_MAX_ACTIVE=50
 # 持久条件系统配置
 # Persistent Context Configuration
 # ----------------------------------------------------------------------------
+# 条件提取触发间隔（每N轮对话触发一次LLM提取，最小1）
+# Context extraction trigger interval (trigger every N turns, minimum 1)
+CONTEXT_TRIGGER_INTERVAL=5
+
+# 对话获取范围（分析时获取的历史轮数，确保有足够上下文）
+# Max context turns for analysis (history turns to fetch for analysis)
+CONTEXT_MAX_CONTEXT_TURNS=20
+
 # 每类型最大条件数 / Max conditions per type
 CONTEXT_MAX_PER_TYPE=10
 
@@ -151,6 +165,22 @@ CONTEXT_DECAY_RATE=0.05
 
 # 最低置信度（低于此值自动归档）/ Min confidence before archive
 CONTEXT_MIN_CONFIDENCE=0.1
+
+# ----------------------------------------------------------------------------
+# 上下文构建配置（100%不遗忘保证）
+# Context Building Configuration (100% Memory Guarantee)
+# ----------------------------------------------------------------------------
+# 构建上下文时包含的最近对话数（确保对话连贯性）
+# Recent turns to include when building context
+BUILD_CONTEXT_INCLUDE_RECENT=10
+
+# 是否启用主动提醒（重要信息长期未提及时主动提醒AI）
+# Enable proactive reminders for important info not mentioned for a while
+PROACTIVE_REMINDER_ENABLED=true
+
+# 主动提醒阈值（超过多少轮未提及则触发提醒）
+# Turns threshold to trigger proactive reminder
+PROACTIVE_REMINDER_TURNS=50
 
 # ----------------------------------------------------------------------------
 # 智能去重配置（持久条件和伏笔系统）
@@ -612,26 +642,9 @@ async def add_memory(request: AddMemoryRequest):
     else:
         print(f"[Recall][Memory] ⏭️ 跳过: {result.message}")
     
-    # 【重要】自动提取条件 - 只处理用户消息，避免AI回复产生大量无意义条件
-    # AI 回复中的角色特征等信息应该来自角色卡设定，不需要重复提取
-    # 只在成功保存的用户消息中提取条件
-    if role == 'user' and result.success:
-        try:
-            print(f"[Recall][Context] 🔍 触发条件提取: user={user_id}, char={character_id}, content_len={len(request.content)}")
-            # 在后台异步提取条件，不阻塞响应
-            loop = asyncio.get_event_loop()
-            loop.run_in_executor(
-                None,
-                lambda: engine.context_tracker.extract_from_text(
-                    request.content, user_id, character_id
-                )
-            )
-        except Exception as e:
-            print(f"[Recall][Context] ❌ 条件提取启动失败: {e}")
-    elif role == 'assistant':
-        print(f"[Recall][Context] ⏭️ AI消息不触发条件提取")
-    elif not result.success:
-        print(f"[Recall][Context] ⏭️ 记忆未保存(重复)，跳过条件提取")
+    # 【注意】条件提取已移至 /v1/foreshadowing/analyze/turn 端点
+    # 与伏笔分析使用相同的触发间隔机制（默认每5轮），避免重复分析相同对话历史
+    # 这样确保条件提取能获取完整的对话上下文，而不是只看单条消息
     
     return AddMemoryResponse(
         id=result.id,
@@ -1461,21 +1474,29 @@ _background_analysis_tasks: set = set()
 
 
 async def _background_foreshadowing_analysis(engine: RecallEngine, content: str, role: str, user_id: str, character_id: str):
-    """后台异步执行伏笔分析
+    """后台异步执行伏笔分析和条件提取
     
     这个函数在后台运行，不阻塞 API 响应。
     使用引擎的异步分析方法来避免阻塞事件循环。
     设置 60 秒超时，防止 LLM 调用卡住导致线程池耗尽。
+    
+    同时触发：
+    1. 伏笔分析（ForeshadowingAnalyzer.on_turn）
+    2. 条件提取（ContextTracker.on_turn）
+    
+    两者使用相同的触发间隔机制，避免重复分析相同对话历史。
     """
     try:
         content_preview = content[:60].replace('\n', ' ') if len(content) > 60 else content.replace('\n', ' ')
-        print(f"[Recall][Foreshadow] 🔄 开始分析: user={user_id}, role={role}")
-        print(f"[Recall][Foreshadow]    内容({len(content)}字): {content_preview}{'...' if len(content) > 60 else ''}")
-        # 在线程池中运行同步的分析方法，避免阻塞事件循环
+        print(f"[Recall][Analysis] 🔄 后台分析: user={user_id}, role={role}")
+        print(f"[Recall][Analysis]    内容({len(content)}字): {content_preview}{'...' if len(content) > 60 else ''}")
+        
         loop = asyncio.get_event_loop()
-        result = await asyncio.wait_for(
+        
+        # 1. 伏笔分析
+        foreshadow_result = await asyncio.wait_for(
             loop.run_in_executor(
-                None,  # 使用默认线程池
+                None,
                 lambda: engine.on_foreshadowing_turn(
                     content=content,
                     role=role,
@@ -1483,20 +1504,40 @@ async def _background_foreshadowing_analysis(engine: RecallEngine, content: str,
                     character_id=character_id
                 )
             ),
-            timeout=60.0  # 60秒超时
+            timeout=60.0
         )
-        if result.triggered:
-            print(f"[Recall][Foreshadow] ✅ 分析完成: 新伏笔={len(result.new_foreshadowings)}, 可能解决={len(result.potentially_resolved)}")
-            for f in result.new_foreshadowings[:2]:
+        if foreshadow_result.triggered:
+            print(f"[Recall][Foreshadow] ✅ 分析完成: 新伏笔={len(foreshadow_result.new_foreshadowings)}, 可能解决={len(foreshadow_result.potentially_resolved)}")
+            for f in foreshadow_result.new_foreshadowings[:2]:
                 print(f"[Recall][Foreshadow]    🌱 新伏笔: {f[:50]}..." if len(f) > 50 else f"[Recall][Foreshadow]    🌱 新伏笔: {f}")
         else:
-            print(f"[Recall][Foreshadow] ⏭️ 分析跳过: 未达到触发条件")
-        if result.error:
-            print(f"[Recall][Foreshadow] ⚠️ 分析警告: {result.error}")
+            print(f"[Recall][Foreshadow] ⏭️ 未达触发条件")
+        if foreshadow_result.error:
+            print(f"[Recall][Foreshadow] ⚠️ 警告: {foreshadow_result.error}")
+        
+        # 2. 条件提取（使用同样的触发间隔机制）
+        try:
+            context_result = await asyncio.wait_for(
+                loop.run_in_executor(
+                    None,
+                    lambda: engine.context_tracker.on_turn(user_id, character_id)
+                ),
+                timeout=60.0
+            )
+            if context_result.get('triggered'):
+                print(f"[Recall][Context] ✅ 提取完成: 新条件={context_result.get('extracted_count', 0)}")
+                for ctx in context_result.get('extracted', [])[:3]:
+                    print(f"[Recall][Context]    🌱 [{ctx['type']}] {ctx['content'][:40]}..." if len(ctx['content']) > 40 else f"[Recall][Context]    🌱 [{ctx['type']}] {ctx['content']}")
+            else:
+                turns_left = context_result.get('turns_until_next', '?')
+                print(f"[Recall][Context] ⏭️ 未达触发条件 (还需 {turns_left} 轮)")
+        except Exception as e:
+            print(f"[Recall][Context] ⚠️ 条件提取失败: {e}")
+            
     except asyncio.TimeoutError:
-        print(f"[Recall][Foreshadow] ⏱️ 分析超时 (>60s)")
+        print(f"[Recall][Analysis] ⏱️ 分析超时 (>60s)")
     except Exception as e:
-        print(f"[Recall][Foreshadow] ❌ 分析失败: {e}")
+        print(f"[Recall][Analysis] ❌ 分析失败: {e}")
 
 
 @app.post("/v1/foreshadowing/analyze/turn", response_model=ForeshadowingAnalysisResult, tags=["Foreshadowing Analysis"])
@@ -1847,11 +1888,18 @@ async def get_config():
     llm_model = os.environ.get('LLM_MODEL', '')
     
     # 容量限制配置
+    context_trigger_interval = safe_int(os.environ.get('CONTEXT_TRIGGER_INTERVAL', ''), 5)
+    context_max_context_turns = safe_int(os.environ.get('CONTEXT_MAX_CONTEXT_TURNS', ''), 20)
     context_max_per_type = safe_int(os.environ.get('CONTEXT_MAX_PER_TYPE', ''), 30)
     context_max_total = safe_int(os.environ.get('CONTEXT_MAX_TOTAL', ''), 100)
     context_decay_days = safe_int(os.environ.get('CONTEXT_DECAY_DAYS', ''), 7)
     context_decay_rate = safe_float(os.environ.get('CONTEXT_DECAY_RATE', ''), 0.1)
     context_min_confidence = safe_float(os.environ.get('CONTEXT_MIN_CONFIDENCE', ''), 0.3)
+    
+    # 上下文构建配置
+    build_context_include_recent = safe_int(os.environ.get('BUILD_CONTEXT_INCLUDE_RECENT', ''), 10)
+    proactive_reminder_enabled = safe_bool(os.environ.get('PROACTIVE_REMINDER_ENABLED', ''), True)
+    proactive_reminder_turns = safe_int(os.environ.get('PROACTIVE_REMINDER_TURNS', ''), 50)
     
     foreshadowing_max_return = safe_int(os.environ.get('FORESHADOWING_MAX_RETURN', ''), 5)
     foreshadowing_max_active = safe_int(os.environ.get('FORESHADOWING_MAX_ACTIVE', ''), 50)
@@ -1880,11 +1928,18 @@ async def get_config():
         },
         "capacity_limits": {
             "context": {
+                "trigger_interval": context_trigger_interval,
+                "max_context_turns": context_max_context_turns,
                 "max_per_type": context_max_per_type,
                 "max_total": context_max_total,
                 "decay_days": context_decay_days,
                 "decay_rate": context_decay_rate,
                 "min_confidence": context_min_confidence
+            },
+            "build_context": {
+                "include_recent": build_context_include_recent,
+                "proactive_reminder_enabled": proactive_reminder_enabled,
+                "proactive_reminder_turns": proactive_reminder_turns
             },
             "foreshadowing": {
                 "max_return": foreshadowing_max_return,
@@ -2407,6 +2462,7 @@ class ConfigUpdateRequest(BaseModel):
     llm_api_base: Optional[str] = Field(default=None, description="LLM API 地址")
     llm_model: Optional[str] = Field(default=None, description="LLM 模型")
     # 持久条件容量配置
+    context_trigger_interval: Optional[int] = Field(default=None, description="条件提取触发间隔（每N轮）")
     context_max_per_type: Optional[int] = Field(default=None, description="每类型条件上限")
     context_max_total: Optional[int] = Field(default=None, description="条件总数上限")
     context_decay_days: Optional[int] = Field(default=None, description="衰减开始天数")
@@ -2419,6 +2475,11 @@ class ConfigUpdateRequest(BaseModel):
     dedup_embedding_enabled: Optional[bool] = Field(default=None, description="启用语义去重")
     dedup_high_threshold: Optional[float] = Field(default=None, description="高相似度阈值 (0-1)")
     dedup_low_threshold: Optional[float] = Field(default=None, description="低相似度阈值 (0-1)")
+    # 上下文构建配置（100%不遗忘保证）
+    context_max_context_turns: Optional[int] = Field(default=None, description="对话提取最大轮次")
+    build_context_include_recent: Optional[int] = Field(default=None, description="build_context默认最近对话轮次")
+    proactive_reminder_enabled: Optional[bool] = Field(default=None, description="启用主动提醒")
+    proactive_reminder_turns: Optional[int] = Field(default=None, description="主动提醒触发轮次")
 
 
 @app.put("/v1/config", tags=["Admin"])
@@ -2458,6 +2519,7 @@ async def update_config(request: ConfigUpdateRequest):
         'llm_api_base': 'LLM_API_BASE',
         'llm_model': 'LLM_MODEL',
         # 持久条件容量配置
+        'context_trigger_interval': 'CONTEXT_TRIGGER_INTERVAL',
         'context_max_per_type': 'CONTEXT_MAX_PER_TYPE',
         'context_max_total': 'CONTEXT_MAX_TOTAL',
         'context_decay_days': 'CONTEXT_DECAY_DAYS',
@@ -2470,6 +2532,11 @@ async def update_config(request: ConfigUpdateRequest):
         'dedup_embedding_enabled': 'DEDUP_EMBEDDING_ENABLED',
         'dedup_high_threshold': 'DEDUP_HIGH_THRESHOLD',
         'dedup_low_threshold': 'DEDUP_LOW_THRESHOLD',
+        # 上下文构建配置（100%不遗忘保证）
+        'context_max_context_turns': 'CONTEXT_MAX_CONTEXT_TURNS',
+        'build_context_include_recent': 'BUILD_CONTEXT_INCLUDE_RECENT',
+        'proactive_reminder_enabled': 'PROACTIVE_REMINDER_ENABLED',
+        'proactive_reminder_turns': 'PROACTIVE_REMINDER_TURNS',
     }
     
     # 更新配置

@@ -184,7 +184,8 @@ class ContextTracker:
         }
     
     def __init__(self, base_path: Optional[str] = None, llm_client: Optional[Any] = None, 
-                 embedding_backend: Optional[Any] = None, storage_dir: Optional[str] = None):
+                 embedding_backend: Optional[Any] = None, storage_dir: Optional[str] = None,
+                 memory_provider: Optional[Any] = None):
         """初始化持久上下文追踪器
         
         存储结构：{base_path}/{user_id}/{character_id}/contexts.json
@@ -195,6 +196,7 @@ class ContextTracker:
             llm_client: LLM 客户端（用于智能提取和压缩）
             embedding_backend: Embedding 后端（用于智能去重），如果为 None 会尝试自动获取
             storage_dir: 旧参数（向后兼容），如果提供则自动迁移到新结构
+            memory_provider: 记忆提供回调函数，格式为 (user_id, limit) -> List[Dict]
         """
         # 向后兼容：如果提供了 storage_dir 而非 base_path
         if storage_dir and not base_path:
@@ -212,6 +214,17 @@ class ContextTracker:
         
         # Embedding 后端（用于智能去重）
         self.embedding_backend = embedding_backend
+        
+        # 记忆提供回调（用于获取对话上下文）
+        self._memory_provider = memory_provider
+        
+        # 触发机制（类似 ForeshadowingAnalyzer）
+        # 每 N 轮对话触发一次条件提取，避免重复分析相同内容
+        self._trigger_interval = int(os.environ.get('CONTEXT_TRIGGER_INTERVAL', '5'))  # 默认每5轮
+        # 对话获取范围：用于分析时获取的历史轮数（与伏笔分析器统一）
+        self._max_context_turns = int(os.environ.get('CONTEXT_MAX_CONTEXT_TURNS', '20'))  # 默认20轮
+        self._turn_counters: Dict[str, int] = {}  # cache_key -> 当前轮次计数
+        self._last_analyzed_turn: Dict[str, int] = {}  # cache_key -> 上次分析时的总轮次
         
         if base_path:
             os.makedirs(base_path, exist_ok=True)
@@ -246,30 +259,42 @@ class ContextTracker:
         # LLM 提取提示
         self.extraction_prompt = """分析以下对话内容，提取出应该作为"持久前提条件"的信息。
 
-【重要】只提取对话中**明确提到**的信息，**不要推测、脑补或添加对话中没有的内容**。
-如果对话内容很短或没有明确的背景信息，请返回空数组 []。
+【重要提示】
+1. 只提取对话中**明确提到或确立**的信息
+2. 如果对话内容很短或没有明确的背景信息，请返回空数组 []
+3. 对于角色扮演/故事场景，要提取角色状态、技能、物品、关系等变化
 
 持久前提条件是指：一旦确立就应该在后续所有对话中默认成立的背景信息。
 
-合适的例子（对话中明确提到的）：
-- 对话说"我是一个大学毕业生，想创业" → 可以提取
-- 对话说"角色拿起了魔法剑" → 可以提取"角色携带魔法剑"
-- 对话说"露西有黑客技能" → 可以提取技能信息
+【角色扮演/故事场景适用的条件类型】
+- character_trait: 角色性格、身份、外貌等固定特征
+- skill_ability: 角色习得的技能或能力（如：入侵神识、剑术）
+- item_prop: 角色获得或携带的物品道具
+- relationship: 角色之间的关系变化（如：成为师兄妹、结仇）
+- world_setting: 世界观设定（如：修仙世界、魔法体系）
+- emotional_state: 角色当前情绪状态
 
-不合适的例子（对话中没有明确提到的）：
-- 对话只是普通聊天 → 不要编造角色特征
-- 对话没有提到具体技能 → 不要猜测角色可能有什么技能
-- 对话没有提到关系 → 不要推测角色之间的关系
+【日常对话适用的条件类型】
+- user_identity: 用户身份（如：大学毕业生、程序员）
+- user_goal: 用户目标（如：想创业、学习Python）
+- environment: 技术环境（如：Windows开发、Ubuntu部署）
+- project: 项目信息
+
+【提取示例】
+- "我用入侵神识的办法扫描记忆" → skill_ability: "主角掌握入侵神识能力"
+- "李二狗是邻村的二流子" → character_trait: "李二狗是邻村的二流子"
+- "师姐送给了我一把法剑" → item_prop: "主角获得师姐赠送的法剑"
+- "我是在修仙界" → world_setting: "故事发生在修仙界"
 
 对话内容：
 {content}
 
 请以JSON格式返回提取的条件（如果没有明确的条件则返回空数组 []）：
 [
-  {{"type": "user_identity|user_goal|user_preference|environment|project|time_constraint|character_trait|world_setting|relationship|emotional_state|skill_ability|item_prop|assumption|constraint|custom", "content": "条件内容（必须是对话中明确提到的）", "keywords": ["关键词1", "关键词2"]}}
+  {{"type": "条件类型", "content": "条件内容（简洁概括）", "keywords": ["关键词1", "关键词2"]}}
 ]
 
-只返回JSON，不要其他解释。如果没有找到明确的条件，返回 []。"""
+只返回JSON数组，不要其他解释。如果没有找到明确的条件，返回 []。"""
     
     def _sanitize_path_component(self, name: str) -> str:
         """清理路径组件中的非法字符"""
@@ -331,6 +356,144 @@ class ContextTracker:
         with open(filepath, 'w', encoding='utf-8') as f:
             json.dump([c.to_dict() for c in contexts], f, ensure_ascii=False, indent=2)
     
+    def set_memory_provider(self, provider):
+        """设置记忆提供回调函数
+        
+        Args:
+            provider: 回调函数，格式为 (user_id, limit) -> List[Dict]
+                     返回格式：[{'content': '...', 'metadata': {'role': 'user/assistant', ...}}]
+        """
+        self._memory_provider = provider
+        print(f"[ContextTracker] 🔗 已设置 memory_provider")
+    
+    def on_turn(self, user_id: str = "default", character_id: str = "default") -> Dict[str, Any]:
+        """通知一轮对话完成，检查是否应该触发条件提取
+        
+        类似 ForeshadowingAnalyzer.on_turn()，每 N 轮触发一次分析。
+        这避免了每轮都重复分析相同对话历史的问题。
+        
+        Args:
+            user_id: 用户ID
+            character_id: 角色ID
+            
+        Returns:
+            Dict: 包含触发状态和提取结果
+        """
+        cache_key = f"{user_id}/{character_id}"
+        
+        # 增加轮次计数
+        if cache_key not in self._turn_counters:
+            self._turn_counters[cache_key] = 0
+        self._turn_counters[cache_key] += 1
+        current_count = self._turn_counters[cache_key]
+        
+        # 检查是否应该触发分析
+        if current_count >= self._trigger_interval:
+            print(f"[ContextTracker] 🔄 触发条件提取: user={user_id}, char={character_id}")
+            print(f"[ContextTracker]    轮次={current_count}, 间隔={self._trigger_interval}")
+            
+            # 重置计数
+            self._turn_counters[cache_key] = 0
+            
+            # 执行提取（使用对话上下文）
+            if self.llm_client and self._memory_provider:
+                extracted = self._extract_from_conversation(user_id, character_id)
+                return {
+                    'triggered': True,
+                    'extracted_count': len(extracted),
+                    'extracted': [{'id': ctx.id, 'content': ctx.content, 'type': ctx.context_type.value} for ctx in extracted]
+                }
+            else:
+                print(f"[ContextTracker]    ⏭️ LLM 或 memory_provider 未配置，跳过")
+                return {'triggered': False, 'reason': 'LLM or memory_provider not configured'}
+        
+        return {
+            'triggered': False,
+            'turns_until_next': self._trigger_interval - current_count
+        }
+    
+    def _extract_from_conversation(self, user_id: str, character_id: str = "default") -> List['PersistentContext']:
+        """从对话历史中提取条件
+        
+        获取最近的对话历史，然后使用 LLM 提取持久条件。
+        与 extract_from_text 不同，这个方法专门用于批量分析对话历史。
+        
+        使用 CONTEXT_MAX_CONTEXT_TURNS 配置控制获取范围，与伏笔分析器统一。
+        
+        Args:
+            user_id: 用户ID
+            character_id: 角色ID
+            
+        Returns:
+            List[PersistentContext]: 提取的条件列表
+        """
+        # 使用 max_context_turns * 2 作为获取范围（与伏笔分析器保持一致）
+        conversation_context = self._get_conversation_context(user_id, character_id, max_turns=self._max_context_turns * 2)
+        
+        if not conversation_context:
+            print(f"[ContextTracker] ⏭️ 无对话上下文，跳过提取")
+            return []
+        
+        print(f"[ContextTracker] 🔍 从对话历史提取条件")
+        print(f"[ContextTracker]    对话长度: {len(conversation_context)} 字符")
+        
+        # 使用 LLM 提取
+        return self._extract_with_llm("", user_id, character_id, conversation_context)
+    
+    def _get_conversation_context(self, user_id: str, character_id: str = "default", 
+                                   max_turns: int = 10) -> str:
+        """获取最近的对话上下文
+        
+        从已保存的记忆中获取最近的对话，用于条件提取时提供更多上下文。
+        
+        Args:
+            user_id: 用户ID
+            character_id: 角色ID  
+            max_turns: 最大轮数
+            
+        Returns:
+            格式化的对话内容字符串
+        """
+        if not self._memory_provider:
+            return ""
+        
+        try:
+            # 获取最近的记忆
+            memories = self._memory_provider(user_id, max_turns * 2)
+            
+            if not memories:
+                return ""
+            
+            # 转换为对话格式
+            conversations = []
+            for mem in memories:
+                metadata = mem.get('metadata', {})
+                role = metadata.get('role', 'user')
+                content = mem.get('content', '')
+                timestamp = metadata.get('timestamp', 0)
+                
+                if content:
+                    conversations.append({
+                        'role': role,
+                        'content': content,
+                        'timestamp': timestamp
+                    })
+            
+            # 按时间戳排序
+            conversations.sort(key=lambda x: x.get('timestamp', 0))
+            
+            # 格式化为文本
+            lines = []
+            for conv in conversations:
+                role_label = "用户" if conv['role'] == 'user' else "AI"
+                lines.append(f"{role_label}: {conv['content']}")
+            
+            return "\n".join(lines)
+            
+        except Exception as e:
+            print(f"[ContextTracker] ⚠️ 获取对话上下文失败: {e}")
+            return ""
+
     # =========================
     # 归档机制（低置信度条件自动归档）
     # =========================
@@ -1208,18 +1371,36 @@ class ContextTracker:
         self._save_user(user_id, character_id)
     
     def extract_from_text(self, text: str, user_id: str = "default",
-                          character_id: str = "default") -> List[PersistentContext]:
+                          character_id: str = "default", 
+                          use_conversation_context: bool = True) -> List[PersistentContext]:
         """从文本中自动提取持久上下文
         
-        优先使用 LLM，如果没有 LLM 则使用规则
+        优先使用 LLM，如果没有 LLM 则使用规则。
+        如果启用了 memory_provider 且 use_conversation_context=True，
+        会自动获取最近的对话历史作为上下文，帮助 LLM 更好地理解和提取条件。
+        
+        Args:
+            text: 当前消息文本
+            user_id: 用户ID
+            character_id: 角色ID
+            use_conversation_context: 是否获取对话历史作为上下文（默认True）
         """
         text_preview = text[:60].replace('\n', ' ') if len(text) > 60 else text.replace('\n', ' ')
         print(f"[ContextTracker] 🔍 开始提取: user={user_id}, char={character_id}")
         print(f"[ContextTracker]    文本({len(text)}字): {text_preview}{'...' if len(text) > 60 else ''}")
+        
+        # 获取对话上下文（如果配置了 memory_provider）
+        conversation_context = ""
+        if use_conversation_context and self.llm_client and self._memory_provider:
+            conversation_context = self._get_conversation_context(user_id, character_id, max_turns=10)
+            if conversation_context:
+                print(f"[ContextTracker]    📜 获取到对话上下文: {len(conversation_context)} 字符")
+        
         print(f"[ContextTracker]    模式: {'LLM' if self.llm_client else '规则'}")
         
         if self.llm_client:
-            result = self._extract_with_llm(text, user_id, character_id)
+            # 传入对话上下文以帮助 LLM 更好地理解
+            result = self._extract_with_llm(text, user_id, character_id, conversation_context)
         else:
             result = self._extract_with_rules(text, user_id, character_id)
         
@@ -1278,12 +1459,33 @@ class ContextTracker:
         return extracted
     
     def _extract_with_llm(self, text: str, user_id: str,
-                          character_id: str = "default") -> List[PersistentContext]:
-        """使用 LLM 提取"""
+                          character_id: str = "default",
+                          conversation_context: str = "") -> List[PersistentContext]:
+        """使用 LLM 提取
+        
+        Args:
+            text: 当前消息文本
+            user_id: 用户ID
+            character_id: 角色ID
+            conversation_context: 对话历史上下文（可选，帮助 LLM 更好理解）
+        """
         try:
             print(f"[ContextTracker] 🤖 调用 LLM 提取条件...")
-            prompt = self.extraction_prompt.format(content=text)
-            response = self.llm_client.complete(prompt, max_tokens=500)
+            
+            # 构建提取内容：如果有对话上下文，则合并
+            if conversation_context:
+                # 使用对话上下文 + 当前消息
+                extract_content = f"""【最近对话历史】
+{conversation_context}
+
+【当前消息】
+{text}"""
+                print(f"[ContextTracker]    📝 提取内容: 对话历史 + 当前消息 = {len(extract_content)} 字符")
+            else:
+                extract_content = text
+            
+            prompt = self.extraction_prompt.format(content=extract_content)
+            response = self.llm_client.complete(prompt, max_tokens=800)
             print(f"[ContextTracker]    LLM 响应: {len(response)} 字符")
             
             # 解析 JSON
