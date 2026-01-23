@@ -230,7 +230,17 @@ class RecallEngine:
             memory_provider=self._get_recent_memories_for_analysis
         )
         
-        self.consistency_checker = ConsistencyChecker()
+        # L0 核心设定（角色卡、世界观、规则等）
+        # 提前加载，因为 ConsistencyChecker 需要 absolute_rules
+        self.core_settings = CoreSettings.load(
+            data_path=os.path.join(self.data_root, 'data')
+        )
+        
+        # 一致性检查器（传入用户定义的绝对规则 + LLM客户端用于语义检测）
+        self.consistency_checker = ConsistencyChecker(
+            absolute_rules=self.core_settings.absolute_rules,
+            llm_client=self.llm_client  # 启用LLM语义规则检测
+        )
         self.memory_summarizer = MemorySummarizer(llm_client=self.llm_client)
         self.scenario_detector = ScenarioDetector()
         
@@ -247,11 +257,6 @@ class RecallEngine:
         
         # 长期记忆层（L1 ConsolidatedMemory）
         self.consolidated_memory = ConsolidatedMemory(
-            data_path=os.path.join(self.data_root, 'data')
-        )
-        
-        # L0 核心设定（角色卡、世界观、规则等）
-        self.core_settings = CoreSettings.load(
             data_path=os.path.join(self.data_root, 'data')
         )
         

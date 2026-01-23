@@ -524,11 +524,14 @@ function createUI() {
                             <li>角色卡、世界观、写作风格请使用 <strong>SillyTavern 自带功能</strong></li>
                             <li>此功能是 ST 没有的<strong>补充功能</strong>，用于强制 AI 遵守某些规则</li>
                         </ul>
+                        <div id="recall-rule-mode-hint" class="recall-setting-hint" style="margin-top:8px; padding:6px; background:var(--SmartThemeBlurTintColor); border-radius:4px;">
+                            🔍 检测模式: <span id="recall-rule-mode-text">检查中...</span>
+                        </div>
                     </div>
                     
                     <div class="recall-settings-section">
                         <div class="recall-settings-section-title">⚠️ 绝对规则（每行一条）</div>
-                        <div class="recall-setting-hint">这些规则会被强制注入，AI 必须遵守</div>
+                        <div class="recall-setting-hint">这些规则会被强制注入，AI 必须遵守。保存内容时会自动检测违规并提醒。</div>
                         <textarea id="recall-core-rules" class="text_pole recall-textarea" 
                             placeholder="绝对不能违反的规则，每行一条
 例如：
@@ -1920,7 +1923,17 @@ async function loadCoreSettings() {
             const rulesArray = data.absolute_rules || [];
             document.getElementById('recall-core-rules').value = rulesArray.join('\n');
             
-            console.log('[Recall] 绝对规则已加载');
+            // 显示检测模式
+            const modeTextEl = document.getElementById('recall-rule-mode-text');
+            if (modeTextEl) {
+                if (data.rule_detection_mode === 'llm') {
+                    modeTextEl.innerHTML = '<span style="color:var(--SmartThemeQuoteColor);">✨ LLM 语义检测已启用</span>';
+                } else {
+                    modeTextEl.innerHTML = '<span style="color:var(--SmartThemeEmColor);">⚠️ 未配置 LLM，规则检测未生效</span>（配置 LLM_API_KEY 后生效）';
+                }
+            }
+            
+            console.log('[Recall] 绝对规则已加载, 检测模式:', data.rule_detection_mode || 'unknown');
         } else {
             console.error('[Recall] 加载绝对规则失败:', response.status);
         }
@@ -1959,6 +1972,16 @@ async function saveCoreSettings() {
             const result = await response.json();
             alert(`✅ 绝对规则已保存\n\n共 ${(result.absolute_rules || []).length} 条规则`);
             console.log('[Recall] 绝对规则已保存');
+            
+            // 更新检测模式显示
+            const modeTextEl = document.getElementById('recall-rule-mode-text');
+            if (modeTextEl && result.rule_detection_mode) {
+                if (result.rule_detection_mode === 'llm') {
+                    modeTextEl.innerHTML = '<span style="color:var(--SmartThemeQuoteColor);">✨ LLM 语义检测已启用</span>';
+                } else {
+                    modeTextEl.innerHTML = '<span style="color:var(--SmartThemeEmColor);">⚠️ 未配置 LLM，规则检测未生效</span>（配置 LLM_API_KEY 后生效）';
+                }
+            }
         } else {
             const error = await response.json().catch(() => ({}));
             alert(`❌ 保存绝对规则失败: ${error.detail || '未知错误'}`);

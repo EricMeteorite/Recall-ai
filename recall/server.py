@@ -531,6 +531,8 @@ class CoreSettingsResponse(BaseModel):
     naming_conventions: str = ""
     user_preferences: Dict[str, Any] = {}
     absolute_rules: List[str] = []
+    # 规则检测模式: "llm" = LLM语义检测, "fallback" = 关键词回退检测
+    rule_detection_mode: str = "fallback"
 
 
 class ForeshadowingRequest(BaseModel):
@@ -975,9 +977,18 @@ async def update_memory(
 
 @app.get("/v1/core-settings", response_model=CoreSettingsResponse, tags=["Core Settings"])
 async def get_core_settings():
-    """获取L0核心设定"""
+    """获取L0核心设定
+    
+    返回值中包含 rule_detection_mode 字段:
+    - "llm": LLM 语义检测已启用（需配置 LLM_API_KEY）
+    - "fallback": 使用关键词回退检测（未配置 LLM 或 LLM 不可用）
+    """
     engine = get_engine()
     settings = engine.core_settings
+    
+    # 判断规则检测模式
+    rule_mode = "llm" if (engine.consistency_checker._llm_client is not None) else "fallback"
+    
     return CoreSettingsResponse(
         character_card=settings.character_card,
         world_setting=settings.world_setting,
@@ -986,7 +997,8 @@ async def get_core_settings():
         project_structure=settings.project_structure,
         naming_conventions=settings.naming_conventions,
         user_preferences=settings.user_preferences,
-        absolute_rules=settings.absolute_rules
+        absolute_rules=settings.absolute_rules,
+        rule_detection_mode=rule_mode
     )
 
 
@@ -1011,9 +1023,14 @@ async def update_core_settings(request: CoreSettingsRequest):
         settings.naming_conventions = request.naming_conventions
     if request.absolute_rules is not None:
         settings.absolute_rules = request.absolute_rules
+        # 同步更新 ConsistencyChecker 的规则
+        engine.consistency_checker.update_rules(request.absolute_rules)
     
     # 保存更新
     settings.save()
+    
+    # 获取检测模式
+    rule_mode = "llm" if engine.consistency_checker._llm_client else "fallback"
     
     return CoreSettingsResponse(
         character_card=settings.character_card,
@@ -1023,7 +1040,8 @@ async def update_core_settings(request: CoreSettingsRequest):
         project_structure=settings.project_structure,
         naming_conventions=settings.naming_conventions,
         user_preferences=settings.user_preferences,
-        absolute_rules=settings.absolute_rules
+        absolute_rules=settings.absolute_rules,
+        rule_detection_mode=rule_mode
     )
 
 

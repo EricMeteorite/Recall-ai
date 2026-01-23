@@ -65,18 +65,44 @@ class CoreSettings:
             json.dump(data, f, ensure_ascii=False, indent=2)
     
     def get_injection_text(self, scenario: str) -> str:
-        """根据场景返回需要注入的核心设定"""
+        """根据场景返回需要注入的核心设定
+        
+        注意：absolute_rules（绝对规则）会在所有场景下都注入，
+        因为这是用户定义的必须遵守的规则，不分场景。
+        """
+        parts = []
+        
+        # 场景特定内容
         if scenario == 'roleplay':
-            parts = [self.character_card, self.world_setting, self.writing_style]
-            return '\n\n'.join(p for p in parts if p)
+            scene_parts = [self.character_card, self.world_setting, self.writing_style]
+            scene_text = '\n\n'.join(p for p in scene_parts if p)
+            if scene_text:
+                parts.append(scene_text)
         elif scenario == 'coding':
-            parts = [self.code_standards, self.naming_conventions]
-            return '\n\n'.join(p for p in parts if p)
-        else:
-            return self._get_universal_rules()
+            scene_parts = [self.code_standards, self.naming_conventions]
+            scene_text = '\n\n'.join(p for p in scene_parts if p)
+            if scene_text:
+                parts.append(scene_text)
+        
+        # 【重要】绝对规则在所有场景下都注入
+        rules_text = self._get_universal_rules()
+        if rules_text:
+            parts.append(rules_text)
+        
+        return '\n\n'.join(parts)
     
     def _get_universal_rules(self) -> str:
-        """获取通用规则"""
-        if not self.absolute_rules:
+        """获取通用规则（绝对规则）"""
+        # 过滤空规则并去重（保持顺序）
+        seen = set()
+        valid_rules = []
+        for r in self.absolute_rules:
+            if not r or not r.strip():
+                continue
+            normalized = r.strip()
+            if normalized not in seen:
+                seen.add(normalized)
+                valid_rules.append(normalized)
+        if not valid_rules:
             return ""
-        return "【必须遵守的规则】\n" + "\n".join(f"- {r}" for r in self.absolute_rules)
+        return "【必须遵守的规则】\n" + "\n".join(f"- {r}" for r in valid_rules)
