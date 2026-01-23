@@ -32,26 +32,87 @@
     
     /**
      * 智能检测 Recall API 地址
-     * 优先级：
-     * 1. 与当前页面同源（如果 ST 和 Recall 在同一服务器）
-     * 2. localhost:18888（本地开发）
-     * 3. 127.0.0.1:18888（本地开发备用）
+     * 
+     * 支持两种部署模式：
+     * 1. 端口模式: http://域名:18888（直接暴露端口）
+     * 2. 路径模式: http://域名/recall（通过 Nginx 等反向代理）
+     * 
+     * 检测优先级：
+     * 1. 尝试 /recall 路径（反向代理模式）
+     * 2. 尝试 :18888 端口（直接端口模式）
+     * 3. localhost:18888（本地开发）
      */
     function detectApiUrl() {
         const currentHost = window.location.hostname;
         const currentProtocol = window.location.protocol;
-        
-        // 如果是通过域名访问（不是 localhost/127.0.0.1）
-        // 假设 Recall 服务也部署在同一台服务器，端口 18888
-        if (currentHost && currentHost !== 'localhost' && currentHost !== '127.0.0.1') {
-            // 优先使用 http（Recall 默认不启用 https）
-            return `http://${currentHost}:18888`;
-        }
+        const currentPort = window.location.port;
         
         // 本地开发环境
-        return 'http://127.0.0.1:18888';
+        if (!currentHost || currentHost === 'localhost' || currentHost === '127.0.0.1') {
+            return 'http://127.0.0.1:18888';
+        }
+        
+        // 通过域名访问，构建基础 URL
+        // 优先使用路径模式（适配反向代理）
+        const baseUrl = `${currentProtocol}//${currentHost}${currentPort ? ':' + currentPort : ''}`;
+        return `${baseUrl}/recall`;
     }
     
+    /**
+     * 探测 API 地址是否可用
+     */
+    async function probeApiUrl(url) {
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 3000);
+            
+            const response = await fetch(`${url}/health`, {
+                method: 'GET',
+                signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+            
+            return response.ok;
+        } catch (e) {
+            return false;
+        }
+    }
+    
+    /**
+     * 智能连接：自动探测可用的 API 地址
+     */
+    async function smartConnect() {
+        const currentHost = window.location.hostname;
+        const currentProtocol = window.location.protocol;
+        const currentPort = window.location.port;
+        
+        // 本地环境直接使用默认地址
+        if (!currentHost || currentHost === 'localhost' || currentHost === '127.0.0.1') {
+            return 'http://127.0.0.1:18888';
+        }
+        
+        const baseUrl = `${currentProtocol}//${currentHost}${currentPort ? ':' + currentPort : ''}`;
+        
+        // 候选 URL 列表（按优先级）
+        const candidates = [
+            `${baseUrl}/recall`,              // 路径模式（反向代理）
+            `http://${currentHost}:18888`,    // 端口模式（HTTP）
+            `https://${currentHost}:18888`,   // 端口模式（HTTPS）
+        ];
+        
+        for (const url of candidates) {
+            console.log(`[Recall] 探测 API 地址: ${url}`);
+            if (await probeApiUrl(url)) {
+                console.log(`[Recall] ✓ 找到可用地址: ${url}`);
+                return url;
+            }
+        }
+        
+        // 都失败，返回第一个候选（让用户手动配置）
+        console.log(`[Recall] ✗ 未找到可用地址，使用默认: ${candidates[0]}`);
+        return candidates[0];
+    }
+
     /**
      * 过滤掉AI回复中的思考过程
      * 支持多种常见格式：<thinking>, <thought>, <reasoning>, 【思考】等
@@ -163,11 +224,22 @@ function loadSettings() {
             const parsed = JSON.parse(saved);
             pluginSettings = { ...defaultSettings, ...parsed };
             
-            // 如果保存的设置没有 apiUrl 或是空的，自动检测
-            if (!pluginSettings.apiUrl) {
-                pluginSettings.apiUrl = detectApiUrl();
-                saveSettings();  // 保存检测到的地址
-                console.log('[Recall] 自动检测到 API 地址:', pluginSettings.apiUrl);
+            // 检查保存的 apiUrl 是否与当前访问的服务器匹配
+            // 如果不匹配，说明可能是从其他设备同步过来的旧设置，需要重新检测
+            const currentHost = window.location.hostname;
+            const savedUrl = pluginSettings.apiUrl || '';
+            const savedHost = savedUrl.match(/\/\/([^:/]+)/)?.[1] || '';
+            
+            // 如果保存的地址与当前访问的服务器不同，重新检测
+            // 例如：保存的是 utophoria.top 但现在访问的是 192.168.1.100
+            if (!pluginSettings.apiUrl || 
+                (savedHost && savedHost !== currentHost && 
+                 savedHost !== 'localhost' && savedHost !== '127.0.0.1' &&
+                 currentHost !== 'localhost' && currentHost !== '127.0.0.1')) {
+                const newUrl = detectApiUrl();
+                console.log(`[Recall] API 地址不匹配，重新检测: ${savedUrl} -> ${newUrl}`);
+                pluginSettings.apiUrl = newUrl;
+                saveSettings();
             }
         } else {
             // 首次使用，自动检测 API 地址
@@ -2187,6 +2259,28 @@ async function checkConnection() {
             throw new Error(`API 响应异常: ${response.status}`);
         }
     } catch (e) {
+        // 首次连接失败，尝试智能探测其他地址（只探测一次）
+        if (!checkConnection._hasProbed) {
+            checkConnection._hasProbed = true;
+            console.log('[Recall] 当前地址连接失败，尝试智能探测...');
+            const newUrl = await smartConnect();
+            
+            if (newUrl !== pluginSettings.apiUrl) {
+                console.log(`[Recall] 切换到新地址: ${newUrl}`);
+                pluginSettings.apiUrl = newUrl;
+                saveSettings();
+                
+                // 更新 UI 显示
+                const urlInput = document.getElementById('recall-api-url');
+                if (urlInput) urlInput.value = newUrl;
+                
+                // 用新地址重试连接（重置标记，允许新地址再试一次）
+                checkConnection._hasProbed = false;
+                return checkConnection();
+            }
+        }
+        
+        // 智能探测也失败了
         isConnected = false;
         updateConnectionStatus(false);
         
@@ -2204,7 +2298,7 @@ async function checkConnection() {
                 helpTip = `浏览器阻止了混合内容请求。建议：使用 http://${currentHost} 访问 SillyTavern`;
             } else if (pluginSettings.apiUrl.includes('127.0.0.1') || pluginSettings.apiUrl.includes('localhost')) {
                 if (currentHost !== 'localhost' && currentHost !== '127.0.0.1') {
-                    helpTip = `当前从 ${currentHost} 访问，但 API 指向本地。请到设置中修改 API 地址为 http://${currentHost}:18888`;
+                    helpTip = `当前从 ${currentHost} 访问，但 API 指向本地。请到设置中修改 API 地址`;
                 } else {
                     helpTip = '请确认 Recall 服务已启动（python -m recall.server）';
                 }
