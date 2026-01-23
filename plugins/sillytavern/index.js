@@ -2421,6 +2421,22 @@ async function onAddMemory() {
         if (result.success) {
             document.getElementById('recall-add-input').value = '';
             loadMemories();
+            
+            // 显示一致性检查警告（如果有）
+            if (result.consistency_warnings && result.consistency_warnings.length > 0) {
+                const warningMsg = result.consistency_warnings.join('\n');
+                console.warn('[Recall] 一致性检查警告:', warningMsg);
+                // 使用 toastr 显示警告（如果可用）
+                if (typeof toastr !== 'undefined' && toastr.warning) {
+                    toastr.warning(warningMsg, '一致性检查警告', { timeOut: 8000 });
+                }
+            }
+        } else {
+            // 显示保存失败的原因
+            console.log('[Recall] 记忆未保存:', result.message);
+            if (result.message && typeof toastr !== 'undefined' && toastr.info) {
+                toastr.info(result.message, 'Recall', { timeOut: 3000 });
+            }
         }
     } catch (e) {
         console.error('[Recall] 添加记忆失败:', e);
@@ -2566,8 +2582,22 @@ const memorySaveQueue = {
                 // 【修复】解析服务器返回的实际结果，检查是否真的保存成功
                 const result = await response.json();
                 if (result.success) {
-                    item.resolve({ success: true, id: result.id });
+                    item.resolve({ 
+                        success: true, 
+                        id: result.id,
+                        consistency_warnings: result.consistency_warnings || []
+                    });
                     console.log('[Recall] 记忆保存成功（队列处理）');
+                    
+                    // 显示一致性检查警告（如果有）
+                    if (result.consistency_warnings && result.consistency_warnings.length > 0) {
+                        console.warn('[Recall] 一致性检查警告:', result.consistency_warnings);
+                        // 使用 toastr 显示警告（如果可用），不阻塞流程
+                        if (typeof toastr !== 'undefined' && toastr.warning) {
+                            const warningMsg = result.consistency_warnings.join('\n');
+                            toastr.warning(warningMsg, '一致性检查警告', { timeOut: 8000 });
+                        }
+                    }
                 } else {
                     // 服务器返回成功状态码，但业务上未保存（如重复内容）
                     item.resolve({ success: false, message: result.message });
