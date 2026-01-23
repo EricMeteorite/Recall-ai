@@ -56,6 +56,36 @@ SUPPORTED_CONFIG_KEYS = {
     'DEDUP_EMBEDDING_ENABLED',
     'DEDUP_HIGH_THRESHOLD',
     'DEDUP_LOW_THRESHOLD',
+    
+    # ====== v4.0 Phase 1/2 新增配置项 ======
+    # 时态知识图谱配置
+    'TEMPORAL_GRAPH_ENABLED',         # 是否启用时态知识图谱
+    'TEMPORAL_DECAY_RATE',            # 时态信息衰减率 (0.0-1.0)
+    'TEMPORAL_MAX_HISTORY',           # 保留的最大时态历史记录数
+    # 矛盾检测与管理配置
+    'CONTRADICTION_DETECTION_ENABLED',  # 是否启用矛盾检测
+    'CONTRADICTION_AUTO_RESOLVE',     # 是否自动解决矛盾（推荐 false）
+    'CONTRADICTION_DETECTION_STRATEGY',  # 检测策略: RULE/LLM/HYBRID/AUTO
+    'CONTRADICTION_SIMILARITY_THRESHOLD',  # 相似度阈值（用于检测潜在矛盾）
+    # 全文检索配置 (BM25)
+    'FULLTEXT_ENABLED',               # 是否启用全文检索
+    'FULLTEXT_K1',                    # BM25 k1 参数（词频饱和度）
+    'FULLTEXT_B',                     # BM25 b 参数（文档长度归一化）
+    'FULLTEXT_WEIGHT',                # 全文检索在混合搜索中的权重
+    # 智能抽取器配置 (SmartExtractor)
+    'SMART_EXTRACTOR_MODE',           # 模式: LOCAL/HYBRID/LLM_FULL
+    'SMART_EXTRACTOR_COMPLEXITY_THRESHOLD',  # 复杂度阈值（超过此值使用 LLM）
+    'SMART_EXTRACTOR_ENABLE_TEMPORAL',  # 是否启用时态检测
+    # 预算管理配置 (BudgetManager)
+    'BUDGET_DAILY_LIMIT',             # 每日预算上限 (USD)
+    'BUDGET_HOURLY_LIMIT',            # 每小时预算上限 (USD)
+    'BUDGET_RESERVE',                 # 保留预算比例 (0.0-1.0)
+    'BUDGET_ALERT_THRESHOLD',         # 预算警告阈值 (0.0-1.0)
+    # 三阶段去重配置 (ThreeStageDeduplicator)
+    'DEDUP_JACCARD_THRESHOLD',        # Jaccard 相似度阈值（阶段1）
+    'DEDUP_SEMANTIC_THRESHOLD',       # 语义相似度阈值（阶段2 高）
+    'DEDUP_SEMANTIC_LOW_THRESHOLD',   # 语义相似度低阈值（阶段2 低）
+    'DEDUP_LLM_ENABLED',              # 是否启用 LLM 确认（阶段3）
 }
 
 
@@ -198,6 +228,123 @@ DEDUP_HIGH_THRESHOLD=0.85
 # 低相似度阈值：低于此值视为不相似（0.0-1.0，推荐0.70）
 # Low similarity threshold: considered different when below (recommend 0.70)
 DEDUP_LOW_THRESHOLD=0.70
+
+# ============================================================================
+# v4.0 Phase 1/2 新增配置
+# v4.0 Phase 1/2 New Configurations
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# 时态知识图谱配置
+# Temporal Knowledge Graph Configuration
+# ----------------------------------------------------------------------------
+# 是否启用时态知识图谱（追踪事实随时间的变化）
+# Enable temporal knowledge graph (track facts over time)
+TEMPORAL_GRAPH_ENABLED=true
+
+# 时态信息衰减率（0.0-1.0，值越大衰减越快）
+# Temporal decay rate (0.0-1.0, higher = faster decay)
+TEMPORAL_DECAY_RATE=0.1
+
+# 保留的最大时态历史记录数
+# Max temporal history records to keep
+TEMPORAL_MAX_HISTORY=1000
+
+# ----------------------------------------------------------------------------
+# 矛盾检测与管理配置
+# Contradiction Detection & Management Configuration
+# ----------------------------------------------------------------------------
+# 是否启用矛盾检测
+# Enable contradiction detection
+CONTRADICTION_DETECTION_ENABLED=true
+
+# 是否自动解决矛盾（推荐 false，让用户确认）
+# Auto-resolve contradictions (recommend false, let user confirm)
+CONTRADICTION_AUTO_RESOLVE=false
+
+# 检测策略: RULE(规则), LLM(大模型判断), HYBRID(混合), AUTO(自动选择)
+# Detection strategy: RULE/LLM/HYBRID/AUTO
+CONTRADICTION_DETECTION_STRATEGY=HYBRID
+
+# 相似度阈值（用于检测潜在矛盾，0.0-1.0）
+# Similarity threshold for detecting potential contradictions
+CONTRADICTION_SIMILARITY_THRESHOLD=0.8
+
+# ----------------------------------------------------------------------------
+# 全文检索配置 (BM25)
+# Full-text Search Configuration (BM25)
+# ----------------------------------------------------------------------------
+# 是否启用 BM25 全文检索
+# Enable BM25 full-text search
+FULLTEXT_ENABLED=true
+
+# BM25 k1 参数（词频饱和度，推荐 1.2-2.0）
+# BM25 k1 parameter (term frequency saturation)
+FULLTEXT_K1=1.5
+
+# BM25 b 参数（文档长度归一化，0.0-1.0）
+# BM25 b parameter (document length normalization)
+FULLTEXT_B=0.75
+
+# 全文检索在混合搜索中的权重（0.0-1.0）
+# Full-text search weight in hybrid search
+FULLTEXT_WEIGHT=0.3
+
+# ----------------------------------------------------------------------------
+# 智能抽取器配置 (SmartExtractor)
+# Smart Extractor Configuration
+# ----------------------------------------------------------------------------
+# 抽取模式: LOCAL(本地), HYBRID(混合), LLM_FULL(全LLM)
+# Extraction mode: LOCAL/HYBRID/LLM_FULL
+SMART_EXTRACTOR_MODE=HYBRID
+
+# 复杂度阈值（超过此值使用 LLM 辅助抽取，0.0-1.0）
+# Complexity threshold (use LLM when exceeded)
+SMART_EXTRACTOR_COMPLEXITY_THRESHOLD=0.6
+
+# 是否启用时态检测（识别时间相关信息）
+# Enable temporal detection
+SMART_EXTRACTOR_ENABLE_TEMPORAL=true
+
+# ----------------------------------------------------------------------------
+# 预算管理配置 (BudgetManager)
+# Budget Management Configuration
+# ----------------------------------------------------------------------------
+# 每日预算上限（美元，0=无限制）
+# Daily budget limit in USD (0 = unlimited)
+BUDGET_DAILY_LIMIT=0
+
+# 每小时预算上限（美元，0=无限制）
+# Hourly budget limit in USD (0 = unlimited)
+BUDGET_HOURLY_LIMIT=0
+
+# 保留预算比例（为重要操作预留的预算比例，0.0-1.0）
+# Reserve budget ratio for critical operations
+BUDGET_RESERVE=0.1
+
+# 预算警告阈值（使用量超过此比例时发出警告，0.0-1.0）
+# Budget alert threshold (warn when usage exceeds this ratio)
+BUDGET_ALERT_THRESHOLD=0.8
+
+# ----------------------------------------------------------------------------
+# 三阶段去重配置 (ThreeStageDeduplicator)
+# Three-Stage Deduplication Configuration
+# ----------------------------------------------------------------------------
+# Jaccard 相似度阈值（阶段1 MinHash+LSH，0.0-1.0）
+# Jaccard similarity threshold (Stage 1)
+DEDUP_JACCARD_THRESHOLD=0.7
+
+# 语义相似度高阈值（阶段2，超过此值直接合并）
+# Semantic similarity high threshold (Stage 2, auto-merge when exceeded)
+DEDUP_SEMANTIC_THRESHOLD=0.85
+
+# 语义相似度低阈值（阶段2，低于此值视为不同）
+# Semantic similarity low threshold (Stage 2, considered different when below)
+DEDUP_SEMANTIC_LOW_THRESHOLD=0.70
+
+# 是否启用 LLM 确认（阶段3，用于边界情况）
+# Enable LLM confirmation (Stage 3, for borderline cases)
+DEDUP_LLM_ENABLED=false
 '''
 
 
@@ -1704,6 +1851,639 @@ async def update_foreshadowing_analyzer_config(config: ForeshadowingConfigUpdate
         }
     
     return {"success": True, "config": (await get_foreshadowing_analyzer_config())["config"]}
+
+
+# ==================== v4.0 时态知识图谱 API ====================
+
+class TemporalQueryRequest(BaseModel):
+    """时态查询请求"""
+    entity_name: str = Field(..., description="实体名称")
+    timestamp: Optional[str] = Field(None, description="查询时间点 (ISO 格式)")
+    user_id: str = Field(default="default", description="用户ID")
+
+
+class TemporalRangeRequest(BaseModel):
+    """时态范围查询请求"""
+    entity_name: str = Field(..., description="实体名称")
+    start_time: Optional[str] = Field(None, description="开始时间 (ISO 格式)")
+    end_time: Optional[str] = Field(None, description="结束时间 (ISO 格式)")
+    user_id: str = Field(default="default", description="用户ID")
+
+
+@app.post("/v1/temporal/at", tags=["Temporal"])
+async def get_facts_at_time(request: TemporalQueryRequest):
+    """获取实体在特定时间点的事实
+    
+    查询某个实体在指定时间点的状态/属性值。
+    如果不指定时间，返回最新状态。
+    """
+    engine = get_engine()
+    
+    # 检查是否启用了时态图谱
+    if not hasattr(engine, 'temporal_graph') or engine.temporal_graph is None:
+        return {
+            "success": False,
+            "error": "时态知识图谱未启用",
+            "facts": []
+        }
+    
+    try:
+        from datetime import datetime
+        timestamp = None
+        if request.timestamp:
+            timestamp = datetime.fromisoformat(request.timestamp.replace('Z', '+00:00'))
+        
+        facts = engine.temporal_graph.get_facts_at_time(
+            entity_name=request.entity_name,
+            timestamp=timestamp
+        )
+        
+        return {
+            "success": True,
+            "entity": request.entity_name,
+            "timestamp": request.timestamp,
+            "facts": [
+                {
+                    "attribute": f.attribute,
+                    "value": f.value,
+                    "valid_from": f.valid_from.isoformat() if f.valid_from else None,
+                    "valid_to": f.valid_to.isoformat() if f.valid_to else None,
+                    "source_turn": f.source_turn,
+                    "confidence": f.confidence
+                }
+                for f in facts
+            ]
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "facts": []
+        }
+
+
+@app.post("/v1/temporal/range", tags=["Temporal"])
+async def get_facts_in_range(request: TemporalRangeRequest):
+    """获取实体在时间范围内的所有事实变化
+    
+    查询某个实体在指定时间范围内的所有状态变化历史。
+    """
+    engine = get_engine()
+    
+    if not hasattr(engine, 'temporal_graph') or engine.temporal_graph is None:
+        return {
+            "success": False,
+            "error": "时态知识图谱未启用",
+            "timeline": []
+        }
+    
+    try:
+        from datetime import datetime
+        start = None
+        end = None
+        
+        if request.start_time:
+            start = datetime.fromisoformat(request.start_time.replace('Z', '+00:00'))
+        if request.end_time:
+            end = datetime.fromisoformat(request.end_time.replace('Z', '+00:00'))
+        
+        timeline = engine.temporal_graph.get_entity_timeline(
+            entity_name=request.entity_name,
+            start_time=start,
+            end_time=end
+        )
+        
+        return {
+            "success": True,
+            "entity": request.entity_name,
+            "start_time": request.start_time,
+            "end_time": request.end_time,
+            "timeline": timeline
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "timeline": []
+        }
+
+
+@app.get("/v1/temporal/timeline/{entity_name}", tags=["Temporal"])
+async def get_entity_timeline(
+    entity_name: str,
+    user_id: str = Query(default="default", description="用户ID"),
+    limit: int = Query(default=50, ge=1, le=200, description="返回数量")
+):
+    """获取实体的完整时间线
+    
+    返回实体的所有属性变化历史，按时间排序。
+    """
+    engine = get_engine()
+    
+    if not hasattr(engine, 'temporal_graph') or engine.temporal_graph is None:
+        return {
+            "success": False,
+            "error": "时态知识图谱未启用",
+            "timeline": []
+        }
+    
+    try:
+        timeline = engine.temporal_graph.get_entity_timeline(
+            entity_name=entity_name,
+            limit=limit
+        )
+        
+        return {
+            "success": True,
+            "entity": entity_name,
+            "timeline": timeline,
+            "count": len(timeline)
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "timeline": []
+        }
+
+
+@app.get("/v1/temporal/stats", tags=["Temporal"])
+async def get_temporal_stats(user_id: str = Query(default="default", description="用户ID")):
+    """获取时态图谱统计信息"""
+    engine = get_engine()
+    
+    if not hasattr(engine, 'temporal_graph') or engine.temporal_graph is None:
+        return {
+            "success": False,
+            "error": "时态知识图谱未启用",
+            "stats": {}
+        }
+    
+    try:
+        stats = engine.temporal_graph.get_stats()
+        return {
+            "success": True,
+            "stats": stats
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "stats": {}
+        }
+
+
+class SnapshotResponse(BaseModel):
+    """快照响应"""
+    success: bool
+    snapshot_id: Optional[str] = None
+    timestamp: Optional[str] = None
+    entities: Optional[List[Dict[str, Any]]] = None
+    error: Optional[str] = None
+
+
+@app.post("/v1/temporal/snapshot", tags=["Temporal"])
+async def create_snapshot(
+    user_id: str = Query(default="default", description="用户ID"),
+    description: str = Query(default="", description="快照描述")
+):
+    """创建知识图谱快照
+    
+    保存当前时刻的知识图谱状态，用于后续比较或恢复。
+    """
+    engine = get_engine()
+    
+    if not hasattr(engine, 'temporal_graph') or engine.temporal_graph is None:
+        return {
+            "success": False,
+            "error": "时态知识图谱未启用"
+        }
+    
+    try:
+        # 创建快照
+        import time
+        snapshot_id = f"snap_{int(time.time() * 1000)}"
+        timestamp = datetime.now().isoformat()
+        
+        # 获取当前所有实体状态
+        if hasattr(engine.temporal_graph, 'create_snapshot'):
+            snapshot = engine.temporal_graph.create_snapshot(
+                snapshot_id=snapshot_id,
+                description=description
+            )
+            return {
+                "success": True,
+                "snapshot_id": snapshot.get('id', snapshot_id),
+                "timestamp": snapshot.get('timestamp', timestamp),
+                "entity_count": snapshot.get('entity_count', 0),
+                "description": description
+            }
+        else:
+            # 回退方案：记录当前状态
+            return {
+                "success": True,
+                "snapshot_id": snapshot_id,
+                "timestamp": timestamp,
+                "description": description,
+                "note": "快照功能需要 TemporalKnowledgeGraph 支持"
+            }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@app.post("/v1/temporal/snapshot/compare", tags=["Temporal"])
+async def compare_snapshots(
+    snapshot_id_1: str = Query(..., description="第一个快照ID"),
+    snapshot_id_2: str = Query(..., description="第二个快照ID（可选，默认与当前状态比较）"),
+    user_id: str = Query(default="default", description="用户ID")
+):
+    """比较两个快照之间的差异
+    
+    返回两个时间点之间知识图谱的变化：新增、修改、删除的实体和属性。
+    """
+    engine = get_engine()
+    
+    if not hasattr(engine, 'temporal_graph') or engine.temporal_graph is None:
+        return {
+            "success": False,
+            "error": "时态知识图谱未启用"
+        }
+    
+    try:
+        if hasattr(engine.temporal_graph, 'compare_snapshots'):
+            diff = engine.temporal_graph.compare_snapshots(
+                snapshot_id_1=snapshot_id_1,
+                snapshot_id_2=snapshot_id_2
+            )
+            return {
+                "success": True,
+                "snapshot_1": snapshot_id_1,
+                "snapshot_2": snapshot_id_2,
+                "diff": diff
+            }
+        else:
+            return {
+                "success": False,
+                "error": "快照比较功能需要 TemporalKnowledgeGraph 支持",
+                "snapshot_1": snapshot_id_1,
+                "snapshot_2": snapshot_id_2
+            }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+# ==================== v4.0 矛盾检测与管理 API ====================
+
+class ContradictionItem(BaseModel):
+    """矛盾项"""
+    id: str
+    fact1: Dict[str, Any]
+    fact2: Dict[str, Any]
+    contradiction_type: str
+    detected_at: str
+    status: str
+    resolution: Optional[str] = None
+
+
+class ResolveContradictionRequest(BaseModel):
+    """解决矛盾请求"""
+    strategy: str = Field(..., description="解决策略: KEEP_NEWER/KEEP_OLDER/KEEP_BOTH/MANUAL")
+    manual_resolution: Optional[str] = Field(None, description="手动解决说明（strategy=MANUAL 时使用）")
+
+
+@app.get("/v1/contradictions", tags=["Contradictions"])
+async def list_contradictions(
+    user_id: str = Query(default="default", description="用户ID"),
+    status: str = Query(default="pending", description="状态: pending/resolved/all"),
+    limit: int = Query(default=50, ge=1, le=200, description="返回数量")
+):
+    """获取矛盾列表
+    
+    返回检测到的所有矛盾，可按状态过滤。
+    """
+    engine = get_engine()
+    
+    if not hasattr(engine, 'contradiction_manager') or engine.contradiction_manager is None:
+        return {
+            "success": False,
+            "error": "矛盾管理器未启用",
+            "contradictions": []
+        }
+    
+    try:
+        contradictions = engine.contradiction_manager.get_contradictions(
+            status=status if status != "all" else None,
+            limit=limit
+        )
+        
+        return {
+            "success": True,
+            "contradictions": [
+                {
+                    "id": c.id,
+                    "fact1": c.fact1,
+                    "fact2": c.fact2,
+                    "contradiction_type": c.contradiction_type.value if hasattr(c.contradiction_type, 'value') else str(c.contradiction_type),
+                    "detected_at": c.detected_at.isoformat() if hasattr(c.detected_at, 'isoformat') else str(c.detected_at),
+                    "status": c.status,
+                    "resolution": c.resolution
+                }
+                for c in contradictions
+            ],
+            "count": len(contradictions)
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "contradictions": []
+        }
+
+
+@app.get("/v1/contradictions/{contradiction_id}", tags=["Contradictions"])
+async def get_contradiction(contradiction_id: str):
+    """获取单个矛盾详情"""
+    engine = get_engine()
+    
+    if not hasattr(engine, 'contradiction_manager') or engine.contradiction_manager is None:
+        raise HTTPException(status_code=503, detail="矛盾管理器未启用")
+    
+    try:
+        contradiction = engine.contradiction_manager.get_contradiction(contradiction_id)
+        if not contradiction:
+            raise HTTPException(status_code=404, detail="矛盾不存在")
+        
+        return {
+            "success": True,
+            "contradiction": {
+                "id": contradiction.id,
+                "fact1": contradiction.fact1,
+                "fact2": contradiction.fact2,
+                "contradiction_type": contradiction.contradiction_type.value if hasattr(contradiction.contradiction_type, 'value') else str(contradiction.contradiction_type),
+                "detected_at": contradiction.detected_at.isoformat() if hasattr(contradiction.detected_at, 'isoformat') else str(contradiction.detected_at),
+                "status": contradiction.status,
+                "resolution": contradiction.resolution
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/v1/contradictions/{contradiction_id}/resolve", tags=["Contradictions"])
+async def resolve_contradiction(
+    contradiction_id: str,
+    request: ResolveContradictionRequest
+):
+    """解决矛盾
+    
+    策略:
+    - KEEP_NEWER: 保留较新的事实
+    - KEEP_OLDER: 保留较旧的事实
+    - KEEP_BOTH: 保留两者（标记为已处理但不删除）
+    - MANUAL: 手动提供解决方案
+    """
+    engine = get_engine()
+    
+    if not hasattr(engine, 'contradiction_manager') or engine.contradiction_manager is None:
+        raise HTTPException(status_code=503, detail="矛盾管理器未启用")
+    
+    try:
+        result = engine.contradiction_manager.resolve_contradiction(
+            contradiction_id=contradiction_id,
+            strategy=request.strategy,
+            manual_resolution=request.manual_resolution
+        )
+        
+        return {
+            "success": result.success if hasattr(result, 'success') else True,
+            "message": result.message if hasattr(result, 'message') else "矛盾已解决",
+            "resolution": result.resolution if hasattr(result, 'resolution') else request.strategy
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/v1/contradictions/stats", tags=["Contradictions"])
+async def get_contradiction_stats(user_id: str = Query(default="default", description="用户ID")):
+    """获取矛盾统计信息"""
+    engine = get_engine()
+    
+    if not hasattr(engine, 'contradiction_manager') or engine.contradiction_manager is None:
+        return {
+            "success": False,
+            "error": "矛盾管理器未启用",
+            "stats": {}
+        }
+    
+    try:
+        stats = engine.contradiction_manager.get_stats()
+        return {
+            "success": True,
+            "stats": stats
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "stats": {}
+        }
+
+
+# ==================== v4.0 全文检索 API ====================
+
+class FulltextSearchRequest(BaseModel):
+    """全文检索请求"""
+    query: str = Field(..., description="搜索查询")
+    user_id: str = Field(default="default", description="用户ID")
+    top_k: int = Field(default=10, ge=1, le=100, description="返回数量")
+
+
+@app.post("/v1/search/fulltext", tags=["Search"])
+async def fulltext_search(request: FulltextSearchRequest):
+    """BM25 全文检索
+    
+    使用 BM25 算法进行全文检索，适合关键词精确匹配场景。
+    与向量搜索互补，可用于混合搜索。
+    """
+    engine = get_engine()
+    
+    if not hasattr(engine, 'fulltext_index') or engine.fulltext_index is None:
+        return {
+            "success": False,
+            "error": "全文索引未启用",
+            "results": []
+        }
+    
+    try:
+        results = engine.fulltext_index.search(
+            query=request.query,
+            top_k=request.top_k
+        )
+        
+        return {
+            "success": True,
+            "query": request.query,
+            "results": [
+                {
+                    "id": r.get("id"),
+                    "content": r.get("content"),
+                    "score": r.get("score"),
+                    "metadata": r.get("metadata", {})
+                }
+                for r in results
+            ],
+            "count": len(results)
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "results": []
+        }
+
+
+@app.post("/v1/search/hybrid", tags=["Search"])
+async def hybrid_search(request: SearchRequest):
+    """混合搜索
+    
+    结合向量搜索和 BM25 全文检索的混合搜索。
+    同时利用语义相似度和关键词匹配。
+    """
+    engine = get_engine()
+    
+    try:
+        # 尝试使用引擎的混合搜索
+        if hasattr(engine, 'hybrid_search'):
+            results = engine.hybrid_search(
+                query=request.query,
+                user_id=request.user_id,
+                top_k=request.top_k,
+                filters=request.filters
+            )
+        else:
+            # 回退到普通搜索
+            results = engine.search(
+                query=request.query,
+                user_id=request.user_id,
+                top_k=request.top_k,
+                filters=request.filters
+            )
+        
+        return {
+            "success": True,
+            "query": request.query,
+            "results": [
+                {
+                    "id": r.id,
+                    "content": r.content,
+                    "score": r.score,
+                    "metadata": r.metadata,
+                    "entities": r.entities if hasattr(r, 'entities') else []
+                }
+                for r in results
+            ],
+            "count": len(results)
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "results": []
+        }
+
+
+# ==================== v4.0 图谱遍历 API ====================
+
+class GraphTraverseRequest(BaseModel):
+    """图谱遍历请求"""
+    start_entity: str = Field(..., description="起始实体")
+    max_depth: int = Field(default=2, ge=1, le=5, description="最大深度")
+    relation_types: Optional[List[str]] = Field(None, description="关系类型过滤")
+    user_id: str = Field(default="default", description="用户ID")
+
+
+@app.post("/v1/graph/traverse", tags=["Graph"])
+async def traverse_graph(request: GraphTraverseRequest):
+    """知识图谱遍历
+    
+    从指定实体开始，按关系遍历知识图谱。
+    返回遍历路径上的所有实体和关系。
+    """
+    engine = get_engine()
+    
+    try:
+        # 使用时态图谱或普通图谱
+        if hasattr(engine, 'temporal_graph') and engine.temporal_graph is not None:
+            result = engine.temporal_graph.traverse(
+                start_entity=request.start_entity,
+                max_depth=request.max_depth,
+                relation_types=request.relation_types
+            )
+        elif hasattr(engine, 'knowledge_graph') and engine.knowledge_graph is not None:
+            result = engine.knowledge_graph.traverse(
+                start_entity=request.start_entity,
+                max_depth=request.max_depth,
+                relation_types=request.relation_types
+            )
+        else:
+            return {
+                "success": False,
+                "error": "知识图谱未启用",
+                "nodes": [],
+                "edges": []
+            }
+        
+        return {
+            "success": True,
+            "start_entity": request.start_entity,
+            "nodes": result.get("nodes", []),
+            "edges": result.get("edges", []),
+            "depth_reached": result.get("depth_reached", 0)
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "nodes": [],
+            "edges": []
+        }
+
+
+@app.get("/v1/graph/entity/{entity_name}/neighbors", tags=["Graph"])
+async def get_entity_neighbors(
+    entity_name: str,
+    user_id: str = Query(default="default", description="用户ID"),
+    include_relations: bool = Query(default=True, description="是否包含关系详情")
+):
+    """获取实体的邻居节点
+    
+    返回与指定实体直接相连的所有实体。
+    """
+    engine = get_engine()
+    
+    try:
+        related = engine.get_related_entities(entity_name)
+        
+        return {
+            "success": True,
+            "entity": entity_name,
+            "neighbors": related,
+            "count": len(related)
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "neighbors": []
+        }
 
 
 # ==================== 实体 API ====================

@@ -84,7 +84,19 @@ class EnvironmentManager:
         os.environ['XDG_CACHE_HOME'] = cache_dir
     
     def _create_default_config(self):
-        """创建默认配置文件"""
+        """创建默认配置文件
+        
+        v4.0 说明：
+        - 主配置已迁移到 api_keys.env（由 server.py 管理）
+        - recall.json 仅用于向后兼容，新安装不再创建
+        - 所有运行时配置都通过环境变量或 api_keys.env 配置
+        """
+        # v4.0: 不再自动创建 recall.json，配置统一到 api_keys.env
+        # 保留此方法用于向后兼容，但不执行任何操作
+        pass
+    
+    def _create_legacy_config(self):
+        """创建旧版配置文件（仅用于迁移兼容）"""
         config_path = self.dirs['config'] / 'recall.json'
         
         if not config_path.exists():
@@ -146,20 +158,38 @@ class EnvironmentManager:
         return self.dirs.get(key, self.data_root / key)
     
     def load_config(self) -> Dict[str, Any]:
-        """加载配置"""
+        """加载配置
+        
+        v4.0 说明：
+        - 主配置已迁移到 api_keys.env，此方法保留用于向后兼容
+        - 新代码应直接使用环境变量或 server.py 的配置系统
+        - 如果 recall.json 不存在，返回空字典（不自动创建）
+        """
         config_path = self.dirs['config'] / 'recall.json'
         
         if config_path.exists():
-            with open(config_path, 'r', encoding='utf-8') as f:
-                return json.load(f)
+            try:
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, IOError):
+                return {}
         return {}
     
     def save_config(self, config: Dict[str, Any]):
-        """保存配置"""
+        """保存配置
+        
+        v4.0 说明：
+        - 主配置已迁移到 api_keys.env，此方法保留用于向后兼容
+        - 新代码应使用 server.py 的 save_config API
+        - 此方法仅用于旧版本数据迁移场景
+        """
         config_path = self.dirs['config'] / 'recall.json'
         
-        with open(config_path, 'w', encoding='utf-8') as f:
-            json.dump(config, f, ensure_ascii=False, indent=2)
+        try:
+            with open(config_path, 'w', encoding='utf-8') as f:
+                json.dump(config, f, ensure_ascii=False, indent=2)
+        except IOError as e:
+            print(f"[Recall] 警告：保存配置失败（建议使用 api_keys.env）: {e}")
     
     def cleanup_temp(self):
         """清理临时文件"""

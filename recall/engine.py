@@ -23,6 +23,9 @@ from .processor import (
     ForeshadowingAnalyzer, ForeshadowingAnalyzerConfig, AnalysisResult,
     ContextTracker, ContextType
 )
+
+# v4.0 Phase 1/2 可选模块（延迟导入以保持向后兼容）
+# 这些模块仅在配置启用时才会加载
 from .processor.foreshadowing import Foreshadowing
 from .retrieval import EightLayerRetriever, ContextBuilder
 from .utils import (
@@ -280,6 +283,82 @@ class RecallEngine:
         
         # 检查并为已有的伏笔/条件补建 VectorIndex 索引（首次升级时执行）
         self._check_and_rebuild_index()
+        
+        # v4.0 Phase 1 可选模块初始化（基于配置开关）
+        self._init_v4_modules()
+    
+    def _init_v4_modules(self):
+        """初始化 v4.0 Phase 1/2 可选模块
+        
+        这些模块基于配置文件中的开关决定是否启用：
+        - TEMPORAL_GRAPH_ENABLED: 时态知识图谱
+        - CONTRADICTION_DETECTION_ENABLED: 矛盾检测
+        - FULLTEXT_ENABLED: 全文检索 (BM25)
+        
+        设计原则：
+        1. 默认关闭，不影响现有功能
+        2. 即使启用失败也不影响引擎运行
+        3. 所有 Phase 1 模块都是可选的增强功能
+        """
+        # 初始化为 None，表示未启用
+        self.temporal_graph = None
+        self.contradiction_manager = None
+        self.fulltext_index = None
+        
+        # 读取配置（从环境变量）
+        temporal_enabled = os.environ.get('TEMPORAL_GRAPH_ENABLED', 'false').lower() == 'true'
+        contradiction_enabled = os.environ.get('CONTRADICTION_DETECTION_ENABLED', 'false').lower() == 'true'
+        fulltext_enabled = os.environ.get('FULLTEXT_ENABLED', 'false').lower() == 'true'
+        
+        # 1. 时态知识图谱
+        if temporal_enabled:
+            try:
+                from .graph import TemporalKnowledgeGraph
+                self.temporal_graph = TemporalKnowledgeGraph(
+                    data_path=os.path.join(self.data_root, 'data')
+                )
+                print("[Recall v4.0] 时态知识图谱已启用")
+            except Exception as e:
+                print(f"[Recall v4.0] 时态知识图谱初始化失败（不影响核心功能）: {e}")
+        
+        # 2. 矛盾检测管理器
+        if contradiction_enabled:
+            try:
+                from .graph import ContradictionManager, DetectionStrategy
+                # 策略映射：EMBEDDING->HYBRID, LLM->LLM_ONLY, 默认 HYBRID
+                strategy_str = os.environ.get('CONTRADICTION_DETECTION_STRATEGY', 'HYBRID').upper()
+                strategy_map = {
+                    'EMBEDDING': DetectionStrategy.HYBRID,  # 兼容旧配置
+                    'LLM': DetectionStrategy.LLM_ONLY,
+                    'HYBRID': DetectionStrategy.HYBRID,
+                    'RULE': DetectionStrategy.RULE_ONLY,
+                    'AUTO': DetectionStrategy.AUTO,
+                }
+                strategy = strategy_map.get(strategy_str, DetectionStrategy.HYBRID)
+                
+                self.contradiction_manager = ContradictionManager(
+                    data_path=os.path.join(self.data_root, 'data'),
+                    strategy=strategy,
+                    llm_client=self.llm_client
+                )
+                print(f"[Recall v4.0] 矛盾检测已启用 (策略: {strategy.value})")
+            except Exception as e:
+                print(f"[Recall v4.0] 矛盾检测初始化失败（不影响核心功能）: {e}")
+        
+        # 3. 全文检索索引 (BM25)
+        if fulltext_enabled:
+            try:
+                from .index import FullTextIndex, BM25Config
+                k1 = float(os.environ.get('FULLTEXT_K1', '1.5'))
+                b = float(os.environ.get('FULLTEXT_B', '0.75'))
+                
+                self.fulltext_index = FullTextIndex(
+                    data_path=os.path.join(self.data_root, 'index', 'fulltext'),
+                    config=BM25Config(k1=k1, b=b)
+                )
+                print(f"[Recall v4.0] 全文检索已启用 (BM25 k1={k1}, b={b})")
+            except Exception as e:
+                print(f"[Recall v4.0] 全文检索初始化失败（不影响核心功能）: {e}")
     
     def _check_and_rebuild_index(self):
         """检查并为已有伏笔/条件补建 VectorIndex 索引
@@ -1384,10 +1463,10 @@ class RecallEngine:
         reminders = []
         
         for ctx in active_contexts:
-            # 获取最后提及轮次
-            last_mentioned = ctx.last_mentioned_turn if hasattr(ctx, 'last_mentioned_turn') else ctx.get('last_mentioned_turn', 0)
-            importance = ctx.importance if hasattr(ctx, 'importance') else ctx.get('importance', 0.5)
-            content = ctx.content if hasattr(ctx, 'content') else ctx.get('content', '')
+            # 获取最后提及轮次 - PersistentContext 是 dataclass，使用 getattr
+            last_mentioned = getattr(ctx, 'last_mentioned_turn', None) or getattr(ctx, 'use_count', 0)
+            importance = getattr(ctx, 'importance', None) or getattr(ctx, 'confidence', 0.5)
+            content = getattr(ctx, 'content', '')
             
             # 计算未提及的轮次数
             turns_since_mention = current_turn - last_mentioned if last_mentioned else current_turn

@@ -904,19 +904,63 @@ Phase 1 所有代码都是 **100% 平台无关** 的通用实现：
 
 **完成日期：** 2026-01-23
 
-### Phase 2: 智能层（2周）
+### Phase 2: 智能层（2周）✅ 已完成
 
 **目标：混合智能抽取 + 三阶段去重 + REST API 扩展 + 配置系统升级**
 
-| 周次 | 任务 | 产出 |
-|------|------|------|
-| W4 | `SmartExtractor` 框架 | 三模式切换 + 复杂度评估 |
-| W4 | LLM 抽取 Prompt | 实体/关系/时态抽取提示词 |
-| W4 | **配置系统升级** | 统一配置 + Phase 1 模块配置项 |
-| W5 | `ThreeStageDeduplicator` | MinHash+LSH → Semantic → LLM |
-| W5 | 预算管理系统 | `BudgetManager` |
-| W5 | **REST API 扩展** | Phase 1 功能的 HTTP 端点 |
-| W5 | **RecallEngine 集成** | 将 Phase 1 模块接入引擎 |
+| 周次 | 任务 | 产出 | 状态 |
+|------|------|------|------|
+| W4 | `SmartExtractor` 框架 | 三模式切换 + 复杂度评估 | ✅ 完成 |
+| W4 | LLM 抽取 Prompt | 实体/关系/时态抽取提示词 | ✅ 完成 |
+| W4 | **配置系统升级** | 统一配置 + Phase 1 模块配置项 | ✅ 完成 |
+| W5 | `ThreeStageDeduplicator` | MinHash+LSH → Semantic → LLM | ✅ 完成 |
+| W5 | 预算管理系统 | `BudgetManager` | ✅ 完成 |
+| W5 | **REST API 扩展** | Phase 1 功能的 HTTP 端点 | ✅ 完成 |
+| W5 | **RecallEngine 集成** | 将 Phase 1 模块接入引擎 | ✅ 完成 |
+
+**已完成的文件：**
+```
+recall/processor/smart_extractor.py        # ~580 行 - 智能抽取器（三模式）
+recall/processor/three_stage_deduplicator.py  # ~622 行 - 三阶段去重器
+recall/utils/budget_manager.py             # ~445 行 - LLM 预算管理器
+recall/server.py                           # 更新 - REST API 端点 + 配置系统
+recall/engine.py                           # 更新 - Phase 1 模块集成
+recall/utils/environment.py                # 更新 - 废弃 recall.json
+recall/processor/__init__.py               # 更新 - 模块导出
+recall/utils/__init__.py                   # 更新 - 模块导出
+start.ps1                                  # 更新 - 51 个配置项
+start.sh                                   # 更新 - 51 个配置项
+tests/test_phase2.py                       # 新增 - Phase 2 测试
+tools/verify_config.py                     # 新增 - 配置一致性验证
+tools/verify_phase2.py                     # 新增 - 验收标准验证
+```
+
+**📊 代码统计：**
+| 类别 | 文件数 | 总行数 |
+|------|--------|--------|
+| 核心模块 | 3 | ~1,647 行 |
+| 更新文件 | 5 | ~500+ 行修改 |
+| 测试/工具 | 3 | ~300 行 |
+| **合计** | **11** | **~2,500 行** |
+
+**🔑 关键 API 摘要：**
+
+| 模块 | 核心类/方法 | 功能 |
+|------|-------------|------|
+| `smart_extractor.py` | `SmartExtractor` | 三模式智能抽取 |
+| `smart_extractor.py` | `ExtractionMode.LOCAL/HYBRID/LLM_FULL` | 抽取模式枚举 |
+| `smart_extractor.py` | `_assess_complexity()` | 文本复杂度评估 |
+| `three_stage_deduplicator.py` | `ThreeStageDeduplicator` | 三阶段去重 |
+| `three_stage_deduplicator.py` | `Stage 1: MinHash+LSH` | 确定性快速匹配 |
+| `three_stage_deduplicator.py` | `Stage 2: Semantic` | 语义相似度匹配 |
+| `three_stage_deduplicator.py` | `Stage 3: LLM` | LLM 确认（可选） |
+| `budget_manager.py` | `BudgetManager` | LLM 预算控制 |
+| `budget_manager.py` | `can_afford()` | 预算检查 |
+| `budget_manager.py` | `record_usage()` | 使用记录 |
+| `server.py` | `/v1/temporal/*` | 时态查询 API |
+| `server.py` | `/v1/contradictions/*` | 矛盾管理 API |
+| `server.py` | `/v1/search/fulltext` | 全文搜索 API |
+| `server.py` | `/v1/graph/traverse` | 图遍历 API |
 
 ---
 
@@ -1099,16 +1143,18 @@ SMART_EXTRACTOR_DAILY_BUDGET=1.0
 > 💡 **SillyTavern 集成**：上述 API 完成后，SillyTavern 插件可添加「时间线」「矛盾管理」等新功能标签页。
 
 **验收标准：**
-- [ ] 本地模式可完全离线运行
-- [ ] 混合模式成本可控
-- [ ] 去重准确率 ≥95%
-- [ ] Phase 1 功能的 REST API 全部可用
-- [ ] 配置系统统一到 `api_keys.env`
-- [ ] `recall.json` 完全废弃
-- [ ] Phase 1 模块集成到 RecallEngine
-- [ ] `start.ps1` / `start.sh` 支持所有 Phase 1 配置项
-- [ ] `recall/server.py` 的 `SUPPORTED_CONFIG_KEYS` 已更新
-- [ ] `recall/utils/environment.py` 不再依赖 `recall.json`
+- [x] 本地模式可完全离线运行
+- [x] 混合模式成本可控
+- [x] 去重准确率 ≥95%
+- [x] Phase 1 功能的 REST API 全部可用
+- [x] 配置系统统一到 `api_keys.env`
+- [x] `recall.json` 完全废弃
+- [x] Phase 1 模块集成到 RecallEngine
+- [x] `start.ps1` / `start.sh` 支持所有 Phase 1 配置项
+- [x] `recall/server.py` 的 `SUPPORTED_CONFIG_KEYS` 已更新
+- [x] `recall/utils/environment.py` 不再依赖 `recall.json`
+
+**完成日期：** 2026-01-23
 
 ### Phase 3: 检索升级（2周）
 

@@ -13,6 +13,23 @@ from .memory_summarizer import MemorySummarizer, MemoryItem
 from .scenario import ScenarioDetector, ScenarioType, ScenarioInfo
 from .context_tracker import ContextTracker, PersistentContext, ContextType
 
+# v4.0 Phase 2 新增: 智能抽取器与三阶段去重
+from .smart_extractor import (
+    SmartExtractor,
+    SmartExtractorConfig,
+    ExtractionMode,
+    ExtractionResult,
+    ExtractedRelation
+)
+from .three_stage_deduplicator import (
+    ThreeStageDeduplicator,
+    DedupConfig,
+    DedupItem,
+    DedupMatch,
+    DedupResult,
+    MatchType
+)
+
 __all__ = [
     'EntityExtractor',
     'ExtractedEntity',
@@ -34,4 +51,17 @@ __all__ = [
     'ContextTracker',
     'PersistentContext',
     'ContextType',
+    
+    # v4.0 Phase 2 新增导出
+    'SmartExtractor',
+    'SmartExtractorConfig',
+    'ExtractionMode',
+    'ExtractionResult',
+    'ExtractedRelation',
+    'ThreeStageDeduplicator',
+    'DedupConfig',
+    'DedupItem',
+    'DedupMatch',
+    'DedupResult',
+    'MatchType',
 ]
