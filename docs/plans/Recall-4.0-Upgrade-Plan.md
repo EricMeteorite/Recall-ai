@@ -835,39 +835,280 @@ class RecallMCPServer:
 
 ## 📅 实施计划
 
-### Phase 1: 核心基础（3周）
+### Phase 1: 核心基础（3周）✅ 已完成
 
 **目标：三时态数据模型 + 时序知识图谱**
 
-| 周次 | 任务 | 产出 |
-|------|------|------|
-| W1 | 数据模型设计 | `TemporalFact`, `UnifiedNode`, `EpisodicNode` |
-| W1 | 迁移工具 | v3 → v4 数据迁移脚本 |
-| W2 | `TemporalKnowledgeGraph` 实现 | 核心 CRUD + 时态查询 |
-| W2 | 索引系统 | `TemporalIndex`, `FullTextIndex` 集成 |
-| W3 | 矛盾检测与处理 | `ContradictionManager` |
-| W3 | 图遍历 API | BFS/DFS + 时态过滤 |
+| 周次 | 任务 | 产出 | 状态 |
+|------|------|------|------|
+| W1 | 数据模型设计 | `TemporalFact`, `UnifiedNode`, `EpisodicNode` | ✅ 完成 |
+| W1 | 迁移工具 | v3 → v4 数据迁移脚本 | ✅ 完成 |
+| W2 | `TemporalKnowledgeGraph` 实现 | 核心 CRUD + 时态查询 | ✅ 完成 |
+| W2 | 索引系统 | `TemporalIndex`, `FullTextIndex` 集成 | ✅ 完成 |
+| W3 | 矛盾检测与处理 | `ContradictionManager` | ✅ 完成 |
+| W3 | 图遍历 API | BFS/DFS + 时态过滤 | ✅ 完成 |
+
+**已完成的文件：**
+```
+recall/models/temporal.py          # ~575 行 - 三时态数据模型
+recall/index/temporal_index.py     # ~495 行 - 时态索引
+recall/index/fulltext_index.py     # ~413 行 - BM25 全文索引
+recall/graph/temporal_knowledge_graph.py  # ~1230 行 - 时态知识图谱
+recall/graph/contradiction_manager.py     # ~554 行 - 矛盾管理器
+tools/migrate_v3_to_v4.py          # ~721 行 - 数据迁移工具
+recall/models/__init__.py          # 更新导出
+recall/index/__init__.py           # 更新导出
+recall/graph/__init__.py           # 更新导出
+```
+
+**📊 代码统计：**
+| 类别 | 文件数 | 总行数 |
+|------|--------|--------|
+| 核心模块 | 5 | ~3,267 行 |
+| 迁移工具 | 1 | ~721 行 |
+| 导出更新 | 3 | ~30 行 |
+| **合计** | **9** | **~4,018 行** |
+
+**🔑 关键 API 摘要：**
+
+| 模块 | 核心类/方法 | 功能 |
+|------|-------------|------|
+| `temporal.py` | `TemporalFact`, `UnifiedNode`, `EpisodicNode` | 三时态数据模型 |
+| `temporal.py` | `NodeType`, `EdgeType`, `ContradictionType` | 可扩展枚举类型 |
+| `temporal_index.py` | `TemporalIndex.query_at_time()` | 时间点查询 |
+| `temporal_index.py` | `TemporalIndex.query_range()` | 时间范围查询 |
+| `temporal_index.py` | `TemporalIndex.query_timeline()` | 时间线查询 |
+| `fulltext_index.py` | `FullTextIndex.search()` | BM25 全文搜索 |
+| `temporal_knowledge_graph.py` | `add_node()`, `add_edge()` | 节点/边 CRUD |
+| `temporal_knowledge_graph.py` | `query_at_time()`, `query_timeline()` | 时态查询 |
+| `temporal_knowledge_graph.py` | `bfs()`, `dfs()` | 图遍历 |
+| `temporal_knowledge_graph.py` | `compare_snapshots()` | 快照对比 |
+| `contradiction_manager.py` | `detect()` | 矛盾检测 |
+| `contradiction_manager.py` | `resolve()` | 矛盾解决 |
+| `migrate_v3_to_v4.py` | `migrate()` | 数据迁移 |
+
+**🌐 通用性说明：**
+
+Phase 1 所有代码都是 **100% 平台无关** 的通用实现：
+- ✅ 纯 Python 标准库 + dataclasses
+- ✅ JSON 持久化，无外部数据库依赖
+- ✅ 无任何 SillyTavern 或其他前端特定代码
+- ✅ 可被任何客户端/前端通过 REST API 集成
+
+> 💡 **SillyTavern 集成说明**：Phase 1 是后端基础设施层，SillyTavern 插件需等待 Phase 2 完成 REST API 端点后才能使用新功能。
 
 **验收标准：**
-- [ ] 所有现有测试通过
-- [ ] 时态查询 API 可用
-- [ ] v3 数据可无损迁移
+- [x] 所有现有测试通过（RecallEngine, MultiTenantStorage, EntityExtractor 等核心模块正常）
+- [x] 时态查询 API 可用（query_at_time, query_timeline, compare_snapshots）
+- [x] v3 数据可无损迁移（migrate_v3_to_v4.py 支持自动备份和增量迁移）
+
+**完成日期：** 2026-01-23
 
 ### Phase 2: 智能层（2周）
 
-**目标：混合智能抽取 + 三阶段去重**
+**目标：混合智能抽取 + 三阶段去重 + REST API 扩展 + 配置系统升级**
 
 | 周次 | 任务 | 产出 |
 |------|------|------|
 | W4 | `SmartExtractor` 框架 | 三模式切换 + 复杂度评估 |
 | W4 | LLM 抽取 Prompt | 实体/关系/时态抽取提示词 |
+| W4 | **配置系统升级** | 统一配置 + Phase 1 模块配置项 |
 | W5 | `ThreeStageDeduplicator` | MinHash+LSH → Semantic → LLM |
 | W5 | 预算管理系统 | `BudgetManager` |
+| W5 | **REST API 扩展** | Phase 1 功能的 HTTP 端点 |
+| W5 | **RecallEngine 集成** | 将 Phase 1 模块接入引擎 |
+
+---
+
+#### 📁 配置系统升级
+
+**现状分析：**
+| 配置文件 | 位置 | 状态 |
+|---------|------|------|
+| `api_keys.env` | `recall_data/config/` | ✅ **主配置文件** - 已统一大部分配置 |
+| `recall.json` | `recall_data/config/` | ⚠️ **废弃** - v3.0.0 遗留，不再使用 |
+
+**升级方案：将所有配置统一到 `api_keys.env`**
+
+**需要添加的 Phase 1 配置项：**
+
+```env
+# ============================================================================
+# Recall 4.0 新增配置项
+# Recall 4.0 New Configuration
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# 时态知识图谱配置
+# Temporal Knowledge Graph Configuration
+# ----------------------------------------------------------------------------
+# 是否启用时态知识图谱 (true/false)
+TEMPORAL_GRAPH_ENABLED=true
+
+# 图谱存储后端: local(本地JSON) | neo4j | falkordb
+# Graph storage backend
+TEMPORAL_GRAPH_BACKEND=local
+
+# 图谱作用域: global(全局共享) | isolated(用户隔离)
+# Graph scope
+TEMPORAL_GRAPH_SCOPE=global
+
+# ----------------------------------------------------------------------------
+# 矛盾检测配置
+# Contradiction Detection Configuration
+# ----------------------------------------------------------------------------
+# 检测策略: rule_only(仅规则) | llm_only(仅LLM) | hybrid(混合) | auto(自动)
+# Detection strategy
+CONTRADICTION_STRATEGY=rule_only
+
+# 是否自动解决低置信度矛盾 (true/false)
+# Auto-resolve low-confidence contradictions
+CONTRADICTION_AUTO_RESOLVE=false
+
+# 默认解决策略: supersede(取代) | coexist(共存) | reject(拒绝) | manual(人工)
+# Default resolution strategy
+CONTRADICTION_DEFAULT_RESOLUTION=manual
+
+# ----------------------------------------------------------------------------
+# 全文索引配置 (BM25)
+# Full-text Index Configuration (BM25)
+# ----------------------------------------------------------------------------
+# 是否启用 BM25 全文索引 (true/false)
+FULLTEXT_INDEX_ENABLED=true
+
+# BM25 参数 k1 (控制词频饱和度，默认1.5)
+FULLTEXT_BM25_K1=1.5
+
+# BM25 参数 b (控制文档长度归一化，默认0.75)
+FULLTEXT_BM25_B=0.75
+
+# BM25 参数 delta (IDF 平滑，默认0.5)
+FULLTEXT_BM25_DELTA=0.5
+
+# ----------------------------------------------------------------------------
+# 时态索引配置
+# Temporal Index Configuration
+# ----------------------------------------------------------------------------
+# 是否启用时态索引 (true/false)
+TEMPORAL_INDEX_ENABLED=true
+
+# ----------------------------------------------------------------------------
+# 智能抽取配置 (Phase 2 新增)
+# Smart Extraction Configuration
+# ----------------------------------------------------------------------------
+# 抽取模式: local(纯本地) | hybrid(混合) | llm(纯LLM)
+SMART_EXTRACTOR_MODE=hybrid
+
+# 复杂度阈值 (0.0-1.0，超过此值使用 LLM)
+SMART_EXTRACTOR_COMPLEXITY_THRESHOLD=0.6
+
+# 每日 LLM 预算（美元，0=不限制）
+SMART_EXTRACTOR_DAILY_BUDGET=1.0
+```
+
+**配置加载优先级：**
+1. 环境变量（最高优先级，用于 Docker/CI）
+2. `api_keys.env` 文件（用户主配置）
+3. 代码内默认值（保底）
+
+**废弃 `recall.json`：**
+- Phase 2 完成后，`recall.json` 将不再被读取
+- 迁移脚本会自动将 `recall.json` 中的有效配置转移到 `api_keys.env`
+
+---
+
+#### 📜 脚本文件配置同步
+
+**需要更新的文件：**
+
+| 文件 | 类型 | 当前状态 | Phase 2 任务 |
+|------|------|---------|-------------|
+| `start.ps1` | Windows 启动脚本 | ✅ 已使用 `api_keys.env` | 添加 Phase 1 配置项 |
+| `start.sh` | Linux 启动脚本 | ✅ 已使用 `api_keys.env` | 添加 Phase 1 配置项 |
+| `manage.ps1` | Windows 管理脚本 | ⚠️ 使用 `manager.json` | 可保留（管理器专用配置） |
+| `manage.sh` | Linux 管理脚本 | ⚠️ 使用独立配置 | 可保留（管理器专用配置） |
+| `install.ps1` | Windows 安装脚本 | ✅ 无配置依赖 | 无需修改 |
+| `install.sh` | Linux 安装脚本 | ✅ 无配置依赖 | 无需修改 |
+| `recall/utils/environment.py` | Python 环境管理 | ⚠️ 使用 `recall.json` | **废弃 JSON 配置** |
+| `recall/server.py` | API 服务器 | ✅ 已使用 `api_keys.env` | 添加 Phase 1 配置项 |
+
+**具体更新任务：**
+
+1. **`start.ps1` / `start.sh`** - 添加 Phase 1 支持的配置项：
+   ```powershell
+   # 新增配置项列表
+   $supportedKeys = @(
+       # ... 现有配置项 ...
+       # Phase 1 新增
+       'TEMPORAL_GRAPH_ENABLED', 'TEMPORAL_GRAPH_BACKEND', 'TEMPORAL_GRAPH_SCOPE',
+       'CONTRADICTION_STRATEGY', 'CONTRADICTION_AUTO_RESOLVE', 'CONTRADICTION_DEFAULT_RESOLUTION',
+       'FULLTEXT_INDEX_ENABLED', 'FULLTEXT_BM25_K1', 'FULLTEXT_BM25_B', 'FULLTEXT_BM25_DELTA',
+       'TEMPORAL_INDEX_ENABLED',
+       'SMART_EXTRACTOR_MODE', 'SMART_EXTRACTOR_COMPLEXITY_THRESHOLD', 'SMART_EXTRACTOR_DAILY_BUDGET'
+   )
+   ```
+
+2. **`recall/utils/environment.py`** - 废弃 `recall.json` 相关代码：
+   ```python
+   # 删除 _create_default_config() 中的 recall.json 逻辑
+   # 删除 load_config() 和 save_config() 中的 recall.json 引用
+   # 改为读取 api_keys.env 或直接使用环境变量
+   ```
+
+3. **`recall/server.py`** - 添加 Phase 1 配置项到 `SUPPORTED_CONFIG_KEYS`：
+   ```python
+   SUPPORTED_CONFIG_KEYS = {
+       # ... 现有配置项 ...
+       # Phase 1 新增
+       'TEMPORAL_GRAPH_ENABLED',
+       'TEMPORAL_GRAPH_BACKEND',
+       'TEMPORAL_GRAPH_SCOPE',
+       'CONTRADICTION_STRATEGY',
+       'CONTRADICTION_AUTO_RESOLVE',
+       'CONTRADICTION_DEFAULT_RESOLUTION',
+       'FULLTEXT_INDEX_ENABLED',
+       'FULLTEXT_BM25_K1',
+       'FULLTEXT_BM25_B',
+       'FULLTEXT_BM25_DELTA',
+       'TEMPORAL_INDEX_ENABLED',
+       'SMART_EXTRACTOR_MODE',
+       'SMART_EXTRACTOR_COMPLEXITY_THRESHOLD',
+       'SMART_EXTRACTOR_DAILY_BUDGET',
+   }
+   ```
+
+4. **默认配置模板** - 更新 `get_default_config_content()` 添加 Phase 1 配置段
+
+---
+
+**📡 需要添加的 REST API 端点（暴露 Phase 1 功能）：**
+
+| 端点 | 方法 | 功能 | 对应模块 |
+|------|------|------|----------|
+| `/v1/temporal/at` | GET | 时间点快照查询 | `TemporalKnowledgeGraph.query_at_time()` |
+| `/v1/temporal/range` | GET | 时间范围查询 | `TemporalIndex.query_range()` |
+| `/v1/temporal/timeline` | GET | 实体时间线 | `TemporalKnowledgeGraph.query_timeline()` |
+| `/v1/temporal/snapshot` | GET | 获取快照 | `TemporalKnowledgeGraph.get_snapshot()` |
+| `/v1/temporal/snapshot/compare` | GET | 快照对比 | `TemporalKnowledgeGraph.compare_snapshots()` |
+| `/v1/contradictions` | GET | 矛盾列表 | `ContradictionManager.get_pending()` |
+| `/v1/contradictions/{id}/resolve` | POST | 解决矛盾 | `ContradictionManager.resolve()` |
+| `/v1/search/fulltext` | GET | BM25 全文搜索 | `FullTextIndex.search()` |
+| `/v1/graph/traverse` | POST | 图遍历 | `TemporalKnowledgeGraph.bfs()` |
+| `/v1/migrate/v3-to-v4` | POST | 触发迁移 | `migrate_v3_to_v4.migrate()` |
+
+> 💡 **SillyTavern 集成**：上述 API 完成后，SillyTavern 插件可添加「时间线」「矛盾管理」等新功能标签页。
 
 **验收标准：**
 - [ ] 本地模式可完全离线运行
 - [ ] 混合模式成本可控
 - [ ] 去重准确率 ≥95%
+- [ ] Phase 1 功能的 REST API 全部可用
+- [ ] 配置系统统一到 `api_keys.env`
+- [ ] `recall.json` 完全废弃
+- [ ] Phase 1 模块集成到 RecallEngine
+- [ ] `start.ps1` / `start.sh` 支持所有 Phase 1 配置项
+- [ ] `recall/server.py` 的 `SUPPORTED_CONFIG_KEYS` 已更新
+- [ ] `recall/utils/environment.py` 不再依赖 `recall.json`
 
 ### Phase 3: 检索升级（2周）
 

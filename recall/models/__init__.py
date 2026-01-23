@@ -6,7 +6,25 @@ from .turn import Turn
 from .foreshadowing import Foreshadowing
 from .event import Event
 
+# v4.0 新增: 时态模型
+from .temporal import (
+    NodeType,
+    EdgeType,
+    ContradictionType,
+    ResolutionStrategy,
+    TemporalFact,
+    UnifiedNode,
+    EpisodicNode,
+    Contradiction,
+    ResolutionResult,
+    GraphIndexes,
+    # 兼容函数
+    entity_to_unified_node,
+    relation_to_temporal_fact,
+)
+
 __all__ = [
+    # v3 原有导出（保持向后兼容）
     'EntityType',
     'EventType', 
     'ForeshadowingStatus',
@@ -15,4 +33,18 @@ __all__ = [
     'Turn',
     'Foreshadowing',
     'Event',
+    
+    # v4.0 新增导出
+    'NodeType',
+    'EdgeType',
+    'ContradictionType',
+    'ResolutionStrategy',
+    'TemporalFact',
+    'UnifiedNode',
+    'EpisodicNode',
+    'Contradiction',
+    'ResolutionResult',
+    'GraphIndexes',
+    'entity_to_unified_node',
+    'relation_to_temporal_fact',
 ]
