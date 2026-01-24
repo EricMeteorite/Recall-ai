@@ -500,7 +500,8 @@ RETRIEVAL_WEIGHT_TEMPORAL=0.5
         }
         
         # Start in background with log
-        Start-Process powershell -ArgumentList "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $startScript -WorkingDirectory $SCRIPT_DIR -RedirectStandardOutput $startLog -RedirectStandardError $startLog -WindowStyle Hidden
+        $errorLog = Join-Path $SCRIPT_DIR "recall_data\logs\start_error.log"
+        Start-Process powershell -ArgumentList "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $startScript -WorkingDirectory $SCRIPT_DIR -RedirectStandardOutput $startLog -RedirectStandardError $errorLog -WindowStyle Hidden
         
         # Wait for service to start
         Write-Host "  Waiting for service to start" -NoNewline
@@ -948,7 +949,7 @@ function Show-CurrentConfig {
         Write-Host ""
         Write-Info "Embedding Config:"
         $embStatus = $config.embedding.status
-        $statusColor = if ($embStatus -eq "已配置") { "Green" } else { "DarkGray" }
+        $statusColor = if ($embStatus -eq "Configured") { "Green" } else { "DarkGray" }
         Write-Host "  Status: " -NoNewline
         Write-Host $embStatus -ForegroundColor $statusColor
         Write-Dim "  API Base: $($config.embedding.api_base)"
@@ -958,7 +959,7 @@ function Show-CurrentConfig {
         Write-Host ""
         Write-Info "LLM Config:"
         $llmStatus = $config.llm.status
-        $statusColor = if ($llmStatus -eq "已配置") { "Green" } else { "DarkGray" }
+        $statusColor = if ($llmStatus -eq "Configured") { "Green" } else { "DarkGray" }
         Write-Host "  Status: " -NoNewline
         Write-Host $llmStatus -ForegroundColor $statusColor
         Write-Dim "  API Base: $($config.llm.api_base)"
