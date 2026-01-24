@@ -97,7 +97,7 @@
 | **L8 LLM过滤默认关闭** | 故意设计。L8消耗LLM API资源，默认关闭以控制成本。可通过 `config['l8_enabled'] = True` 启用 |
 | **ContextBuilder 未被使用** | `engine.build_context()` 自己实现了6.5层上下文策略，ContextBuilder 保留供未来扩展 |
 | **ParallelRetriever 未被使用** | 设计选择，EightLayerRetriever是主要实现 |
-| **RecallInit/LightweightConfig 导入** | 保留用于CLI等场景，添加了 `# noqa: F401` 注释 |
+| **RecallInit/LiteConfig 导入** | 保留用于CLI等场景，添加了 `# noqa: F401` 注释 (LightweightConfig 为别名) |
 | **ST 前端只暴露绝对规则** | 故意设计。角色卡/世界观/写作风格与 ST 自带功能重复，后端 API 完整保留供其他工具使用 |
 
 ### 100%不遗忘机制验证结果
@@ -222,7 +222,7 @@ DEDUP_LOW_THRESHOLD=0.70       # 低相似度阈值（视为不同）
 | 12 | 3-5秒响应 | 并行检索 + 异步写入 + 缓存热路径 | ✅ | `recall/retrieval/parallel_retrieval.py` |
 | 13 | 知识图谱 | 轻量级本地图结构 + 关系自动提取 | ✅ | `recall/graph/knowledge_graph.py` |
 | 14 | 多用户/多角色 | MemoryScope 作用域隔离 | ✅ | `recall/storage/multi_tenant.py` |
-| 15 | 低配电脑支持 | 轻量模式（~80MB内存）+ 无GPU要求 | ✅ | `--lightweight` 模式 |
+| 15 | 低配电脑支持 | Lite 模式（~80MB内存）+ 无GPU要求 | ✅ | `--lite` 模式 (--lightweight 为别名) |
 
 ### 第二组：即插即用/环境隔离检查项（10项）
 

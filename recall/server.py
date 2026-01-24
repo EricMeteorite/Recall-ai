@@ -60,12 +60,13 @@ SUPPORTED_CONFIG_KEYS = {
     # ====== v4.0 Phase 1/2 新增配置项 ======
     # 时态知识图谱配置
     'TEMPORAL_GRAPH_ENABLED',         # 是否启用时态知识图谱
+    'TEMPORAL_GRAPH_BACKEND',         # 图谱后端: file/neo4j/falkordb
     'TEMPORAL_DECAY_RATE',            # 时态信息衰减率 (0.0-1.0)
     'TEMPORAL_MAX_HISTORY',           # 保留的最大时态历史记录数
     # 矛盾检测与管理配置
     'CONTRADICTION_DETECTION_ENABLED',  # 是否启用矛盾检测
     'CONTRADICTION_AUTO_RESOLVE',     # 是否自动解决矛盾（推荐 false）
-    'CONTRADICTION_DETECTION_STRATEGY',  # 检测策略: RULE/LLM/HYBRID/AUTO
+    'CONTRADICTION_DETECTION_STRATEGY',  # 检测策略: RULE/LLM/MIXED/AUTO
     'CONTRADICTION_SIMILARITY_THRESHOLD',  # 相似度阈值（用于检测潜在矛盾）
     # 全文检索配置 (BM25)
     'FULLTEXT_ENABLED',               # 是否启用全文检索
@@ -73,7 +74,7 @@ SUPPORTED_CONFIG_KEYS = {
     'FULLTEXT_B',                     # BM25 b 参数（文档长度归一化）
     'FULLTEXT_WEIGHT',                # 全文检索在混合搜索中的权重
     # 智能抽取器配置 (SmartExtractor)
-    'SMART_EXTRACTOR_MODE',           # 模式: LOCAL/HYBRID/LLM_FULL
+    'SMART_EXTRACTOR_MODE',           # 模式: RULES/ADAPTIVE/LLM
     'SMART_EXTRACTOR_COMPLEXITY_THRESHOLD',  # 复杂度阈值（超过此值使用 LLM）
     'SMART_EXTRACTOR_ENABLE_TEMPORAL',  # 是否启用时态检测
     # 预算管理配置 (BudgetManager)
@@ -144,14 +145,30 @@ def get_default_config_content() -> str:
 # Recall-AI 配置文件
 # Recall-AI Configuration File
 # ============================================================================
+#
+# ⚡ 快速开始 (90%的用户只需要配置这里)
+# ⚡ Quick Start (90% users only need to configure this section)
+#
+# 1. 填写 EMBEDDING_API_KEY 和 EMBEDDING_API_BASE (必须)
+# 2. 填写 LLM_API_KEY 和 LLM_API_BASE (可选，用于伏笔/矛盾等高级功能)
+# 3. 启动服务: ./start.ps1 或 ./start.sh
+#
+# 其他所有配置项都有合理的默认值，无需修改！
+# All other settings have sensible defaults, no changes needed!
+#
+# ============================================================================
+
+# ╔══════════════════════════════════════════════════════════════════════════╗
+# ║  ⭐ 必填配置 - REQUIRED CONFIGURATION                                    ║
+# ╚══════════════════════════════════════════════════════════════════════════╝
 
 # ----------------------------------------------------------------------------
-# Embedding 配置 (OpenAI 兼容接口)
-# Embedding Configuration (OpenAI Compatible API)
+# Embedding 配置 (OpenAI 兼容接口) - 必填!
+# Embedding Configuration (OpenAI Compatible API) - REQUIRED!
 # ----------------------------------------------------------------------------
 # 示例 (Examples):
 #   OpenAI:      https://api.openai.com/v1
-#   SiliconFlow: https://api.siliconflow.cn/v1
+#   SiliconFlow: https://api.siliconflow.cn/v1  (推荐国内用户)
 #   Ollama:      http://localhost:11434/v1
 # ----------------------------------------------------------------------------
 EMBEDDING_API_KEY=
@@ -164,6 +181,18 @@ EMBEDDING_DIMENSION=1024
 RECALL_EMBEDDING_MODE=auto
 
 # ----------------------------------------------------------------------------
+# LLM 配置 (OpenAI 兼容接口) - 用于伏笔分析、矛盾检测等高级功能
+# LLM Configuration (OpenAI Compatible API) - For foreshadowing, contradiction, etc.
+# ----------------------------------------------------------------------------
+LLM_API_KEY=
+LLM_API_BASE=
+LLM_MODEL=
+
+# ╔══════════════════════════════════════════════════════════════════════════╗
+# ║  ⚙️ 可选配置 - OPTIONAL CONFIGURATION (以下内容可保持默认值)              ║
+# ╚══════════════════════════════════════════════════════════════════════════╝
+
+# ----------------------------------------------------------------------------
 # Embedding API 速率限制
 # Embedding API Rate Limiting
 # ----------------------------------------------------------------------------
@@ -174,14 +203,6 @@ EMBEDDING_RATE_LIMIT=10
 # 速率限制时间窗口（秒，默认60）
 # Rate limit time window in seconds (default 60)
 EMBEDDING_RATE_WINDOW=60
-
-# ----------------------------------------------------------------------------
-# LLM 配置 (OpenAI 兼容接口)
-# LLM Configuration (OpenAI Compatible API)
-# ----------------------------------------------------------------------------
-LLM_API_KEY=
-LLM_API_BASE=
-LLM_MODEL=
 
 # ----------------------------------------------------------------------------
 # 伏笔分析器配置
@@ -284,6 +305,10 @@ DEDUP_LOW_THRESHOLD=0.70
 # Enable temporal knowledge graph (track facts over time)
 TEMPORAL_GRAPH_ENABLED=true
 
+# 图谱存储后端: file(本地JSON), neo4j, falkordb
+# Graph storage backend: file(local JSON), neo4j, falkordb
+TEMPORAL_GRAPH_BACKEND=file
+
 # 时态信息衰减率（0.0-1.0，值越大衰减越快）
 # Temporal decay rate (0.0-1.0, higher = faster decay)
 TEMPORAL_DECAY_RATE=0.1
@@ -304,9 +329,9 @@ CONTRADICTION_DETECTION_ENABLED=true
 # Auto-resolve contradictions (recommend false, let user confirm)
 CONTRADICTION_AUTO_RESOLVE=false
 
-# 检测策略: RULE(规则), LLM(大模型判断), HYBRID(混合), AUTO(自动选择)
-# Detection strategy: RULE/LLM/HYBRID/AUTO
-CONTRADICTION_DETECTION_STRATEGY=HYBRID
+# 检测策略: RULE(规则), LLM(大模型判断), MIXED(混合), AUTO(自动选择)
+# Detection strategy: RULE/LLM/MIXED/AUTO (HYBRID is deprecated alias for MIXED)
+CONTRADICTION_DETECTION_STRATEGY=MIXED
 
 # 相似度阈值（用于检测潜在矛盾，0.0-1.0）
 # Similarity threshold for detecting potential contradictions
@@ -336,9 +361,9 @@ FULLTEXT_WEIGHT=0.3
 # 智能抽取器配置 (SmartExtractor)
 # Smart Extractor Configuration
 # ----------------------------------------------------------------------------
-# 抽取模式: LOCAL(本地), HYBRID(混合), LLM_FULL(全LLM)
-# Extraction mode: LOCAL/HYBRID/LLM_FULL
-SMART_EXTRACTOR_MODE=HYBRID
+# 抽取模式: RULES(规则), ADAPTIVE(自适应), LLM(全LLM)
+# Extraction mode: RULES/ADAPTIVE/LLM (LOCAL/HYBRID/LLM_FULL are deprecated aliases)
+SMART_EXTRACTOR_MODE=ADAPTIVE
 
 # 复杂度阈值（超过此值使用 LLM 辅助抽取，0.0-1.0）
 # Complexity threshold (use LLM when exceeded)
@@ -387,6 +412,117 @@ DEDUP_SEMANTIC_LOW_THRESHOLD=0.70
 # 是否启用 LLM 确认（阶段3，用于边界情况）
 # Enable LLM confirmation (Stage 3, for borderline cases)
 DEDUP_LLM_ENABLED=false
+
+# ============================================================================
+# v4.0 Phase 3 十一层检索器配置
+# v4.0 Phase 3 Eleven-Layer Retriever Configuration
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# 主开关
+# Master Switch
+# ----------------------------------------------------------------------------
+# 是否启用十一层检索器（替代默认的八层检索器）
+# Enable eleven-layer retriever (replaces default eight-layer)
+ELEVEN_LAYER_RETRIEVER_ENABLED=false
+
+# ----------------------------------------------------------------------------
+# 层开关配置
+# Layer Enable/Disable Configuration
+# ----------------------------------------------------------------------------
+# L1: Bloom Filter 快速否定（极低成本排除不相关记忆）
+RETRIEVAL_L1_BLOOM_ENABLED=true
+
+# L2: 时态过滤（根据时间范围筛选，需要 TEMPORAL_GRAPH_ENABLED=true）
+RETRIEVAL_L2_TEMPORAL_ENABLED=true
+
+# L3: 倒排索引（关键词匹配）
+RETRIEVAL_L3_INVERTED_ENABLED=true
+
+# L4: 实体索引（命名实体匹配）
+RETRIEVAL_L4_ENTITY_ENABLED=true
+
+# L5: 知识图谱遍历（实体关系扩展，需要 TEMPORAL_GRAPH_ENABLED=true）
+RETRIEVAL_L5_GRAPH_ENABLED=true
+
+# L6: N-gram 匹配（模糊文本匹配）
+RETRIEVAL_L6_NGRAM_ENABLED=true
+
+# L7: 向量粗排（ANN 近似最近邻）
+RETRIEVAL_L7_VECTOR_COARSE_ENABLED=true
+
+# L8: 向量精排（精确相似度计算）
+RETRIEVAL_L8_VECTOR_FINE_ENABLED=true
+
+# L9: 重排序（综合评分）
+RETRIEVAL_L9_RERANK_ENABLED=true
+
+# L10: CrossEncoder 精排（深度语义匹配，需要 sentence-transformers）
+RETRIEVAL_L10_CROSS_ENCODER_ENABLED=false
+
+# L11: LLM 过滤（大模型最终确认，消耗 API）
+RETRIEVAL_L11_LLM_ENABLED=false
+
+# ----------------------------------------------------------------------------
+# Top-K 配置（每层返回的候选数量）
+# Top-K Configuration (candidates returned per layer)
+# ----------------------------------------------------------------------------
+RETRIEVAL_L2_TEMPORAL_TOP_K=500
+RETRIEVAL_L3_INVERTED_TOP_K=100
+RETRIEVAL_L4_ENTITY_TOP_K=50
+RETRIEVAL_L5_GRAPH_TOP_K=100
+RETRIEVAL_L6_NGRAM_TOP_K=30
+RETRIEVAL_L7_VECTOR_TOP_K=200
+RETRIEVAL_L10_CROSS_ENCODER_TOP_K=50
+RETRIEVAL_L11_LLM_TOP_K=20
+
+# ----------------------------------------------------------------------------
+# 阈值与最终输出配置
+# Thresholds and Final Output Configuration
+# ----------------------------------------------------------------------------
+# 精排阈值（进入精排阶段的候选数）
+RETRIEVAL_FINE_RANK_THRESHOLD=100
+
+# 最终返回的记忆数量
+RETRIEVAL_FINAL_TOP_K=20
+
+# ----------------------------------------------------------------------------
+# L5 知识图谱遍历配置
+# L5 Knowledge Graph Traversal Configuration
+# ----------------------------------------------------------------------------
+# 图遍历最大深度
+RETRIEVAL_L5_GRAPH_MAX_DEPTH=2
+
+# 图遍历起始实体数量
+RETRIEVAL_L5_GRAPH_MAX_ENTITIES=3
+
+# 遍历方向: both(双向), outgoing(出边), incoming(入边)
+RETRIEVAL_L5_GRAPH_DIRECTION=both
+
+# ----------------------------------------------------------------------------
+# L10 CrossEncoder 配置
+# L10 CrossEncoder Configuration
+# ----------------------------------------------------------------------------
+# CrossEncoder 模型名称（需要安装 sentence-transformers）
+RETRIEVAL_L10_CROSS_ENCODER_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2
+
+# ----------------------------------------------------------------------------
+# L11 LLM 配置
+# L11 LLM Configuration
+# ----------------------------------------------------------------------------
+# LLM 判断超时时间（秒）
+RETRIEVAL_L11_LLM_TIMEOUT=10.0
+
+# ----------------------------------------------------------------------------
+# 权重配置（调整各检索层的相对权重）
+# Weight Configuration (adjust relative weight of each layer)
+# ----------------------------------------------------------------------------
+RETRIEVAL_WEIGHT_INVERTED=1.0
+RETRIEVAL_WEIGHT_ENTITY=1.2
+RETRIEVAL_WEIGHT_GRAPH=1.0
+RETRIEVAL_WEIGHT_NGRAM=0.8
+RETRIEVAL_WEIGHT_VECTOR=1.0
+RETRIEVAL_WEIGHT_TEMPORAL=0.5
 '''
 
 
@@ -776,10 +912,10 @@ def get_engine() -> RecallEngine:
     """获取全局引擎实例
     
     根据环境变量 RECALL_EMBEDDING_MODE 自动选择模式：
-    - none: 轻量模式
-    - local: 完整模式
-    - openai: Hybrid-OpenAI
-    - siliconflow: Hybrid-硅基流动
+    - none: Lite 模式（轻量）
+    - local: Local 模式（本地模型）
+    - openai: Cloud 模式-OpenAI
+    - siliconflow: Cloud 模式-硅基流动
     """
     global _engine
     if _engine is None:
@@ -2893,7 +3029,7 @@ async def reload_config():
         stats = engine.get_stats()
         
         # 获取当前 embedding 模式
-        embedding_info = "轻量模式" if stats.get('lightweight') else "完整/Hybrid模式"
+        embedding_info = "Lite 模式" if stats.get('lite') else "Local/Cloud 模式"
         
         return {
             "success": True,
@@ -2925,7 +3061,7 @@ async def rebuild_index():
         if not engine._vector_index or not engine._vector_index.enabled:
             return {
                 "success": False,
-                "message": "VectorIndex 未启用（轻量模式下不可用）",
+                "message": "VectorIndex 未启用（Lite 模式下不可用）",
                 "indexed_count": 0
             }
         
@@ -3078,12 +3214,12 @@ async def test_connection():
     """
     engine = get_engine()
     
-    # 检查是否是轻量模式
+    # 检查是否是 Lite 模式
     config = engine.embedding_config
     if engine.lightweight or not config or config.backend.value == "none":
         return {
             "success": True,
-            "message": "轻量模式无需测试 API 连接",
+            "message": "Lite 模式无需测试 API 连接",
             "backend": "none",
             "model": None,
             "dimension": None,
@@ -3119,7 +3255,7 @@ async def test_connection():
         else:
             return {
                 "success": False,
-                "message": "Embedding 后端未初始化（可能是轻量模式或索引未加载）",
+                "message": "Embedding 后端未初始化（可能是 Lite 模式或索引未加载）",
                 "backend": backend_type,
                 "model": model,
                 "dimension": dimension,

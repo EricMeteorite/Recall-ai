@@ -250,14 +250,14 @@ function Do-Start {
     # Check config file
     $configFile = Join-Path $SCRIPT_DIR "recall_data\config\api_keys.env"
     $modeFile = Join-Path $SCRIPT_DIR "recall_data\config\install_mode"
-    $installMode = "full"
+    $installMode = "local"
     
     if (Test-Path $modeFile) {
         $installMode = Get-Content $modeFile -ErrorAction SilentlyContinue
     }
     
-    # If hybrid mode, check API config
-    if ($installMode -eq "hybrid") {
+    # If cloud/hybrid mode, check API config
+    if ($installMode -in "cloud", "hybrid") {
         $needConfig = $false
         
         if (-not (Test-Path $configFile)) {
@@ -407,13 +407,77 @@ PROACTIVE_REMINDER_ENABLED=true
 # 主动提醒触发轮次阈值（高重要性减半）
 # Proactive reminder threshold turns (halved for high importance)
 PROACTIVE_REMINDER_TURNS=50
+
+# ============================================================================
+# v4.0 Phase 1/2 新增配置
+# ============================================================================
+TEMPORAL_GRAPH_ENABLED=true
+TEMPORAL_GRAPH_BACKEND=file
+TEMPORAL_DECAY_RATE=0.1
+TEMPORAL_MAX_HISTORY=1000
+CONTRADICTION_DETECTION_ENABLED=true
+CONTRADICTION_AUTO_RESOLVE=false
+CONTRADICTION_DETECTION_STRATEGY=MIXED
+CONTRADICTION_SIMILARITY_THRESHOLD=0.8
+FULLTEXT_ENABLED=true
+FULLTEXT_K1=1.5
+FULLTEXT_B=0.75
+FULLTEXT_WEIGHT=0.3
+SMART_EXTRACTOR_MODE=ADAPTIVE
+SMART_EXTRACTOR_COMPLEXITY_THRESHOLD=0.6
+SMART_EXTRACTOR_ENABLE_TEMPORAL=true
+BUDGET_DAILY_LIMIT=0
+BUDGET_HOURLY_LIMIT=0
+BUDGET_RESERVE=0.1
+BUDGET_ALERT_THRESHOLD=0.8
+DEDUP_JACCARD_THRESHOLD=0.7
+DEDUP_SEMANTIC_THRESHOLD=0.85
+DEDUP_SEMANTIC_LOW_THRESHOLD=0.70
+DEDUP_LLM_ENABLED=false
+
+# ============================================================================
+# v4.0 Phase 3 十一层检索器配置
+# ============================================================================
+ELEVEN_LAYER_RETRIEVER_ENABLED=false
+RETRIEVAL_L1_BLOOM_ENABLED=true
+RETRIEVAL_L2_TEMPORAL_ENABLED=true
+RETRIEVAL_L3_INVERTED_ENABLED=true
+RETRIEVAL_L4_ENTITY_ENABLED=true
+RETRIEVAL_L5_GRAPH_ENABLED=true
+RETRIEVAL_L6_NGRAM_ENABLED=true
+RETRIEVAL_L7_VECTOR_COARSE_ENABLED=true
+RETRIEVAL_L8_VECTOR_FINE_ENABLED=true
+RETRIEVAL_L9_RERANK_ENABLED=true
+RETRIEVAL_L10_CROSS_ENCODER_ENABLED=false
+RETRIEVAL_L11_LLM_ENABLED=false
+RETRIEVAL_L2_TEMPORAL_TOP_K=500
+RETRIEVAL_L3_INVERTED_TOP_K=100
+RETRIEVAL_L4_ENTITY_TOP_K=50
+RETRIEVAL_L5_GRAPH_TOP_K=100
+RETRIEVAL_L6_NGRAM_TOP_K=30
+RETRIEVAL_L7_VECTOR_TOP_K=200
+RETRIEVAL_L10_CROSS_ENCODER_TOP_K=50
+RETRIEVAL_L11_LLM_TOP_K=20
+RETRIEVAL_FINE_RANK_THRESHOLD=100
+RETRIEVAL_FINAL_TOP_K=20
+RETRIEVAL_L5_GRAPH_MAX_DEPTH=2
+RETRIEVAL_L5_GRAPH_MAX_ENTITIES=3
+RETRIEVAL_L5_GRAPH_DIRECTION=both
+RETRIEVAL_L10_CROSS_ENCODER_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2
+RETRIEVAL_L11_LLM_TIMEOUT=10.0
+RETRIEVAL_WEIGHT_INVERTED=1.0
+RETRIEVAL_WEIGHT_ENTITY=1.2
+RETRIEVAL_WEIGHT_GRAPH=1.0
+RETRIEVAL_WEIGHT_NGRAM=0.8
+RETRIEVAL_WEIGHT_VECTOR=1.0
+RETRIEVAL_WEIGHT_TEMPORAL=0.5
 '@
                 Set-Content -Path $configFile -Value $defaultConfig -Encoding UTF8
                 Write-Info "Created config file: $configFile"
             }
             
             Write-Host ""
-            Write-Warning2 "Hybrid mode requires Embedding API configuration"
+            Write-Warning2 "Cloud mode requires Embedding API configuration"
             Write-Host ""
             Write-Info "Please edit config file:"
             Write-Dim "  $configFile"
@@ -490,9 +554,9 @@ function Do-Stop {
         # Try to find by port
         $netstat = netstat -ano | Select-String ":$DEFAULT_PORT.*LISTENING"
         if ($netstat) {
-            $pid = ($netstat -split '\s+')[-1]
-            if ($pid -and $pid -ne "0") {
-                Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
+            $processId = ($netstat -split '\s+')[-1]
+            if ($processId -and $processId -ne "0") {
+                Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
                 Write-Success "Service stopped"
                 return
             }
@@ -539,7 +603,7 @@ function Do-Status {
         try {
             $stats = Invoke-RestMethod -Uri "http://127.0.0.1:$DEFAULT_PORT/v1/stats" -TimeoutSec 5
             Write-Dim "Total Memories: $($stats.total_memories)"
-            $mode = if ($stats.lightweight) { "轻量模式" } else { "完整模式" }
+            $mode = if ($stats.lite -or $stats.lightweight) { "Lite 模式" } else { "Local 模式" }
             Write-Dim "Embedding Mode: $mode"
         } catch {}
     } else {
@@ -788,7 +852,7 @@ function Reload-Config {
     Write-Info "Reloading config..."
     
     try {
-        $response = Invoke-RestMethod -Uri "http://127.0.0.1:$DEFAULT_PORT/v1/config/reload" -Method POST -TimeoutSec 10
+        $null = Invoke-RestMethod -Uri "http://127.0.0.1:$DEFAULT_PORT/v1/config/reload" -Method POST -TimeoutSec 10
         Write-Success "Config reloaded!"
         
         # Show current mode

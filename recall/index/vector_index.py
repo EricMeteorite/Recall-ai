@@ -14,9 +14,9 @@ class VectorIndex:
     """向量索引 - 使用 FAISS 实现高效相似度搜索
     
     支持三种模式：
-    1. 完整模式（local）: 本地 sentence-transformers，~800MB 内存
-    2. Hybrid 模式（openai/siliconflow）: API 调用，~50MB 内存
-    3. 轻量模式（none）: 禁用向量索引
+    1. Local 模式（local）: 本地 sentence-transformers，~800MB 内存
+    2. Cloud 模式（openai/siliconflow）: API 调用，~50MB 内存
+    3. Lite 模式（none）: 禁用向量索引
     """
     
     def __init__(
@@ -60,7 +60,7 @@ class VectorIndex:
         # 检查是否启用
         if self.embedding_config.backend == EmbeddingBackendType.NONE:
             self._enabled = False
-            print("[VectorIndex] 轻量模式，向量索引已禁用")
+            print("[VectorIndex] Lite 模式，向量索引已禁用")
     
     def _load_or_create_config(self) -> EmbeddingConfig:
         """加载已有配置或自动选择"""

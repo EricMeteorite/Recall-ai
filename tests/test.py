@@ -70,7 +70,7 @@ def run_quick_test():
     print("\n[2/5] 引擎初始化...")
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
-            engine = RecallEngine(data_root=tmpdir, lightweight=True)
+            engine = RecallEngine(data_root=tmpdir, lite=True)  # 也可以用 lightweight=True
             ok("引擎初始化成功")
             
             # 3. CRUD 测试

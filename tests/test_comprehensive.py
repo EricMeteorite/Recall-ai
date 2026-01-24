@@ -10,7 +10,7 @@ import tempfile
 import time
 import traceback
 
-# 设置轻量模式
+# 设置 Lite 模式（轻量模式）
 os.environ['RECALL_EMBEDDING_MODE'] = 'none'
 
 def print_header(title):
@@ -177,6 +177,32 @@ except Exception as e:
     ALL_ERRORS.append(f'hybrid_siliconflow() 失败: {e}')
     print_fail(f'hybrid_siliconflow(): {e}')
 
+# 测试新名称别名
+print('\n  新名称别名测试:')
+try:
+    c = EmbeddingConfig.lite()
+    assert c.backend == EmbeddingBackendType.NONE
+    print_ok('lite() 配置正确 (新名称)')
+except Exception as e:
+    ALL_ERRORS.append(f'lite() 失败: {e}')
+    print_fail(f'lite(): {e}')
+
+try:
+    c = EmbeddingConfig.cloud_openai('sk-test')
+    assert c.backend == EmbeddingBackendType.OPENAI
+    print_ok('cloud_openai() 配置正确 (新名称)')
+except Exception as e:
+    ALL_ERRORS.append(f'cloud_openai() 失败: {e}')
+    print_fail(f'cloud_openai(): {e}')
+
+try:
+    c = EmbeddingConfig.local()
+    assert c.backend == EmbeddingBackendType.LOCAL
+    print_ok('local() 配置正确 (新名称)')
+except Exception as e:
+    ALL_ERRORS.append(f'local() 失败: {e}')
+    print_fail(f'local(): {e}')
+
 # ============================================================
 # 6. 功能测试（使用临时目录）
 # ============================================================
@@ -184,7 +210,7 @@ print_header('6. 功能测试')
 
 with tempfile.TemporaryDirectory() as tmpdir:
     try:
-        engine = RecallEngine(data_root=tmpdir, lightweight=True)
+        engine = RecallEngine(data_root=tmpdir, lite=True)  # 也可以用 lightweight=True
         print_ok('引擎初始化')
     except Exception as e:
         ALL_ERRORS.append(f'引擎初始化失败: {e}')

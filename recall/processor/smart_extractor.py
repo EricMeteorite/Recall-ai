@@ -23,9 +23,27 @@ from ..utils.budget_manager import BudgetManager, BudgetConfig
 
 class ExtractionMode(str, Enum):
     """抽取模式"""
-    LOCAL = "local"           # 纯本地：spaCy + jieba + 规则
-    HYBRID = "hybrid"         # 混合：本地初筛 + LLM 精炼（默认）
-    LLM_FULL = "llm"          # 纯 LLM：最高质量
+    RULES = "rules"           # 纯规则：spaCy + jieba + 规则
+    ADAPTIVE = "adaptive"     # 自适应：规则初筛 + LLM 精炼（默认）
+    LLM = "llm"               # 纯 LLM：最高质量
+    
+    @classmethod
+    def _missing_(cls, value):
+        """向后兼容：映射旧值到新值"""
+        legacy_map = {
+            'local': cls.RULES,
+            'hybrid': cls.ADAPTIVE,
+            'llm_full': cls.LLM,
+        }
+        if isinstance(value, str):
+            return legacy_map.get(value.lower())
+        return None
+
+
+# 向后兼容别名（支持 ExtractionMode.LOCAL 等旧用法）
+ExtractionMode.LOCAL = ExtractionMode.RULES
+ExtractionMode.HYBRID = ExtractionMode.ADAPTIVE
+ExtractionMode.LLM_FULL = ExtractionMode.LLM
 
 
 @dataclass
@@ -48,7 +66,7 @@ class ExtractionResult:
     keywords: List[str]
     
     # 元信息
-    mode_used: ExtractionMode = ExtractionMode.LOCAL
+    mode_used: ExtractionMode = ExtractionMode.RULES
     complexity_score: float = 0.0
     llm_used: bool = False
     cost: float = 0.0
@@ -79,26 +97,42 @@ class ExtractionResult:
 @dataclass
 class SmartExtractorConfig:
     """智能抽取器配置"""
-    mode: ExtractionMode = ExtractionMode.HYBRID
+    mode: ExtractionMode = ExtractionMode.ADAPTIVE
     complexity_threshold: float = 0.6       # 复杂度阈值（超过此值使用 LLM）
     max_text_length: int = 10000            # 最大处理文本长度
     enable_relation_extraction: bool = True # 是否抽取关系
     enable_temporal_detection: bool = True  # 是否检测时态
     
     @classmethod
+    def rules_only(cls) -> 'SmartExtractorConfig':
+        """纯规则模式配置"""
+        return cls(mode=ExtractionMode.RULES)
+    
+    @classmethod
+    def adaptive(cls, threshold: float = 0.6) -> 'SmartExtractorConfig':
+        """自适应模式配置"""
+        return cls(mode=ExtractionMode.ADAPTIVE, complexity_threshold=threshold)
+    
+    @classmethod
+    def llm(cls) -> 'SmartExtractorConfig':
+        """纯 LLM 模式配置"""
+        return cls(mode=ExtractionMode.LLM)
+    
+    # 向后兼容别名
+    @classmethod
     def local_only(cls) -> 'SmartExtractorConfig':
-        """纯本地模式配置"""
-        return cls(mode=ExtractionMode.LOCAL)
+        """[已弃用] 请使用 rules_only()"""
+        return cls.rules_only()
     
     @classmethod
     def hybrid(cls, threshold: float = 0.6) -> 'SmartExtractorConfig':
-        """混合模式配置"""
-        return cls(mode=ExtractionMode.HYBRID, complexity_threshold=threshold)
+        """[已弃用] 请使用 adaptive()"""
+        return cls.adaptive(threshold)
     
     @classmethod
     def llm_full(cls) -> 'SmartExtractorConfig':
-        """纯 LLM 模式配置"""
-        return cls(mode=ExtractionMode.LLM_FULL)
+        """[已弃用] 请使用 llm()"""
+        return cls.llm()
 
 
 class SmartExtractor:
@@ -218,7 +252,7 @@ class SmartExtractor:
         if not text:
             return ExtractionResult(
                 entities=[], relations=[], temporal_markers=[], keywords=[],
-                mode_used=ExtractionMode.LOCAL, latency_ms=0
+                mode_used=ExtractionMode.RULES, latency_ms=0
             )
         
         # 确定使用的模式
@@ -229,8 +263,8 @@ class SmartExtractor:
         local_result = self._local_extract(text)
         
         # 如果是纯本地模式，直接返回
-        if mode == ExtractionMode.LOCAL:
-            local_result.mode_used = ExtractionMode.LOCAL
+        if mode == ExtractionMode.RULES:
+            local_result.mode_used = ExtractionMode.RULES
             local_result.latency_ms = (time.time() - start_time) * 1000
             return local_result
         
@@ -240,8 +274,8 @@ class SmartExtractor:
         
         # 3. 决策是否需要 LLM
         need_llm = (
-            mode == ExtractionMode.LLM_FULL or
-            (mode == ExtractionMode.HYBRID and complexity >= self.config.complexity_threshold)
+            mode == ExtractionMode.LLM or
+            (mode == ExtractionMode.ADAPTIVE and complexity >= self.config.complexity_threshold)
         )
         
         # 4. 检查预算

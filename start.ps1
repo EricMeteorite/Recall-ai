@@ -112,7 +112,7 @@ function Get-RecallProcess {
 
 function Test-ApiHealth {
     try {
-        $response = Invoke-WebRequest -Uri "http://localhost:$Port/" -TimeoutSec 2 -ErrorAction Stop
+        $null = Invoke-WebRequest -Uri "http://localhost:$Port/" -TimeoutSec 2 -ErrorAction Stop
         return $true
     } catch {
         return $false
@@ -121,7 +121,7 @@ function Test-ApiHealth {
 
 # ==================== 加载配置文件 ====================
 
-function Load-ApiKeys {
+function Import-ApiKeys {
     $configFile = Join-Path $ScriptDir "recall_data\config\api_keys.env"
     
     # 支持的配置项（与 server.py SUPPORTED_CONFIG_KEYS 保持一致）
@@ -147,7 +147,7 @@ function Load-ApiKeys {
         'DEDUP_EMBEDDING_ENABLED', 'DEDUP_HIGH_THRESHOLD', 'DEDUP_LOW_THRESHOLD',
         # ====== v4.0 Phase 1/2 新增配置项 ======
         # 时态知识图谱配置
-        'TEMPORAL_GRAPH_ENABLED', 'TEMPORAL_DECAY_RATE', 'TEMPORAL_MAX_HISTORY',
+        'TEMPORAL_GRAPH_ENABLED', 'TEMPORAL_GRAPH_BACKEND', 'TEMPORAL_DECAY_RATE', 'TEMPORAL_MAX_HISTORY',
         # 矛盾检测与管理配置
         'CONTRADICTION_DETECTION_ENABLED', 'CONTRADICTION_AUTO_RESOLVE',
         'CONTRADICTION_DETECTION_STRATEGY', 'CONTRADICTION_SIMILARITY_THRESHOLD',
@@ -220,32 +220,54 @@ function Load-ApiKeys {
 # Recall-AI 配置文件
 # Recall-AI Configuration File
 # ============================================================================
+#
+# ⚡ 快速开始 (90%的用户只需要配置这里)
+# ⚡ Quick Start (90% users only need to configure this section)
+#
+# 1. 填写 EMBEDDING_API_KEY 和 EMBEDDING_API_BASE (必须)
+# 2. 填写 LLM_API_KEY 和 LLM_API_BASE (可选，用于伏笔/矛盾等高级功能)
+# 3. 启动服务: ./start.ps1 或 ./start.sh
+#
+# 其他所有配置项都有合理的默认值，无需修改！
+# All other settings have sensible defaults, no changes needed!
+#
+# ============================================================================
+
+# ╔══════════════════════════════════════════════════════════════════════════╗
+# ║  ⭐ 必填配置 - REQUIRED CONFIGURATION                                    ║
+# ╚══════════════════════════════════════════════════════════════════════════╝
 
 # ----------------------------------------------------------------------------
-# Embedding 配置 (OpenAI 兼容接口)
-# Embedding Configuration (OpenAI Compatible API)
+# Embedding 配置 (OpenAI 兼容接口) - 必填!
+# Embedding Configuration (OpenAI Compatible API) - REQUIRED!
 # ----------------------------------------------------------------------------
 # 示例 (Examples):
 #   OpenAI:      https://api.openai.com/v1
-#   SiliconFlow: https://api.siliconflow.cn/v1
+#   SiliconFlow: https://api.siliconflow.cn/v1  (推荐国内用户)
 #   Ollama:      http://localhost:11434/v1
 # ----------------------------------------------------------------------------
 EMBEDDING_API_KEY=
 EMBEDDING_API_BASE=
 EMBEDDING_MODEL=
 EMBEDDING_DIMENSION=1024
+EMBEDDING_RATE_LIMIT=10
+EMBEDDING_RATE_WINDOW=60
 
 # Embedding 模式: auto(自动检测), local(本地), api(远程API)
 # Embedding Mode: auto(auto detect), local(local model), api(remote API)
 RECALL_EMBEDDING_MODE=auto
 
 # ----------------------------------------------------------------------------
-# LLM 配置 (OpenAI 兼容接口)
-# LLM Configuration (OpenAI Compatible API)
+# LLM 配置 (OpenAI 兼容接口) - 用于伏笔分析、矛盾检测等高级功能
+# LLM Configuration (OpenAI Compatible API) - For foreshadowing, contradiction, etc.
 # ----------------------------------------------------------------------------
 LLM_API_KEY=
 LLM_API_BASE=
 LLM_MODEL=
+
+# ╔══════════════════════════════════════════════════════════════════════════╗
+# ║  ⚙️ 可选配置 - OPTIONAL CONFIGURATION (以下内容可保持默认值)              ║
+# ╚══════════════════════════════════════════════════════════════════════════╝
 
 # ----------------------------------------------------------------------------
 # 伏笔分析器配置
@@ -328,6 +350,133 @@ PROACTIVE_REMINDER_ENABLED=true
 # 主动提醒触发轮次阈值（高重要性减半）
 # Proactive reminder threshold turns (halved for high importance)
 PROACTIVE_REMINDER_TURNS=50
+
+# ============================================================================
+# v4.0 Phase 1/2 新增配置
+# v4.0 Phase 1/2 New Configurations
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# 时态知识图谱配置
+# Temporal Knowledge Graph Configuration
+# ----------------------------------------------------------------------------
+# 是否启用时态知识图谱（追踪事实随时间的变化）
+TEMPORAL_GRAPH_ENABLED=true
+
+# 图谱存储后端: file(本地JSON), neo4j, falkordb
+TEMPORAL_GRAPH_BACKEND=file
+
+# 时态信息衰减率（0.0-1.0，值越大衰减越快）
+TEMPORAL_DECAY_RATE=0.1
+
+# 保留的最大时态历史记录数
+TEMPORAL_MAX_HISTORY=1000
+
+# ----------------------------------------------------------------------------
+# 矛盾检测与管理配置
+# Contradiction Detection & Management Configuration
+# ----------------------------------------------------------------------------
+# 是否启用矛盾检测
+CONTRADICTION_DETECTION_ENABLED=true
+
+# 是否自动解决矛盾（推荐 false，让用户确认）
+CONTRADICTION_AUTO_RESOLVE=false
+
+# 检测策略: RULE(规则), LLM(大模型判断), MIXED(混合), AUTO(自动选择)
+CONTRADICTION_DETECTION_STRATEGY=MIXED
+
+# 相似度阈值（用于检测潜在矛盾，0.0-1.0）
+CONTRADICTION_SIMILARITY_THRESHOLD=0.8
+
+# ----------------------------------------------------------------------------
+# 全文检索配置 (BM25)
+# Full-text Search Configuration (BM25)
+# ----------------------------------------------------------------------------
+FULLTEXT_ENABLED=true
+FULLTEXT_K1=1.5
+FULLTEXT_B=0.75
+FULLTEXT_WEIGHT=0.3
+
+# ----------------------------------------------------------------------------
+# 智能抽取器配置 (SmartExtractor)
+# Smart Extractor Configuration
+# ----------------------------------------------------------------------------
+# 抽取模式: RULES(规则), ADAPTIVE(自适应), LLM(全LLM)
+SMART_EXTRACTOR_MODE=ADAPTIVE
+SMART_EXTRACTOR_COMPLEXITY_THRESHOLD=0.6
+SMART_EXTRACTOR_ENABLE_TEMPORAL=true
+
+# ----------------------------------------------------------------------------
+# 预算管理配置 (BudgetManager)
+# Budget Management Configuration
+# ----------------------------------------------------------------------------
+BUDGET_DAILY_LIMIT=0
+BUDGET_HOURLY_LIMIT=0
+BUDGET_RESERVE=0.1
+BUDGET_ALERT_THRESHOLD=0.8
+
+# ----------------------------------------------------------------------------
+# 三阶段去重配置 (ThreeStageDeduplicator)
+# Three-Stage Deduplication Configuration
+# ----------------------------------------------------------------------------
+DEDUP_JACCARD_THRESHOLD=0.7
+DEDUP_SEMANTIC_THRESHOLD=0.85
+DEDUP_SEMANTIC_LOW_THRESHOLD=0.70
+DEDUP_LLM_ENABLED=false
+
+# ============================================================================
+# v4.0 Phase 3 十一层检索器配置
+# v4.0 Phase 3 Eleven-Layer Retriever Configuration
+# ============================================================================
+
+# 主开关 / Master Switch
+ELEVEN_LAYER_RETRIEVER_ENABLED=false
+
+# 层开关 / Layer Enable/Disable
+RETRIEVAL_L1_BLOOM_ENABLED=true
+RETRIEVAL_L2_TEMPORAL_ENABLED=true
+RETRIEVAL_L3_INVERTED_ENABLED=true
+RETRIEVAL_L4_ENTITY_ENABLED=true
+RETRIEVAL_L5_GRAPH_ENABLED=true
+RETRIEVAL_L6_NGRAM_ENABLED=true
+RETRIEVAL_L7_VECTOR_COARSE_ENABLED=true
+RETRIEVAL_L8_VECTOR_FINE_ENABLED=true
+RETRIEVAL_L9_RERANK_ENABLED=true
+RETRIEVAL_L10_CROSS_ENCODER_ENABLED=false
+RETRIEVAL_L11_LLM_ENABLED=false
+
+# Top-K 配置 / Top-K Configuration
+RETRIEVAL_L2_TEMPORAL_TOP_K=500
+RETRIEVAL_L3_INVERTED_TOP_K=100
+RETRIEVAL_L4_ENTITY_TOP_K=50
+RETRIEVAL_L5_GRAPH_TOP_K=100
+RETRIEVAL_L6_NGRAM_TOP_K=30
+RETRIEVAL_L7_VECTOR_TOP_K=200
+RETRIEVAL_L10_CROSS_ENCODER_TOP_K=50
+RETRIEVAL_L11_LLM_TOP_K=20
+
+# 阈值与最终输出 / Thresholds and Final Output
+RETRIEVAL_FINE_RANK_THRESHOLD=100
+RETRIEVAL_FINAL_TOP_K=20
+
+# L5 图遍历配置 / L5 Graph Traversal Configuration
+RETRIEVAL_L5_GRAPH_MAX_DEPTH=2
+RETRIEVAL_L5_GRAPH_MAX_ENTITIES=3
+RETRIEVAL_L5_GRAPH_DIRECTION=both
+
+# L10 CrossEncoder 配置 / L10 CrossEncoder Configuration
+RETRIEVAL_L10_CROSS_ENCODER_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2
+
+# L11 LLM 配置 / L11 LLM Configuration
+RETRIEVAL_L11_LLM_TIMEOUT=10.0
+
+# 权重配置 / Weight Configuration
+RETRIEVAL_WEIGHT_INVERTED=1.0
+RETRIEVAL_WEIGHT_ENTITY=1.2
+RETRIEVAL_WEIGHT_GRAPH=1.0
+RETRIEVAL_WEIGHT_NGRAM=0.8
+RETRIEVAL_WEIGHT_VECTOR=1.0
+RETRIEVAL_WEIGHT_TEMPORAL=0.5
 '@
         Set-Content -Path $configFile -Value $defaultConfig -Encoding UTF8
         Write-Host "  $([char]0x2192) 已创建配置文件: $configFile" -ForegroundColor Cyan
@@ -342,9 +491,9 @@ function Get-EmbeddingMode {
     if (Test-Path $modeFile) {
         $installMode = Get-Content $modeFile -ErrorAction SilentlyContinue
         switch ($installMode) {
-            "lightweight" { return "none" }
-            "hybrid" {
-                # Hybrid 模式需要检查 API Key
+            { $_ -in "lite", "lightweight" } { return "none" }
+            { $_ -in "cloud", "hybrid" } {
+                # Cloud 模式需要检查 API Key
                 # 排除占位符值
                 $key = $env:EMBEDDING_API_KEY
                 if ($key -and 
@@ -356,7 +505,7 @@ function Get-EmbeddingMode {
                     return "api_required"
                 }
             }
-            "full" { return "local" }
+            { $_ -in "local", "full" } { return "local" }
             default { return "local" }
         }
     } else {
@@ -372,7 +521,7 @@ function Start-RecallService {
     Write-Header
     
     # 加载配置文件中的 API Keys
-    Load-ApiKeys
+    Import-ApiKeys
     
     # 检查是否已运行
     $existingProc = Get-RecallProcess
@@ -390,9 +539,9 @@ function Start-RecallService {
     # 获取 Embedding 模式
     $embeddingMode = Get-EmbeddingMode
     
-    # 检查 Hybrid 模式是否配置了 API Key
+    # 检查 Cloud 模式是否配置了 API Key
     if ($embeddingMode -eq "api_required") {
-        Write-Error2 "Hybrid 模式需要配置 API Key"
+        Write-Error2 "Cloud 模式需要配置 API Key"
         Write-Host ""
         Write-Host "  请编辑配置文件: " -NoNewline
         Write-Host "recall_data\config\api_keys.env" -ForegroundColor Cyan
@@ -420,9 +569,9 @@ function Start-RecallService {
     
     # 显示 Embedding 模式
     switch ($embeddingMode) {
-        "none" { Write-Info "Embedding: 轻量模式 (仅关键词搜索)" }
-        "api" { Write-Success "Embedding: Hybrid-API (API 语义搜索)" }
-        "local" { Write-Success "Embedding: 完整模式 (本地模型)" }
+        "none" { Write-Info "Embedding: Lite 模式 (仅关键词搜索)" }
+        "api" { Write-Success "Embedding: Cloud 模式 (API 语义搜索)" }
+        "local" { Write-Success "Embedding: Local 模式 (本地模型)" }
     }
     Write-Host ""
     

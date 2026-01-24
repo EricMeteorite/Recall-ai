@@ -8,64 +8,64 @@
 import os
 import sys
 
-def test_lightweight_mode():
-    """测试轻量模式"""
+def test_lite_mode():
+    """测试 Lite 模式"""
     print("=" * 50)
-    print("测试 1: 轻量模式")
+    print("测试 1: Lite 模式")
     print("=" * 50)
     
     from recall.embedding import EmbeddingConfig, create_embedding_backend
     from recall.embedding.base import EmbeddingBackendType
     
-    config = EmbeddingConfig.lightweight()
+    config = EmbeddingConfig.lite()  # 也可以用 lightweight()
     assert config.backend == EmbeddingBackendType.NONE
     
     backend = create_embedding_backend(config)
     assert backend.dimension == 0
     
-    # 轻量模式调用 encode 应该抛出错误
+    # Lite 模式调用 encode 应该抛出错误
     try:
         backend.encode("test")
         assert False, "应该抛出 RuntimeError"
     except RuntimeError as e:
-        assert "轻量模式不支持向量编码" in str(e)
+        assert "Lite 模式不支持向量编码" in str(e) or "轻量模式不支持向量编码" in str(e)
     
-    print("[OK] Lightweight mode config correct")
+    print("[OK] Lite mode config correct")
     print("[OK] Backend dimension is 0")
     print("[OK] Encode correctly throws error")
     print()
 
 
-def test_hybrid_mode():
-    """测试 Hybrid 模式（需要 API key）"""
+def test_cloud_mode():
+    """测试 Cloud 模式（需要 API key）"""
     print("=" * 50)
-    print("测试 2: Hybrid 模式")
+    print("测试 2: Cloud 模式")
     print("=" * 50)
     
     from recall.embedding import EmbeddingConfig, create_embedding_backend
     from recall.embedding.base import EmbeddingBackendType
     
     # 测试 OpenAI 配置
-    config = EmbeddingConfig.hybrid_openai("sk-test")
+    config = EmbeddingConfig.cloud_openai("sk-test")  # 也可以用 hybrid_openai()
     assert config.backend == EmbeddingBackendType.OPENAI
     assert config.api_model == "text-embedding-3-small"
     print("[OK] OpenAI config correct")
     
     # 测试硅基流动配置
-    config = EmbeddingConfig.hybrid_siliconflow("sf-test")
+    config = EmbeddingConfig.cloud_siliconflow("sf-test")  # 也可以用 hybrid_siliconflow()
     assert config.backend == EmbeddingBackendType.SILICONFLOW
     assert config.api_model == "BAAI/bge-large-zh-v1.5"
     print("[OK] SiliconFlow config correct")
     
     # 如果有真实 API key，测试实际调用
     if os.environ.get('OPENAI_API_KEY'):
-        config = EmbeddingConfig.hybrid_openai(os.environ['OPENAI_API_KEY'])
+        config = EmbeddingConfig.cloud_openai(os.environ['OPENAI_API_KEY'])
         backend = create_embedding_backend(config)
         vec = backend.encode("你好世界")
         print(f"[OK] OpenAI actual call succeeded, vector dim: {vec.shape}")
     
     if os.environ.get('SILICONFLOW_API_KEY'):
-        config = EmbeddingConfig.hybrid_siliconflow(os.environ['SILICONFLOW_API_KEY'])
+        config = EmbeddingConfig.cloud_siliconflow(os.environ['SILICONFLOW_API_KEY'])
         backend = create_embedding_backend(config)
         vec = backend.encode("你好世界")
         print(f"[OK] SiliconFlow actual call succeeded, vector dim: {vec.shape}")
@@ -73,18 +73,18 @@ def test_hybrid_mode():
     print()
 
 
-def test_full_mode():
-    """测试完整模式（需要 sentence-transformers）"""
+def test_local_mode():
+    """测试 Local 模式（需要 sentence-transformers）"""
     print("=" * 50)
-    print("测试 3: 完整模式")
+    print("测试 3: Local 模式")
     print("=" * 50)
     
     from recall.embedding import EmbeddingConfig, create_embedding_backend
     from recall.embedding.base import EmbeddingBackendType
     
-    config = EmbeddingConfig.full()
+    config = EmbeddingConfig.local()  # 也可以用 full()
     assert config.backend == EmbeddingBackendType.LOCAL
-    print("[OK] Full mode config correct")
+    print("[OK] Local mode config correct")
     
     try:
         import sentence_transformers
@@ -121,12 +121,12 @@ def test_vector_index_disabled():
     from recall.index.vector_index import VectorIndex
     
     with tempfile.TemporaryDirectory() as tmpdir:
-        config = EmbeddingConfig.lightweight()
+        config = EmbeddingConfig.lite()  # 也可以用 lightweight()
         vi = VectorIndex(tmpdir, embedding_config=config)
         
         assert vi.enabled == False
         assert vi.search("test") == []
-        print("[OK] Vector index correctly disabled in lightweight mode")
+        print("[OK] Vector index correctly disabled in lite mode")
     
     print()
 
@@ -138,9 +138,9 @@ def main():
     print()
     
     tests = [
-        test_lightweight_mode,
-        test_hybrid_mode,
-        test_full_mode,
+        test_lite_mode,
+        test_cloud_mode,
+        test_local_mode,
         test_auto_select,
         test_vector_index_disabled,
     ]

@@ -35,7 +35,7 @@ $DataPath = Join-Path $ScriptDir "recall_data"
 $PipMirror = ""
 $InstallSuccess = $false
 $VenvCreated = $false
-$InstallMode = "full"  # lightweight, hybrid, full
+$InstallMode = "local"  # lite, cloud, local (旧值 lightweight/hybrid/full 兼容)
 
 # ==================== 工具函数 ====================
 
@@ -111,19 +111,19 @@ function Show-ModeSelection {
     Write-Host "  1) " -NoNewline; Write-Host "Lite Mode" -ForegroundColor Green -NoNewline; Write-Host "      ~100MB RAM, keyword search only"
     Write-Host "     For: Servers with < 1GB RAM" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "  2) " -NoNewline; Write-Host "Hybrid Mode" -ForegroundColor Green -NoNewline; Write-Host "    ~150MB RAM, cloud API for vectors " -NoNewline; Write-Host "[Recommended]" -ForegroundColor Yellow
+    Write-Host "  2) " -NoNewline; Write-Host "Cloud Mode" -ForegroundColor Green -NoNewline; Write-Host "    ~150MB RAM, cloud API for vectors " -NoNewline; Write-Host "[Recommended]" -ForegroundColor Yellow
     Write-Host "     For: Any server, full features, needs API Key" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "  3) " -NoNewline; Write-Host "Full Mode" -ForegroundColor Green -NoNewline; Write-Host "      ~1.5GB RAM, local vector model"
+    Write-Host "  3) " -NoNewline; Write-Host "Local Mode" -ForegroundColor Green -NoNewline; Write-Host "      ~1.5GB RAM, local vector model"
     Write-Host "     For: High-spec servers, fully offline" -ForegroundColor Cyan
     Write-Host ""
     
     $modeChoice = Read-Host "请选择 [1-3，默认2]"
     
     switch ($modeChoice) {
-        "1" { $script:InstallMode = "lightweight" }
-        "3" { $script:InstallMode = "full" }
-        default { $script:InstallMode = "hybrid" }
+        "1" { $script:InstallMode = "lite" }
+        "3" { $script:InstallMode = "local" }
+        default { $script:InstallMode = "cloud" }
     }
     
     Write-Host ""
@@ -272,16 +272,16 @@ function Install-Dependencies {
     
     # 根据模式显示预计大小
     switch ($InstallMode) {
-        "lightweight" {
-            Write-Host "    ℹ 轻量模式：下载约 300MB 依赖" -ForegroundColor Cyan
+        { $_ -in "lite", "lightweight" } {
+            Write-Host "    ℹ Lite 模式：下载约 300MB 依赖" -ForegroundColor Cyan
             Write-Host "    ℹ 预计需要 3-5 分钟" -ForegroundColor Cyan
         }
-        "hybrid" {
-            Write-Host "    ℹ Hybrid模式：下载约 400MB 依赖" -ForegroundColor Cyan
+        { $_ -in "cloud", "hybrid" } {
+            Write-Host "    ℹ Cloud 模式：下载约 400MB 依赖" -ForegroundColor Cyan
             Write-Host "    ℹ 预计需要 5-8 分钟" -ForegroundColor Cyan
         }
-        "full" {
-            Write-Host "    ℹ 完整模式：下载约 1.5GB 依赖 (包含 PyTorch)" -ForegroundColor Cyan
+        { $_ -in "local", "full" } {
+            Write-Host "    ℹ Local 模式：下载约 1.5GB 依赖 (包含 PyTorch)" -ForegroundColor Cyan
             Write-Host "    ℹ 预计需要 10-20 分钟" -ForegroundColor Cyan
         }
     }
@@ -298,20 +298,20 @@ function Install-Dependencies {
     Write-Info "安装项目依赖..."
     Write-Host ""
     
-    # 根据模式安装不同依赖
+    # 根据模式安装不同依赖（兼容新旧名称）
     $extras = ""
     switch ($InstallMode) {
-        "lightweight" { 
+        { $_ -in "lite", "lightweight" } { 
             $extras = ""
-            Write-Info "安装轻量依赖..."
+            Write-Info "安装 Lite 依赖..."
         }
-        "hybrid" { 
-            $extras = "[hybrid]"
-            Write-Info "安装 Hybrid 依赖 (FAISS)..."
+        { $_ -in "cloud", "hybrid" } { 
+            $extras = "[cloud]"
+            Write-Info "安装 Cloud 依赖 (FAISS)..."
         }
-        "full" { 
-            $extras = "[full]"
-            Write-Info "安装完整依赖 (sentence-transformers + FAISS)..."
+        { $_ -in "local", "full" } { 
+            $extras = "[local]"
+            Write-Info "安装 Local 依赖 (sentence-transformers + FAISS)..."
         }
     }
     
@@ -371,8 +371,8 @@ function Install-Models {
     
     Write-Info "下载 spaCy 中文模型 (约 50MB)..."
     
-    $args = @("-m", "spacy", "download", "zh_core_web_sm")
-    & $pythonPath @args 2>&1 | Out-Null
+    $spacyArgs = @("-m", "spacy", "download", "zh_core_web_sm")
+    & $pythonPath @spacyArgs 2>&1 | Out-Null
     
     # 验证模型是否真正可加载
     $testResult = & $pythonPath -c "import spacy; spacy.load('zh_core_web_sm'); print('OK')" 2>&1
@@ -411,9 +411,9 @@ function Initialize-Recall {
     
     Write-Info "运行初始化..."
     
-    # 根据模式初始化
+    # 根据模式初始化（兼容新旧名称）
     switch ($InstallMode) {
-        "lightweight" {
+        { $_ -in "lite", "lightweight" } {
             & $recallPath init --lightweight 2>&1 | Out-Null
         }
         default {
@@ -460,14 +460,14 @@ function Invoke-Install {
         Write-Host "╚════════════════════════════════════════════╝" -ForegroundColor Green
         Write-Host ""
         
-        # 根据模式显示不同提示
+        # 根据模式显示不同提示（兼容新旧名称）
         switch ($InstallMode) {
-            "lightweight" {
-                Write-Host "  安装模式: " -NoNewline; Write-Host "轻量模式" -ForegroundColor Cyan
-                Write-Host "  " -NoNewline; Write-Host "注意: 轻量模式仅支持关键词搜索，无语义搜索" -ForegroundColor Yellow
+            { $_ -in "lite", "lightweight" } {
+                Write-Host "  安装模式: " -NoNewline; Write-Host "Lite 模式" -ForegroundColor Cyan
+                Write-Host "  " -NoNewline; Write-Host "注意: Lite 模式仅支持关键词搜索，无语义搜索" -ForegroundColor Yellow
             }
-            "hybrid" {
-                Write-Host "  安装模式: " -NoNewline; Write-Host "Hybrid模式" -ForegroundColor Cyan
+            { $_ -in "cloud", "hybrid" } {
+                Write-Host "  安装模式: " -NoNewline; Write-Host "Cloud 模式" -ForegroundColor Cyan
                 Write-Host ""
                 Write-Host "  ⚠ 重要: 启动前需要配置 API Key!" -ForegroundColor Yellow
                 Write-Host ""
@@ -481,8 +481,8 @@ function Invoke-Install {
                 Write-Host "    2. 编辑: " -NoNewline; Write-Host "recall_data\config\api_keys.env" -ForegroundColor Cyan
                 Write-Host "    3. 热更新: " -NoNewline; Write-Host "curl -X POST http://localhost:18888/v1/config/reload" -ForegroundColor Cyan
             }
-            "full" {
-                Write-Host "  安装模式: " -NoNewline; Write-Host "完整模式" -ForegroundColor Cyan
+            { $_ -in "local", "full" } {
+                Write-Host "  安装模式: " -NoNewline; Write-Host "Local 模式" -ForegroundColor Cyan
                 Write-Host "  " -NoNewline; Write-Host "✓ 本地模型，无需API Key，完全离线运行" -ForegroundColor Green
             }
         }
@@ -538,15 +538,15 @@ function Invoke-Repair {
     switch ($choice) {
         "1" {
             Write-Info "快速修复中..."
-            $args = @("install", "-e", $ScriptDir, "--upgrade")
-            if ($PipMirror) { $args += $PipMirror.Split(" ") }
-            & $pipPath @args
+            $pipArgs = @("install", "-e", $ScriptDir, "--upgrade")
+            if ($PipMirror) { $pipArgs += $PipMirror.Split(" ") }
+            & $pipPath @pipArgs
         }
         "2" {
             Write-Info "完整重装中..."
-            $args = @("install", "-e", $ScriptDir, "--force-reinstall")
-            if ($PipMirror) { $args += $PipMirror.Split(" ") }
-            & $pipPath @args
+            $pipArgs = @("install", "-e", $ScriptDir, "--force-reinstall")
+            if ($PipMirror) { $pipArgs += $PipMirror.Split(" ") }
+            & $pipPath @pipArgs
             
             # 重新安装 spaCy 模型（与 Install-Models 相同逻辑）
             Write-Info "重新安装 spaCy 模型..."
@@ -651,10 +651,10 @@ function Show-Status {
     # 服务状态
     $pidFile = Join-Path $ScriptDir "recall.pid"
     if (Test-Path $pidFile) {
-        $pid = Get-Content $pidFile
-        $proc = Get-Process -Id $pid -ErrorAction SilentlyContinue
+        $procId = Get-Content $pidFile
+        $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
         if ($proc) {
-            Write-Success "服务状态: 运行中 (PID: $pid)"
+            Write-Success "服务状态: 运行中 (PID: $procId)"
         } else {
             Write-Warning2 "服务状态: 已停止 (残留PID文件)"
         }
@@ -664,7 +664,7 @@ function Show-Status {
     
     # API 检查
     try {
-        $response = Invoke-WebRequest -Uri "http://localhost:18888/" -TimeoutSec 2 -ErrorAction Stop
+        $null = Invoke-WebRequest -Uri "http://localhost:18888/" -TimeoutSec 2 -ErrorAction Stop
         Write-Success "API 响应: 正常"
     } catch {
         Write-Info "API 响应: 无法连接"

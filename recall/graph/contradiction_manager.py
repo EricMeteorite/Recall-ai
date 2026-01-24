@@ -27,10 +27,28 @@ if TYPE_CHECKING:
 
 class DetectionStrategy(str, Enum):
     """检测策略"""
-    RULE_ONLY = "rule"          # 仅规则检测
-    LLM_ONLY = "llm"            # 仅 LLM 检测
-    HYBRID = "hybrid"           # 混合：规则初筛 + LLM 确认
-    AUTO = "auto"               # 自动：简单矛盾用规则，复杂矛盾用 LLM
+    RULE = "rule"             # 仅规则检测
+    LLM = "llm"               # 仅 LLM 检测
+    MIXED = "mixed"           # 混合：规则初筛 + LLM 确认
+    AUTO = "auto"             # 自动：简单矛盾用规则，复杂矛盾用 LLM
+    
+    @classmethod
+    def _missing_(cls, value):
+        """向后兼容：映射旧值到新值"""
+        legacy_map = {
+            'rule_only': cls.RULE,
+            'llm_only': cls.LLM,
+            'hybrid': cls.MIXED,
+        }
+        if isinstance(value, str):
+            return legacy_map.get(value.lower())
+        return None
+
+
+# 向后兼容别名（支持 DetectionStrategy.RULE_ONLY 等旧用法）
+DetectionStrategy.RULE_ONLY = DetectionStrategy.RULE
+DetectionStrategy.LLM_ONLY = DetectionStrategy.LLM
+DetectionStrategy.HYBRID = DetectionStrategy.MIXED
 
 
 @dataclass
@@ -116,7 +134,7 @@ class ContradictionManager:
         self,
         data_path: str,
         llm_client: Optional['LLMClient'] = None,
-        strategy: DetectionStrategy = DetectionStrategy.RULE_ONLY,
+        strategy: DetectionStrategy = DetectionStrategy.RULE,
         auto_resolve: bool = False,
         default_resolution: ResolutionStrategy = ResolutionStrategy.MANUAL
     ):
@@ -293,17 +311,17 @@ class ContradictionManager:
         """检测两个事实之间的矛盾"""
         
         # 策略1：仅规则
-        if self.strategy == DetectionStrategy.RULE_ONLY:
+        if self.strategy == DetectionStrategy.RULE:
             return self._detect_by_rules(old_fact, new_fact)
         
         # 策略2：仅 LLM
-        if self.strategy == DetectionStrategy.LLM_ONLY:
+        if self.strategy == DetectionStrategy.LLM:
             if self.llm_client:
                 return self._detect_by_llm(old_fact, new_fact, context)
             return None
         
         # 策略3：混合
-        if self.strategy == DetectionStrategy.HYBRID:
+        if self.strategy == DetectionStrategy.MIXED:
             # 先规则检测
             rule_result = self._detect_by_rules(old_fact, new_fact)
             if rule_result:

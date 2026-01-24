@@ -54,7 +54,7 @@ def test_phase2():
     print('\n3. 测试 SmartExtractor...')
     from recall.processor import SmartExtractor, SmartExtractorConfig, ExtractionMode
 
-    config = SmartExtractorConfig.local_only()
+    config = SmartExtractorConfig.rules_only()  # 也可以用 local_only()
     extractor = SmartExtractor(config=config)
     print(f'   初始化成功，模式: {config.mode}')
 
@@ -68,7 +68,7 @@ def test_phase2():
     from recall.engine import RecallEngine
 
     # 不启用 Phase 1 模块
-    engine = RecallEngine(data_root=temp_dir, lightweight=True, auto_warmup=False)
+    engine = RecallEngine(data_root=temp_dir, lite=True, auto_warmup=False)  # 也可以用 lightweight=True
     print('   引擎初始化成功')
 
     # 测试基本功能
@@ -84,7 +84,7 @@ def test_phase2():
     os.environ['CONTRADICTION_DETECTION_ENABLED'] = 'true'
     os.environ['FULLTEXT_ENABLED'] = 'true'
 
-    engine2 = RecallEngine(data_root=temp_dir2, lightweight=True, auto_warmup=False)
+    engine2 = RecallEngine(data_root=temp_dir2, lite=True, auto_warmup=False)  # 也可以用 lightweight=True
 
     print(f'   时态图谱: {"已启用" if engine2.temporal_graph else "未启用"}')
     print(f'   矛盾检测: {"已启用" if engine2.contradiction_manager else "未启用"}')

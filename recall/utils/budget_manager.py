@@ -424,16 +424,16 @@ class BudgetManager:
         """建议降级策略
         
         Returns:
-            str: 降级建议 (local/hybrid/full)
+            str: 降级建议 (lite/cloud/local)
         """
         remaining = self.get_remaining_budget()
         
         if remaining <= 0:
-            return "local"      # 完全切换到本地模式
+            return "lite"       # 完全切换到 Lite 模式
         elif remaining < 0.1:
-            return "hybrid"     # 混合模式，减少 LLM 使用
+            return "cloud"      # Cloud 模式，减少 LLM 使用
         else:
-            return "full"       # 正常模式
+            return "local"      # Local 模式（本地模型）
     
     def reset_daily(self):
         """手动重置每日预算（用于测试或特殊情况）"""

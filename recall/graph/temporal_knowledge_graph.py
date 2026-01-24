@@ -58,7 +58,7 @@ class TemporalKnowledgeGraph:
     def __init__(
         self,
         data_path: str,
-        backend: str = "local",         # local | neo4j | falkordb（预留）
+        backend: str = "file",          # file | neo4j | falkordb（预留）
         scope: str = "global",          # global | isolated
         enable_fulltext: bool = True,   # 是否启用全文索引
         enable_temporal: bool = True,   # 是否启用时态索引
@@ -68,13 +68,16 @@ class TemporalKnowledgeGraph:
         
         Args:
             data_path: 数据存储路径
-            backend: 存储后端（当前仅支持 local）
+            backend: 存储后端（file=本地JSON文件，支持旧值 'local'）
             scope: 作用域
             enable_fulltext: 是否启用全文索引
             enable_temporal: 是否启用时态索引
             auto_save: 是否自动保存
         """
         self.data_path = data_path
+        # 向后兼容：映射旧值 'local' 到 'file'
+        if backend == "local":
+            backend = "file"
         self.backend = backend
         self.scope = scope
         self.auto_save = auto_save

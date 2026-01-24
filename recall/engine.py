@@ -99,6 +99,7 @@ class RecallEngine:
         llm_model: Optional[str] = None,
         llm_api_key: Optional[str] = None,
         lightweight: bool = False,
+        lite: bool = None,  # 新名称，与 lightweight 等效
         embedding_config: Optional[EmbeddingConfig] = None,
         auto_warmup: bool = True,
         foreshadowing_config: Optional[ForeshadowingAnalyzerConfig] = None
@@ -109,18 +110,23 @@ class RecallEngine:
             data_root: 数据存储根目录，默认为 ./recall_data
             llm_model: LLM 模型名称，默认为 gpt-3.5-turbo
             llm_api_key: LLM API Key
-            lightweight: 是否使用轻量模式（约80MB内存，无语义搜索）
+            lite: 是否使用 Lite 模式（约80MB内存，无语义搜索）
+            lightweight: lite 的别名（向后兼容）
             embedding_config: Embedding 配置，支持三种模式：
                 - None/自动: 根据环境自动选择
-                - EmbeddingConfig.lightweight(): 轻量模式，~100MB内存
-                - EmbeddingConfig.hybrid_openai(key): Hybrid模式，~150MB内存
-                - EmbeddingConfig.hybrid_siliconflow(key): Hybrid模式（国内）
-                - EmbeddingConfig.full(): 完整模式，~1.5GB内存
+                - EmbeddingConfig.lite(): Lite 模式，~100MB内存
+                - EmbeddingConfig.cloud_openai(key): Cloud 模式，~150MB内存
+                - EmbeddingConfig.cloud_siliconflow(key): Cloud 模式（国内）
+                - EmbeddingConfig.local(): Local 模式，~1.5GB内存
             auto_warmup: 是否自动预热模型
             foreshadowing_config: 伏笔分析器配置（可选）
                 - None/默认: 手动模式，不启用自动分析
                 - ForeshadowingAnalyzerConfig.llm_based(...): LLM 辅助模式
         """
+        # 处理 lite/lightweight 别名
+        if lite is not None:
+            lightweight = lite
+        
         # 1. 初始化环境
         self.env_manager = EnvironmentManager(data_root)
         self.env_manager.setup()
@@ -134,7 +140,7 @@ class RecallEngine:
         
         # 3. 确定 Embedding 配置
         if lightweight:
-            self.embedding_config = EmbeddingConfig.lightweight()
+            self.embedding_config = EmbeddingConfig.lite()
         elif embedding_config:
             self.embedding_config = embedding_config
         else:
@@ -142,7 +148,7 @@ class RecallEngine:
             from .embedding.factory import auto_select_backend
             self.embedding_config = auto_select_backend()
         
-        # 根据最终的 embedding_config 确定是否为轻量模式
+        # 根据最终的 embedding_config 确定是否为 Lite 模式
         self.lightweight = (self.embedding_config.backend == EmbeddingBackendType.NONE)
         
         # 4. 初始化组件
@@ -163,15 +169,15 @@ class RecallEngine:
         """获取当前模式名称"""
         backend = self.embedding_config.backend
         if backend == EmbeddingBackendType.NONE:
-            return "轻量模式"
+            return "Lite 模式"
         elif backend == EmbeddingBackendType.LOCAL:
-            return "完整模式"
+            return "Local 模式"
         elif backend == EmbeddingBackendType.OPENAI:
-            return "Hybrid模式-OpenAI"
+            return "Cloud 模式-OpenAI"
         elif backend == EmbeddingBackendType.SILICONFLOW:
-            return "Hybrid模式-硅基流动"
+            return "Cloud 模式-硅基流动"
         elif backend == EmbeddingBackendType.CUSTOM:
-            return "Hybrid模式-自定义API"
+            return "Cloud 模式-自定义API"
         return "未知模式"
     
     def _init_components(
@@ -201,7 +207,7 @@ class RecallEngine:
             data_path=os.path.join(self.data_root, 'data')
         )
         
-        # 索引层（轻量模式延迟加载）
+        # 索引层（Lite 模式延迟加载）
         self._entity_index: Optional[EntityIndex] = None
         self._inverted_index: Optional[InvertedIndex] = None
         self._vector_index: Optional[VectorIndex] = None
@@ -324,10 +330,13 @@ class RecallEngine:
         if temporal_enabled:
             try:
                 from .graph import TemporalKnowledgeGraph
+                # 读取图谱后端配置
+                graph_backend = os.environ.get('TEMPORAL_GRAPH_BACKEND', 'file').lower()
                 self.temporal_graph = TemporalKnowledgeGraph(
-                    data_path=os.path.join(self.data_root, 'data')
+                    data_path=os.path.join(self.data_root, 'data'),
+                    backend=graph_backend
                 )
-                print("[Recall v4.0] 时态知识图谱已启用")
+                print(f"[Recall v4.0] 时态知识图谱已启用 (backend={graph_backend})")
             except Exception as e:
                 print(f"[Recall v4.0] 时态知识图谱初始化失败（不影响核心功能）: {e}")
         
@@ -335,16 +344,21 @@ class RecallEngine:
         if contradiction_enabled:
             try:
                 from .graph import ContradictionManager, DetectionStrategy
-                # 策略映射：EMBEDDING->HYBRID, LLM->LLM_ONLY, 默认 HYBRID
-                strategy_str = os.environ.get('CONTRADICTION_DETECTION_STRATEGY', 'HYBRID').upper()
+                # 策略映射：支持新旧名称，默认 MIXED
+                strategy_str = os.environ.get('CONTRADICTION_DETECTION_STRATEGY', 'MIXED').upper()
                 strategy_map = {
-                    'EMBEDDING': DetectionStrategy.HYBRID,  # 兼容旧配置
-                    'LLM': DetectionStrategy.LLM_ONLY,
-                    'HYBRID': DetectionStrategy.HYBRID,
-                    'RULE': DetectionStrategy.RULE_ONLY,
+                    # 新名称（推荐）
+                    'RULE': DetectionStrategy.RULE,
+                    'LLM': DetectionStrategy.LLM,
+                    'MIXED': DetectionStrategy.MIXED,
                     'AUTO': DetectionStrategy.AUTO,
+                    # 旧名称（向后兼容）
+                    'EMBEDDING': DetectionStrategy.MIXED,  # 兼容旧配置
+                    'LLM_ONLY': DetectionStrategy.LLM,
+                    'RULE_ONLY': DetectionStrategy.RULE,
+                    'HYBRID': DetectionStrategy.MIXED,
                 }
-                strategy = strategy_map.get(strategy_str, DetectionStrategy.HYBRID)
+                strategy = strategy_map.get(strategy_str, DetectionStrategy.MIXED)
                 
                 self.contradiction_manager = ContradictionManager(
                     data_path=os.path.join(self.data_root, 'data'),
@@ -714,7 +728,7 @@ class RecallEngine:
             print(f"[Recall] 已恢复 {count} 条记忆内容到缓存")
     
     def _warmup(self):
-        """预热模型（仅完整模式）"""
+        """预热模型（仅 Local 模式）"""
         warmup_manager = WarmupManager()
         
         # 注册预热任务
@@ -2061,7 +2075,8 @@ class RecallEngine:
             'version': __version__,
             'data_root': self.data_root,
             'mode': self._get_mode_name(),
-            'lightweight': self.lightweight,
+            'lightweight': self.lightweight,  # 保留旧字段（向后兼容）
+            'lite': self.lightweight,  # 新字段（推荐使用）
         }
         
         # 全局统计

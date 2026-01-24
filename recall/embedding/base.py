@@ -14,7 +14,7 @@ class EmbeddingBackendType(str, Enum):
     OPENAI = "openai"         # OpenAI API
     SILICONFLOW = "siliconflow"  # 硅基流动 API
     CUSTOM = "custom"         # 自定义 OpenAI 兼容 API
-    NONE = "none"             # 禁用（轻量模式）
+    NONE = "none"             # 禁用（Lite 模式）
 
 
 @dataclass
@@ -40,9 +40,15 @@ class EmbeddingConfig:
     max_cache_size: int = 10000
     
     @classmethod
-    def lightweight(cls) -> 'EmbeddingConfig':
-        """轻量模式配置（禁用向量索引）"""
+    def lite(cls) -> 'EmbeddingConfig':
+        """Lite 模式配置（禁用向量索引）"""
         return cls(backend=EmbeddingBackendType.NONE)
+    
+    # 向后兼容别名
+    @classmethod
+    def lightweight(cls) -> 'EmbeddingConfig':
+        """[已弃用] 请使用 lite()"""
+        return cls.lite()
     
     # 模型维度映射（与 api_backend.py 保持一致）
     MODEL_DIMENSIONS = {
@@ -57,8 +63,8 @@ class EmbeddingConfig:
     }
     
     @classmethod
-    def hybrid_openai(cls, api_key: str, api_base: str = None, model: str = "text-embedding-3-small") -> 'EmbeddingConfig':
-        """Hybrid 模式 - OpenAI"""
+    def cloud_openai(cls, api_key: str, api_base: str = None, model: str = "text-embedding-3-small") -> 'EmbeddingConfig':
+        """Cloud 模式 - OpenAI API"""
         dimension = cls.MODEL_DIMENSIONS.get(model, 1536)
         return cls(
             backend=EmbeddingBackendType.OPENAI,
@@ -68,9 +74,15 @@ class EmbeddingConfig:
             dimension=dimension,
         )
     
+    # 向后兼容别名
     @classmethod
-    def hybrid_siliconflow(cls, api_key: str, model: str = "BAAI/bge-large-zh-v1.5") -> 'EmbeddingConfig':
-        """Hybrid 模式 - 硅基流动"""
+    def hybrid_openai(cls, api_key: str, api_base: str = None, model: str = "text-embedding-3-small") -> 'EmbeddingConfig':
+        """[已弃用] 请使用 cloud_openai()"""
+        return cls.cloud_openai(api_key, api_base, model)
+    
+    @classmethod
+    def cloud_siliconflow(cls, api_key: str, model: str = "BAAI/bge-large-zh-v1.5") -> 'EmbeddingConfig':
+        """Cloud 模式 - 硅基流动 API"""
         dimension = cls.MODEL_DIMENSIONS.get(model, 1024)
         return cls(
             backend=EmbeddingBackendType.SILICONFLOW,
@@ -80,9 +92,15 @@ class EmbeddingConfig:
             dimension=dimension,
         )
     
+    # 向后兼容别名
     @classmethod
-    def hybrid_custom(cls, api_key: str, api_base: str, api_model: str, dimension: int = 1536) -> 'EmbeddingConfig':
-        """Hybrid 模式 - 自定义 OpenAI 兼容 API
+    def hybrid_siliconflow(cls, api_key: str, model: str = "BAAI/bge-large-zh-v1.5") -> 'EmbeddingConfig':
+        """[已弃用] 请使用 cloud_siliconflow()"""
+        return cls.cloud_siliconflow(api_key, model)
+    
+    @classmethod
+    def cloud_custom(cls, api_key: str, api_base: str, api_model: str, dimension: int = 1536) -> 'EmbeddingConfig':
+        """Cloud 模式 - 自定义 OpenAI 兼容 API
         
         适用于：
         - OpenAI 中转站
@@ -98,14 +116,26 @@ class EmbeddingConfig:
             dimension=dimension,
         )
     
+    # 向后兼容别名
     @classmethod
-    def full(cls) -> 'EmbeddingConfig':
-        """完整模式配置（本地模型）"""
+    def hybrid_custom(cls, api_key: str, api_base: str, api_model: str, dimension: int = 1536) -> 'EmbeddingConfig':
+        """[已弃用] 请使用 cloud_custom()"""
+        return cls.cloud_custom(api_key, api_base, api_model, dimension)
+    
+    @classmethod
+    def local(cls) -> 'EmbeddingConfig':
+        """Local 模式配置（本地模型）"""
         return cls(
             backend=EmbeddingBackendType.LOCAL,
             local_model="paraphrase-multilingual-MiniLM-L12-v2",
             dimension=384,
         )
+    
+    # 向后兼容别名
+    @classmethod
+    def full(cls) -> 'EmbeddingConfig':
+        """[已弃用] 请使用 local()"""
+        return cls.local()
 
 
 class EmbeddingBackend(ABC):
@@ -163,7 +193,7 @@ class EmbeddingBackend(ABC):
 
 
 class NoneBackend(EmbeddingBackend):
-    """空后端（轻量模式）"""
+    """空后端（Lite 模式）"""
     
     @property
     def dimension(self) -> int:
@@ -174,7 +204,7 @@ class NoneBackend(EmbeddingBackend):
         return True
     
     def encode(self, text: str) -> np.ndarray:
-        raise RuntimeError("轻量模式不支持向量编码，请切换到 Hybrid 或完整模式")
+        raise RuntimeError("Lite 模式不支持向量编码，请切换到 Cloud 或 Local 模式")
     
     def encode_batch(self, texts: List[str]) -> np.ndarray:
-        raise RuntimeError("轻量模式不支持向量编码，请切换到 Hybrid 或完整模式")
+        raise RuntimeError("Lite 模式不支持向量编码，请切换到 Cloud 或 Local 模式")

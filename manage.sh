@@ -266,14 +266,14 @@ do_start() {
     # 检查配置文件
     local config_file="$SCRIPT_DIR/recall_data/config/api_keys.env"
     local mode_file="$SCRIPT_DIR/recall_data/config/install_mode"
-    local install_mode="full"
+    local install_mode="local"
     
     if [[ -f "$mode_file" ]]; then
         install_mode=$(cat "$mode_file")
     fi
     
-    # 如果是 hybrid 模式，检查 API 配置
-    if [[ "$install_mode" == "hybrid" ]]; then
+    # 如果是 cloud/hybrid 模式，检查 API 配置
+    if [[ "$install_mode" == "cloud" ]] || [[ "$install_mode" == "hybrid" ]]; then
         local need_config=false
         
         if [[ ! -f "$config_file" ]]; then
@@ -415,12 +415,76 @@ PROACTIVE_REMINDER_ENABLED=true
 # 主动提醒触发轮次阈值（高重要性减半）
 # Proactive reminder threshold turns (halved for high importance)
 PROACTIVE_REMINDER_TURNS=50
+
+# ============================================================================
+# v4.0 Phase 1/2 新增配置
+# ============================================================================
+TEMPORAL_GRAPH_ENABLED=true
+TEMPORAL_GRAPH_BACKEND=file
+TEMPORAL_DECAY_RATE=0.1
+TEMPORAL_MAX_HISTORY=1000
+CONTRADICTION_DETECTION_ENABLED=true
+CONTRADICTION_AUTO_RESOLVE=false
+CONTRADICTION_DETECTION_STRATEGY=MIXED
+CONTRADICTION_SIMILARITY_THRESHOLD=0.8
+FULLTEXT_ENABLED=true
+FULLTEXT_K1=1.5
+FULLTEXT_B=0.75
+FULLTEXT_WEIGHT=0.3
+SMART_EXTRACTOR_MODE=ADAPTIVE
+SMART_EXTRACTOR_COMPLEXITY_THRESHOLD=0.6
+SMART_EXTRACTOR_ENABLE_TEMPORAL=true
+BUDGET_DAILY_LIMIT=0
+BUDGET_HOURLY_LIMIT=0
+BUDGET_RESERVE=0.1
+BUDGET_ALERT_THRESHOLD=0.8
+DEDUP_JACCARD_THRESHOLD=0.7
+DEDUP_SEMANTIC_THRESHOLD=0.85
+DEDUP_SEMANTIC_LOW_THRESHOLD=0.70
+DEDUP_LLM_ENABLED=false
+
+# ============================================================================
+# v4.0 Phase 3 十一层检索器配置
+# ============================================================================
+ELEVEN_LAYER_RETRIEVER_ENABLED=false
+RETRIEVAL_L1_BLOOM_ENABLED=true
+RETRIEVAL_L2_TEMPORAL_ENABLED=true
+RETRIEVAL_L3_INVERTED_ENABLED=true
+RETRIEVAL_L4_ENTITY_ENABLED=true
+RETRIEVAL_L5_GRAPH_ENABLED=true
+RETRIEVAL_L6_NGRAM_ENABLED=true
+RETRIEVAL_L7_VECTOR_COARSE_ENABLED=true
+RETRIEVAL_L8_VECTOR_FINE_ENABLED=true
+RETRIEVAL_L9_RERANK_ENABLED=true
+RETRIEVAL_L10_CROSS_ENCODER_ENABLED=false
+RETRIEVAL_L11_LLM_ENABLED=false
+RETRIEVAL_L2_TEMPORAL_TOP_K=500
+RETRIEVAL_L3_INVERTED_TOP_K=100
+RETRIEVAL_L4_ENTITY_TOP_K=50
+RETRIEVAL_L5_GRAPH_TOP_K=100
+RETRIEVAL_L6_NGRAM_TOP_K=30
+RETRIEVAL_L7_VECTOR_TOP_K=200
+RETRIEVAL_L10_CROSS_ENCODER_TOP_K=50
+RETRIEVAL_L11_LLM_TOP_K=20
+RETRIEVAL_FINE_RANK_THRESHOLD=100
+RETRIEVAL_FINAL_TOP_K=20
+RETRIEVAL_L5_GRAPH_MAX_DEPTH=2
+RETRIEVAL_L5_GRAPH_MAX_ENTITIES=3
+RETRIEVAL_L5_GRAPH_DIRECTION=both
+RETRIEVAL_L10_CROSS_ENCODER_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2
+RETRIEVAL_L11_LLM_TIMEOUT=10.0
+RETRIEVAL_WEIGHT_INVERTED=1.0
+RETRIEVAL_WEIGHT_ENTITY=1.2
+RETRIEVAL_WEIGHT_GRAPH=1.0
+RETRIEVAL_WEIGHT_NGRAM=0.8
+RETRIEVAL_WEIGHT_VECTOR=1.0
+RETRIEVAL_WEIGHT_TEMPORAL=0.5
 EOF
                 print_info "已创建配置文件: $config_file"
             fi
             
             echo ""
-            print_warning "Hybrid 模式需要配置 Embedding API"
+            print_warning "Cloud 模式需要配置 Embedding API"
             echo ""
             print_info "请编辑配置文件:"
             print_dim "  $config_file"
@@ -540,7 +604,7 @@ do_status() {
         local stats=$(curl -s "http://127.0.0.1:$DEFAULT_PORT/v1/stats" 2>/dev/null || echo "")
         if [[ -n "$stats" ]]; then
             local total=$(echo "$stats" | python3 -c "import sys,json; print(json.load(sys.stdin).get('total_memories', 'N/A'))" 2>/dev/null || echo "N/A")
-            local mode=$(echo "$stats" | python3 -c "import sys,json; d=json.load(sys.stdin); print('轻量模式' if d.get('lightweight', False) else '完整模式')" 2>/dev/null || echo "N/A")
+            local mode=$(echo "$stats" | python3 -c "import sys,json; d=json.load(sys.stdin); print('Lite 模式' if d.get('lite', False) or d.get('lightweight', False) else 'Local 模式')" 2>/dev/null || echo "N/A")
             print_dim "记忆总数: $total"
             print_dim "Embedding 模式: $mode"
         fi

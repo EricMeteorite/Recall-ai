@@ -10,7 +10,7 @@ os.environ['RECALL_DATA_ROOT'] = tmpdir
 
 from recall import RecallEngine
 
-e = RecallEngine(lightweight=True)
+e = RecallEngine(lite=True)  # 也可以用 lightweight=True
 
 print('=== 测试持久条件增长控制 ===')
 

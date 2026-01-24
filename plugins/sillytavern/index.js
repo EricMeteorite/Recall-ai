@@ -2127,9 +2127,10 @@ async function showSystemStats() {
                 html += `<div class="recall-stat-item"><span class="recall-stat-label">实体数</span><span class="recall-stat-value">${globalStats.consolidated_entities || 0}</span></div>`;
                 html += `<div class="recall-stat-item"><span class="recall-stat-label">作用域</span><span class="recall-stat-value">${globalStats.total_scopes || 1}</span></div>`;
                 
-                // 模式信息
-                if (stats.lightweight !== undefined) {
-                    html += `<div class="recall-stat-item"><span class="recall-stat-label">运行模式</span><span class="recall-stat-value">${stats.lightweight ? '轻量' : '完整'}</span></div>`;
+                // 模式信息（支持新旧字段名）
+                const isLiteMode = stats.lite ?? stats.lightweight;
+                if (isLiteMode !== undefined) {
+                    html += `<div class="recall-stat-item"><span class="recall-stat-label">运行模式</span><span class="recall-stat-value">${isLiteMode ? 'Lite' : 'Local'}</span></div>`;
                 }
                 
                 // 索引状态

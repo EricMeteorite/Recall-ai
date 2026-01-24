@@ -66,7 +66,7 @@ def test_write_performance():
     # 初始化引擎（使用持久化存储）
     print("初始化引擎...")
     start_mem = get_memory_usage()
-    engine = RecallEngine(data_root=str(TEST_DATA_DIR), lightweight=True, auto_warmup=False)
+    engine = RecallEngine(data_root=str(TEST_DATA_DIR), lite=True, auto_warmup=False)
     
     # 写入测试
     print(f"开始写入 (初始内存: {start_mem:.1f}MB)...")
@@ -126,7 +126,7 @@ def test_persistence():
     
     # 重新加载引擎（模拟程序重启）
     print("重新加载引擎（模拟重启）...")
-    engine = RecallEngine(data_root=str(TEST_DATA_DIR), lightweight=True, auto_warmup=False)
+    engine = RecallEngine(data_root=str(TEST_DATA_DIR), lite=True, auto_warmup=False)
     
     # 检查数据是否还在
     all_memories = engine.get_all()
@@ -151,7 +151,7 @@ def test_search_performance():
     
     from recall.engine import RecallEngine
     
-    engine = RecallEngine(data_root=str(TEST_DATA_DIR), lightweight=True, auto_warmup=False)
+    engine = RecallEngine(data_root=str(TEST_DATA_DIR), lite=True, auto_warmup=False)
     
     queries = ["Alice", "北京", "朋友", "编程", "第100轮", "Turn 250"]
     
@@ -183,7 +183,7 @@ def test_incremental_add():
     
     from recall.engine import RecallEngine
     
-    engine = RecallEngine(data_root=str(TEST_DATA_DIR), lightweight=True, auto_warmup=False)
+    engine = RecallEngine(data_root=str(TEST_DATA_DIR), lite=True, auto_warmup=False)
     
     before_count = len(engine.get_all())
     print(f"当前记忆数: {before_count}")
@@ -198,7 +198,7 @@ def test_incremental_add():
     
     # 再次模拟重启
     print("再次重启验证...")
-    engine2 = RecallEngine(data_root=str(TEST_DATA_DIR), lightweight=True, auto_warmup=False)
+    engine2 = RecallEngine(data_root=str(TEST_DATA_DIR), lite=True, auto_warmup=False)
     final_count = len(engine2.get_all())
     print(f"重启后记忆数: {final_count}")
     

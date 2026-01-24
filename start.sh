@@ -230,7 +230,7 @@ load_api_keys() {
     # 支持的配置项（与 server.py SUPPORTED_CONFIG_KEYS 保持一致）
     # 包括 v4.0 Phase 1/2 新增配置项
     # 包括 v4.0 Phase 3 十一层检索器配置项
-    local supported_keys="EMBEDDING_API_KEY EMBEDDING_API_BASE EMBEDDING_MODEL EMBEDDING_DIMENSION EMBEDDING_RATE_LIMIT EMBEDDING_RATE_WINDOW RECALL_EMBEDDING_MODE LLM_API_KEY LLM_API_BASE LLM_MODEL FORESHADOWING_LLM_ENABLED FORESHADOWING_TRIGGER_INTERVAL FORESHADOWING_AUTO_PLANT FORESHADOWING_AUTO_RESOLVE FORESHADOWING_MAX_RETURN FORESHADOWING_MAX_ACTIVE CONTEXT_TRIGGER_INTERVAL CONTEXT_MAX_CONTEXT_TURNS CONTEXT_MAX_PER_TYPE CONTEXT_MAX_TOTAL CONTEXT_DECAY_DAYS CONTEXT_DECAY_RATE CONTEXT_MIN_CONFIDENCE BUILD_CONTEXT_INCLUDE_RECENT PROACTIVE_REMINDER_ENABLED PROACTIVE_REMINDER_TURNS DEDUP_EMBEDDING_ENABLED DEDUP_HIGH_THRESHOLD DEDUP_LOW_THRESHOLD TEMPORAL_GRAPH_ENABLED TEMPORAL_DECAY_RATE TEMPORAL_MAX_HISTORY CONTRADICTION_DETECTION_ENABLED CONTRADICTION_AUTO_RESOLVE CONTRADICTION_DETECTION_STRATEGY CONTRADICTION_SIMILARITY_THRESHOLD FULLTEXT_ENABLED FULLTEXT_K1 FULLTEXT_B FULLTEXT_WEIGHT SMART_EXTRACTOR_MODE SMART_EXTRACTOR_COMPLEXITY_THRESHOLD SMART_EXTRACTOR_ENABLE_TEMPORAL BUDGET_DAILY_LIMIT BUDGET_HOURLY_LIMIT BUDGET_RESERVE BUDGET_ALERT_THRESHOLD DEDUP_JACCARD_THRESHOLD DEDUP_SEMANTIC_THRESHOLD DEDUP_SEMANTIC_LOW_THRESHOLD DEDUP_LLM_ENABLED ELEVEN_LAYER_RETRIEVER_ENABLED RETRIEVAL_L1_BLOOM_ENABLED RETRIEVAL_L2_TEMPORAL_ENABLED RETRIEVAL_L3_INVERTED_ENABLED RETRIEVAL_L4_ENTITY_ENABLED RETRIEVAL_L5_GRAPH_ENABLED RETRIEVAL_L6_NGRAM_ENABLED RETRIEVAL_L7_VECTOR_COARSE_ENABLED RETRIEVAL_L8_VECTOR_FINE_ENABLED RETRIEVAL_L9_RERANK_ENABLED RETRIEVAL_L10_CROSS_ENCODER_ENABLED RETRIEVAL_L11_LLM_ENABLED RETRIEVAL_L2_TEMPORAL_TOP_K RETRIEVAL_L3_INVERTED_TOP_K RETRIEVAL_L4_ENTITY_TOP_K RETRIEVAL_L5_GRAPH_TOP_K RETRIEVAL_L6_NGRAM_TOP_K RETRIEVAL_L7_VECTOR_TOP_K RETRIEVAL_L10_CROSS_ENCODER_TOP_K RETRIEVAL_L11_LLM_TOP_K RETRIEVAL_FINE_RANK_THRESHOLD RETRIEVAL_FINAL_TOP_K RETRIEVAL_L5_GRAPH_MAX_DEPTH RETRIEVAL_L5_GRAPH_MAX_ENTITIES RETRIEVAL_L5_GRAPH_DIRECTION RETRIEVAL_L10_CROSS_ENCODER_MODEL RETRIEVAL_L11_LLM_TIMEOUT RETRIEVAL_WEIGHT_INVERTED RETRIEVAL_WEIGHT_ENTITY RETRIEVAL_WEIGHT_GRAPH RETRIEVAL_WEIGHT_NGRAM RETRIEVAL_WEIGHT_VECTOR RETRIEVAL_WEIGHT_TEMPORAL"
+    local supported_keys="EMBEDDING_API_KEY EMBEDDING_API_BASE EMBEDDING_MODEL EMBEDDING_DIMENSION EMBEDDING_RATE_LIMIT EMBEDDING_RATE_WINDOW RECALL_EMBEDDING_MODE LLM_API_KEY LLM_API_BASE LLM_MODEL FORESHADOWING_LLM_ENABLED FORESHADOWING_TRIGGER_INTERVAL FORESHADOWING_AUTO_PLANT FORESHADOWING_AUTO_RESOLVE FORESHADOWING_MAX_RETURN FORESHADOWING_MAX_ACTIVE CONTEXT_TRIGGER_INTERVAL CONTEXT_MAX_CONTEXT_TURNS CONTEXT_MAX_PER_TYPE CONTEXT_MAX_TOTAL CONTEXT_DECAY_DAYS CONTEXT_DECAY_RATE CONTEXT_MIN_CONFIDENCE BUILD_CONTEXT_INCLUDE_RECENT PROACTIVE_REMINDER_ENABLED PROACTIVE_REMINDER_TURNS DEDUP_EMBEDDING_ENABLED DEDUP_HIGH_THRESHOLD DEDUP_LOW_THRESHOLD TEMPORAL_GRAPH_ENABLED TEMPORAL_GRAPH_BACKEND TEMPORAL_DECAY_RATE TEMPORAL_MAX_HISTORY CONTRADICTION_DETECTION_ENABLED CONTRADICTION_AUTO_RESOLVE CONTRADICTION_DETECTION_STRATEGY CONTRADICTION_SIMILARITY_THRESHOLD FULLTEXT_ENABLED FULLTEXT_K1 FULLTEXT_B FULLTEXT_WEIGHT SMART_EXTRACTOR_MODE SMART_EXTRACTOR_COMPLEXITY_THRESHOLD SMART_EXTRACTOR_ENABLE_TEMPORAL BUDGET_DAILY_LIMIT BUDGET_HOURLY_LIMIT BUDGET_RESERVE BUDGET_ALERT_THRESHOLD DEDUP_JACCARD_THRESHOLD DEDUP_SEMANTIC_THRESHOLD DEDUP_SEMANTIC_LOW_THRESHOLD DEDUP_LLM_ENABLED ELEVEN_LAYER_RETRIEVER_ENABLED RETRIEVAL_L1_BLOOM_ENABLED RETRIEVAL_L2_TEMPORAL_ENABLED RETRIEVAL_L3_INVERTED_ENABLED RETRIEVAL_L4_ENTITY_ENABLED RETRIEVAL_L5_GRAPH_ENABLED RETRIEVAL_L6_NGRAM_ENABLED RETRIEVAL_L7_VECTOR_COARSE_ENABLED RETRIEVAL_L8_VECTOR_FINE_ENABLED RETRIEVAL_L9_RERANK_ENABLED RETRIEVAL_L10_CROSS_ENCODER_ENABLED RETRIEVAL_L11_LLM_ENABLED RETRIEVAL_L2_TEMPORAL_TOP_K RETRIEVAL_L3_INVERTED_TOP_K RETRIEVAL_L4_ENTITY_TOP_K RETRIEVAL_L5_GRAPH_TOP_K RETRIEVAL_L6_NGRAM_TOP_K RETRIEVAL_L7_VECTOR_TOP_K RETRIEVAL_L10_CROSS_ENCODER_TOP_K RETRIEVAL_L11_LLM_TOP_K RETRIEVAL_FINE_RANK_THRESHOLD RETRIEVAL_FINAL_TOP_K RETRIEVAL_L5_GRAPH_MAX_DEPTH RETRIEVAL_L5_GRAPH_MAX_ENTITIES RETRIEVAL_L5_GRAPH_DIRECTION RETRIEVAL_L10_CROSS_ENCODER_MODEL RETRIEVAL_L11_LLM_TIMEOUT RETRIEVAL_WEIGHT_INVERTED RETRIEVAL_WEIGHT_ENTITY RETRIEVAL_WEIGHT_GRAPH RETRIEVAL_WEIGHT_NGRAM RETRIEVAL_WEIGHT_VECTOR RETRIEVAL_WEIGHT_TEMPORAL"
     
     if [ -f "$config_file" ]; then
         print_info "加载配置文件: $config_file"
@@ -267,32 +267,54 @@ load_api_keys() {
 # Recall-AI 配置文件
 # Recall-AI Configuration File
 # ============================================================================
+#
+# ⚡ 快速开始 (90%的用户只需要配置这里)
+# ⚡ Quick Start (90% users only need to configure this section)
+#
+# 1. 填写 EMBEDDING_API_KEY 和 EMBEDDING_API_BASE (必须)
+# 2. 填写 LLM_API_KEY 和 LLM_API_BASE (可选，用于伏笔/矛盾等高级功能)
+# 3. 启动服务: ./start.ps1 或 ./start.sh
+#
+# 其他所有配置项都有合理的默认值，无需修改！
+# All other settings have sensible defaults, no changes needed!
+#
+# ============================================================================
+
+# ╔══════════════════════════════════════════════════════════════════════════╗
+# ║  ⭐ 必填配置 - REQUIRED CONFIGURATION                                    ║
+# ╚══════════════════════════════════════════════════════════════════════════╝
 
 # ----------------------------------------------------------------------------
-# Embedding 配置 (OpenAI 兼容接口)
-# Embedding Configuration (OpenAI Compatible API)
+# Embedding 配置 (OpenAI 兼容接口) - 必填!
+# Embedding Configuration (OpenAI Compatible API) - REQUIRED!
 # ----------------------------------------------------------------------------
 # 示例 (Examples):
 #   OpenAI:      https://api.openai.com/v1
-#   SiliconFlow: https://api.siliconflow.cn/v1
+#   SiliconFlow: https://api.siliconflow.cn/v1  (推荐国内用户)
 #   Ollama:      http://localhost:11434/v1
 # ----------------------------------------------------------------------------
 EMBEDDING_API_KEY=
 EMBEDDING_API_BASE=
 EMBEDDING_MODEL=
 EMBEDDING_DIMENSION=1024
+EMBEDDING_RATE_LIMIT=10
+EMBEDDING_RATE_WINDOW=60
 
 # Embedding 模式: auto(自动检测), local(本地), api(远程API)
 # Embedding Mode: auto(auto detect), local(local model), api(remote API)
 RECALL_EMBEDDING_MODE=auto
 
 # ----------------------------------------------------------------------------
-# LLM 配置 (OpenAI 兼容接口)
-# LLM Configuration (OpenAI Compatible API)
+# LLM 配置 (OpenAI 兼容接口) - 用于伏笔分析、矛盾检测等高级功能
+# LLM Configuration (OpenAI Compatible API) - For foreshadowing, contradiction, etc.
 # ----------------------------------------------------------------------------
 LLM_API_KEY=
 LLM_API_BASE=
 LLM_MODEL=
+
+# ╔══════════════════════════════════════════════════════════════════════════╗
+# ║  ⚙️ 可选配置 - OPTIONAL CONFIGURATION (以下内容可保持默认值)              ║
+# ╚══════════════════════════════════════════════════════════════════════════╝
 
 # ----------------------------------------------------------------------------
 # 伏笔分析器配置
@@ -375,6 +397,118 @@ PROACTIVE_REMINDER_ENABLED=true
 # 主动提醒触发轮次阈值（高重要性减半）
 # Proactive reminder threshold turns (halved for high importance)
 PROACTIVE_REMINDER_TURNS=50
+
+# ============================================================================
+# v4.0 Phase 1/2 新增配置
+# v4.0 Phase 1/2 New Configurations
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# 时态知识图谱配置
+# Temporal Knowledge Graph Configuration
+# ----------------------------------------------------------------------------
+TEMPORAL_GRAPH_ENABLED=true
+TEMPORAL_GRAPH_BACKEND=file
+TEMPORAL_DECAY_RATE=0.1
+TEMPORAL_MAX_HISTORY=1000
+
+# ----------------------------------------------------------------------------
+# 矛盾检测与管理配置
+# Contradiction Detection & Management Configuration
+# ----------------------------------------------------------------------------
+CONTRADICTION_DETECTION_ENABLED=true
+CONTRADICTION_AUTO_RESOLVE=false
+CONTRADICTION_DETECTION_STRATEGY=MIXED
+CONTRADICTION_SIMILARITY_THRESHOLD=0.8
+
+# ----------------------------------------------------------------------------
+# 全文检索配置 (BM25)
+# Full-text Search Configuration (BM25)
+# ----------------------------------------------------------------------------
+FULLTEXT_ENABLED=true
+FULLTEXT_K1=1.5
+FULLTEXT_B=0.75
+FULLTEXT_WEIGHT=0.3
+
+# ----------------------------------------------------------------------------
+# 智能抽取器配置 (SmartExtractor)
+# Smart Extractor Configuration
+# ----------------------------------------------------------------------------
+SMART_EXTRACTOR_MODE=ADAPTIVE
+SMART_EXTRACTOR_COMPLEXITY_THRESHOLD=0.6
+SMART_EXTRACTOR_ENABLE_TEMPORAL=true
+
+# ----------------------------------------------------------------------------
+# 预算管理配置 (BudgetManager)
+# Budget Management Configuration
+# ----------------------------------------------------------------------------
+BUDGET_DAILY_LIMIT=0
+BUDGET_HOURLY_LIMIT=0
+BUDGET_RESERVE=0.1
+BUDGET_ALERT_THRESHOLD=0.8
+
+# ----------------------------------------------------------------------------
+# 三阶段去重配置 (ThreeStageDeduplicator)
+# Three-Stage Deduplication Configuration
+# ----------------------------------------------------------------------------
+DEDUP_JACCARD_THRESHOLD=0.7
+DEDUP_SEMANTIC_THRESHOLD=0.85
+DEDUP_SEMANTIC_LOW_THRESHOLD=0.70
+DEDUP_LLM_ENABLED=false
+
+# ============================================================================
+# v4.0 Phase 3 十一层检索器配置
+# v4.0 Phase 3 Eleven-Layer Retriever Configuration
+# ============================================================================
+
+# 主开关 / Master Switch
+ELEVEN_LAYER_RETRIEVER_ENABLED=false
+
+# 层开关 / Layer Enable/Disable
+RETRIEVAL_L1_BLOOM_ENABLED=true
+RETRIEVAL_L2_TEMPORAL_ENABLED=true
+RETRIEVAL_L3_INVERTED_ENABLED=true
+RETRIEVAL_L4_ENTITY_ENABLED=true
+RETRIEVAL_L5_GRAPH_ENABLED=true
+RETRIEVAL_L6_NGRAM_ENABLED=true
+RETRIEVAL_L7_VECTOR_COARSE_ENABLED=true
+RETRIEVAL_L8_VECTOR_FINE_ENABLED=true
+RETRIEVAL_L9_RERANK_ENABLED=true
+RETRIEVAL_L10_CROSS_ENCODER_ENABLED=false
+RETRIEVAL_L11_LLM_ENABLED=false
+
+# Top-K 配置 / Top-K Configuration
+RETRIEVAL_L2_TEMPORAL_TOP_K=500
+RETRIEVAL_L3_INVERTED_TOP_K=100
+RETRIEVAL_L4_ENTITY_TOP_K=50
+RETRIEVAL_L5_GRAPH_TOP_K=100
+RETRIEVAL_L6_NGRAM_TOP_K=30
+RETRIEVAL_L7_VECTOR_TOP_K=200
+RETRIEVAL_L10_CROSS_ENCODER_TOP_K=50
+RETRIEVAL_L11_LLM_TOP_K=20
+
+# 阈值与最终输出 / Thresholds and Final Output
+RETRIEVAL_FINE_RANK_THRESHOLD=100
+RETRIEVAL_FINAL_TOP_K=20
+
+# L5 图遍历配置 / L5 Graph Traversal Configuration
+RETRIEVAL_L5_GRAPH_MAX_DEPTH=2
+RETRIEVAL_L5_GRAPH_MAX_ENTITIES=3
+RETRIEVAL_L5_GRAPH_DIRECTION=both
+
+# L10 CrossEncoder 配置 / L10 CrossEncoder Configuration
+RETRIEVAL_L10_CROSS_ENCODER_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2
+
+# L11 LLM 配置 / L11 LLM Configuration
+RETRIEVAL_L11_LLM_TIMEOUT=10.0
+
+# 权重配置 / Weight Configuration
+RETRIEVAL_WEIGHT_INVERTED=1.0
+RETRIEVAL_WEIGHT_ENTITY=1.2
+RETRIEVAL_WEIGHT_GRAPH=1.0
+RETRIEVAL_WEIGHT_NGRAM=0.8
+RETRIEVAL_WEIGHT_VECTOR=1.0
+RETRIEVAL_WEIGHT_TEMPORAL=0.5
 EOF
         print_info "已创建配置文件: $config_file"
     fi
@@ -389,9 +523,9 @@ get_embedding_mode() {
     if [ -f "$mode_file" ]; then
         local install_mode=$(cat "$mode_file")
         case $install_mode in
-            lightweight) echo "none" ;;
-            hybrid)
-                # Hybrid 模式需要检查 Embedding API Key
+            lite|lightweight) echo "none" ;;
+            cloud|hybrid)
+                # Cloud 模式需要检查 Embedding API Key
                 # 排除占位符值
                 if [ -n "$EMBEDDING_API_KEY" ] && \
                    [ "$EMBEDDING_API_KEY" != "your_embedding_api_key_here" ] && \
@@ -402,11 +536,11 @@ get_embedding_mode() {
                     echo "api_required"
                 fi
                 ;;
-            full) echo "local" ;;
+            local|full) echo "local" ;;
             *) echo "local" ;;
         esac
     else
-        # 默认完整模式
+        # 默认 Local 模式
         echo "local"
     fi
 }
@@ -440,9 +574,9 @@ do_start() {
     # 获取 Embedding 模式
     local embedding_mode=$(get_embedding_mode)
     
-    # 检查 Hybrid 模式是否配置了 API Key
+    # 检查 Cloud 模式是否配置了 API Key
     if [ "$embedding_mode" = "api_required" ]; then
-        print_error "Hybrid 模式需要配置 API"
+        print_error "Cloud 模式需要配置 API"
         echo ""
         echo -e "  ${YELLOW}请编辑配置文件: ${CYAN}$DATA_PATH/config/api_keys.env${NC}"
         echo ""
@@ -471,15 +605,15 @@ do_start() {
     # 显示 Embedding 模式
     case $embedding_mode in
         none)
-            print_info "Embedding: ${YELLOW}轻量模式${NC} (仅关键词搜索)"
+            print_info "Embedding: ${YELLOW}Lite 模式${NC} (仅关键词搜索)"
             ;;
         api)
             local base_info=""
             [ -n "$EMBEDDING_API_BASE" ] && base_info=" ($EMBEDDING_API_BASE)"
-            print_info "Embedding: ${GREEN}Hybrid-API${NC}$base_info"
+            print_info "Embedding: ${GREEN}Cloud 模式${NC}$base_info"
             ;;
         local)
-            print_info "Embedding: ${GREEN}完整模式${NC} (本地模型)"
+            print_info "Embedding: ${GREEN}Local 模式${NC} (本地模型)"
             ;;
     esac
     echo ""

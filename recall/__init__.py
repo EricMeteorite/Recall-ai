@@ -42,5 +42,6 @@ _setup_isolated_environment()
 
 from .version import __version__
 from .engine import RecallEngine
+from .config import LiteConfig, LightweightConfig  # noqa: F401 - 用于CLI等场景
 
-__all__ = ['RecallEngine', '__version__']
+__all__ = ['RecallEngine', '__version__', 'LiteConfig', 'LightweightConfig']

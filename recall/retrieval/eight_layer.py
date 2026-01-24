@@ -192,7 +192,7 @@ class EightLayerRetriever:
             self._record_stats(RetrievalLayer.L4_NGRAM_INDEX, input_count, len(candidates), start)
         
         # L5: 向量粗筛
-        # 检查向量索引是否存在且启用（支持轻量模式）
+        # 检查向量索引是否存在且启用（支持 Lite 模式）
         vector_enabled = self.vector_index and getattr(self.vector_index, 'enabled', True)
         if self.config['l5_enabled'] and vector_enabled:
             start = time.time()
@@ -218,7 +218,7 @@ class EightLayerRetriever:
             self._record_stats(RetrievalLayer.L5_VECTOR_COARSE, input_count, len(results), start)
         
         # 关键：将 L2-L4 收集的候选 ID 也转换为结果
-        # 这确保了轻量模式（无向量索引）也能返回结果
+        # 这确保了 Lite 模式（无向量索引）也能返回结果
         seen_ids = {r.id for r in results}
         for doc_id in candidates:
             if doc_id not in seen_ids:

@@ -1,12 +1,12 @@
-"""配置管理 - 包含轻量模式配置"""
+"""配置管理 - 包含 Lite 模式配置"""
 
 import re
 from typing import List
 from dataclasses import dataclass
 
 
-class LightweightConfig:
-    """轻量模式 - 适合低配电脑"""
+class LiteConfig:
+    """Lite 模式 - 适合低配电脑（原 LightweightConfig）"""
     
     # 禁用重型组件
     ENABLE_VECTOR_INDEX = False      # 不加载 sentence-transformers (~400MB)
@@ -30,7 +30,7 @@ class LightweightConfig:
             'retrieval_layers': cls.RETRIEVAL_LAYERS,
             'max_cache': cls.MAX_CACHED_TURNS,
         })
-        print("[Recall] 轻量模式已启用，内存占用约 ~80MB")
+        print("[Recall] Lite 模式已启用，内存占用约 ~80MB")
 
 
 @dataclass
@@ -121,3 +121,9 @@ class LightweightEntityExtractor:
         english = self.re.findall(r'[a-zA-Z]{3,}', text.lower())
         # 过滤停用词
         return [w for w in chinese + english if w not in self.stopwords]
+
+
+# ============================================================================
+# 向后兼容别名
+# ============================================================================
+LightweightConfig = LiteConfig  # 兼容旧代码

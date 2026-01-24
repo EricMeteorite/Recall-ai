@@ -26,7 +26,7 @@ VENV_PATH="$SCRIPT_DIR/recall-env"
 DATA_PATH="$SCRIPT_DIR/recall_data"
 PIP_MIRROR=""
 INSTALL_SUCCESS=false
-INSTALL_MODE="full"  # lightweight, hybrid, full
+INSTALL_MODE="local"  # lite, cloud, local (旧值 lightweight/hybrid/full 兼容)
 
 # ==================== 工具函数 ====================
 
@@ -90,22 +90,22 @@ show_mode_selection() {
     echo ""
     echo -e "${BOLD}请选择安装模式：${NC}"
     echo ""
-    echo -e "  1) ${GREEN}轻量模式${NC}     ~100MB 内存，仅关键词搜索"
+    echo -e "  1) ${GREEN}Lite 模式${NC}    ~100MB 内存，仅关键词搜索"
     echo -e "     ${CYAN}适合: 内存 < 1GB 的服务器${NC}"
     echo ""
-    echo -e "  2) ${GREEN}Hybrid模式${NC}   ~150MB 内存，使用云端API进行向量搜索 ${YELLOW}★推荐★${NC}"
+    echo -e "  2) ${GREEN}Cloud 模式${NC}   ~150MB 内存，使用云端API进行向量搜索 ${YELLOW}★推荐★${NC}"
     echo -e "     ${CYAN}适合: 任何服务器，全功能，需要API Key${NC}"
     echo ""
-    echo -e "  3) ${GREEN}完整模式${NC}     ~1.5GB 内存，本地向量模型"
+    echo -e "  3) ${GREEN}Local 模式${NC}   ~1.5GB 内存，本地向量模型"
     echo -e "     ${CYAN}适合: 高配服务器，完全离线${NC}"
     echo ""
     read -p "请选择 [1-3，默认2]: " mode_choice
     
     case "${mode_choice:-2}" in
-        1) INSTALL_MODE="lightweight" ;;
-        2) INSTALL_MODE="hybrid" ;;
-        3) INSTALL_MODE="full" ;;
-        *) echo -e "${YELLOW}使用默认 Hybrid 模式${NC}"; INSTALL_MODE="hybrid" ;;
+        1) INSTALL_MODE="lite" ;;
+        2) INSTALL_MODE="cloud" ;;
+        3) INSTALL_MODE="local" ;;
+        *) echo -e "${YELLOW}使用默认 Cloud 模式${NC}"; INSTALL_MODE="cloud" ;;
     esac
     
     echo ""
@@ -244,18 +244,18 @@ install_deps() {
         echo -e "    ${YELLOW}! 使用默认源，如果较慢可用 --mirror 参数${NC}"
     fi
     
-    # 根据模式显示预计大小
+    # 根据模式显示预计大小（兼容新旧名称）
     case $INSTALL_MODE in
-        lightweight)
-            echo -e "    ${CYAN}ℹ 轻量模式：下载约 300MB 依赖${NC}"
+        lite|lightweight)
+            echo -e "    ${CYAN}ℹ Lite 模式：下载约 300MB 依赖${NC}"
             echo -e "    ${CYAN}ℹ 预计需要 3-5 分钟${NC}"
             ;;
-        hybrid)
-            echo -e "    ${CYAN}ℹ Hybrid模式：下载约 400MB 依赖${NC}"
+        cloud|hybrid)
+            echo -e "    ${CYAN}ℹ Cloud 模式：下载约 400MB 依赖${NC}"
             echo -e "    ${CYAN}ℹ 预计需要 5-8 分钟${NC}"
             ;;
-        full)
-            echo -e "    ${CYAN}ℹ 完整模式：下载约 1.5GB 依赖 (包含 PyTorch)${NC}"
+        local|full)
+            echo -e "    ${CYAN}ℹ Local 模式：下载约 1.5GB 依赖 (包含 PyTorch)${NC}"
             echo -e "    ${CYAN}ℹ 预计需要 10-20 分钟${NC}"
             ;;
     esac
@@ -266,20 +266,20 @@ install_deps() {
     pip install --upgrade pip $PIP_MIRROR -q 2>&1
     print_success "pip 升级完成"
     
-    # 根据模式安装不同依赖
+    # 根据模式安装不同依赖（兼容新旧名称）
     local EXTRAS=""
     case $INSTALL_MODE in
-        lightweight)
+        lite|lightweight)
             EXTRAS=""
-            print_info "安装轻量依赖..."
+            print_info "安装 Lite 依赖..."
             ;;
-        hybrid)
-            EXTRAS="[hybrid]"
-            print_info "安装 Hybrid 依赖 (FAISS)..."
+        cloud|hybrid)
+            EXTRAS="[cloud]"
+            print_info "安装 Cloud 依赖 (FAISS)..."
             ;;
-        full)
-            EXTRAS="[full]"
-            print_info "安装完整依赖 (sentence-transformers + FAISS)..."
+        local|full)
+            EXTRAS="[local]"
+            print_info "安装 Local 依赖 (sentence-transformers + FAISS)..."
             ;;
     esac
     
@@ -369,9 +369,9 @@ initialize() {
     
     print_info "运行初始化..."
     
-    # 根据模式初始化
+    # 根据模式初始化（兼容新旧名称）
     case $INSTALL_MODE in
-        lightweight)
+        lite|lightweight)
             recall init --lightweight 2>&1 || true
             ;;
         *)
@@ -410,14 +410,14 @@ do_install() {
     echo -e "${GREEN}╚════════════════════════════════════════════╝${NC}"
     echo ""
     
-    # 根据模式显示不同提示
+    # 根据模式显示不同提示（兼容新旧名称）
     case $INSTALL_MODE in
-        lightweight)
-            echo -e "  ${BOLD}安装模式:${NC} ${CYAN}轻量模式${NC}"
-            echo -e "  ${YELLOW}注意: 轻量模式仅支持关键词搜索，无语义搜索${NC}"
+        lite|lightweight)
+            echo -e "  ${BOLD}安装模式:${NC} ${CYAN}Lite 模式${NC}"
+            echo -e "  ${YELLOW}注意: Lite 模式仅支持关键词搜索，无语义搜索${NC}"
             ;;
-        hybrid)
-            echo -e "  ${BOLD}安装模式:${NC} ${CYAN}Hybrid模式${NC}"
+        cloud|hybrid)
+            echo -e "  ${BOLD}安装模式:${NC} ${CYAN}Cloud 模式${NC}"
             echo ""
             echo -e "  ${YELLOW}⚠ 重要: 启动前需要配置 API Key!${NC}"
             echo ""
@@ -431,8 +431,8 @@ do_install() {
             echo -e "    2. 编辑: ${CYAN}recall_data/config/api_keys.env${NC}"
             echo -e "    3. 热更新: ${CYAN}curl -X POST http://localhost:18888/v1/config/reload${NC}"
             ;;
-        full)
-            echo -e "  ${BOLD}安装模式:${NC} ${CYAN}完整模式${NC}"
+        local|full)
+            echo -e "  ${BOLD}安装模式:${NC} ${CYAN}Local 模式${NC}"
             echo -e "  ${GREEN}✓ 本地模型，无需API Key，完全离线运行${NC}"
             ;;
     esac

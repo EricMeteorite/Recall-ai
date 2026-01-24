@@ -46,8 +46,8 @@ class LocalEmbeddingBackend(EmbeddingBackend):
             if not self.is_available:
                 raise ImportError(
                     "sentence-transformers 未安装。\n"
-                    "完整模式需要安装: pip install sentence-transformers\n"
-                    "或者切换到 Hybrid 模式使用 API。"
+                    "Local 模式需要安装: pip install sentence-transformers\n"
+                    "或者切换到 Cloud 模式使用 API。"
                 )
             
             from sentence_transformers import SentenceTransformer
