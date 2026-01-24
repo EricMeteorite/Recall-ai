@@ -417,114 +417,98 @@ class TemporalKnowledgeGraph:
 
 | 维度 | Graphiti | Recall 4.0 | 超越点 |
 |------|----------|------------|--------|
-| 检索层数 | 3层 | **10层** | 更精细的漏斗 |
+| 检索层数 | 3层 | **11层** | 更精细的漏斗 |
 | 重排序器 | 5种 | **7种** | 新增时态/伏笔重排 |
 | 融合算法 | RRF | **RRF + 自适应权重** | 场景感知融合 |
 | 图遍历 | 简单 BFS | **多策略** | BFS/DFS/随机游走 |
 
 ```python
-class TenLayerRetriever:
-    """十层漏斗检索器"""
+class ElevenLayerRetriever:
+    """十一层漏斗检索器（概述版，详见 Phase 3）"""
     
     class Layer(Enum):
-        L01_BLOOM_FILTER = "bloom"           # 快速否定
-        L02_TEMPORAL_FILTER = "temporal"     # 时态过滤【新增】
-        L03_INVERTED_INDEX = "inverted"      # 关键词匹配
-        L04_ENTITY_INDEX = "entity"          # 实体关联
-        L05_GRAPH_TRAVERSAL = "graph"        # 图遍历【新增】
-        L06_NGRAM_INDEX = "ngram"            # 模糊匹配
-        L07_VECTOR_COARSE = "vector_coarse"  # 向量粗筛
-        L08_VECTOR_FINE = "vector_fine"      # 向量精排
-        L09_CROSS_ENCODER = "cross_encoder"  # 交叉编码器【新增】
-        L10_LLM_RERANK = "llm_rerank"        # LLM 重排序
+        L1_BLOOM_FILTER = "bloom"            # 快速否定
+        L2_TEMPORAL_FILTER = "temporal"      # 时态过滤【新增】
+        L3_INVERTED_INDEX = "inverted"       # 关键词匹配
+        L4_ENTITY_INDEX = "entity"           # 实体关联
+        L5_GRAPH_TRAVERSAL = "graph"         # 图遍历【新增】
+        L6_NGRAM_INDEX = "ngram"             # 模糊匹配
+        L7_VECTOR_COARSE = "vector_coarse"   # 向量粗筛
+        L8_VECTOR_FINE = "vector_fine"       # 向量精排
+        L9_RERANK = "rerank"                 # TF-IDF 重排序
+        L10_CROSS_ENCODER = "cross_encoder"  # 交叉编码器【新增】
+        L11_LLM_FILTER = "llm_filter"        # LLM 过滤
     
-    def retrieve(
+    async def retrieve(
         self,
         query: str,
         config: RetrievalConfig = None,
         temporal_context: TemporalContext = None,
-        center_nodes: List[str] = None
+        entities: List[str] = None
     ) -> List[RetrievalResult]:
-        """执行十层检索"""
+        """执行十一层检索（详细实现见 Phase 3）"""
         
         config = config or RetrievalConfig.default()
         candidates = set()
         scores = defaultdict(float)
         
         # L1: Bloom Filter - O(1) 快速否定
-        if config.enable_bloom:
+        if config.l1_enabled:
             keywords = self._extract_keywords(query)
             keywords = [k for k in keywords if k in self.bloom_filter]
         
         # L2: 时态过滤【新增】
-        if temporal_context:
-            time_range = temporal_context.get_range()
+        if config.l2_enabled and temporal_context:
             # 预先过滤时间范围外的文档
+            temporal_candidates = self._l2_temporal_filter(temporal_context, config)
         
         # L3: 倒排索引 - 关键词匹配
-        if config.enable_inverted:
+        if config.l3_enabled:
             inverted_results = self.inverted_index.search(keywords)
             for doc_id, score in inverted_results:
                 candidates.add(doc_id)
                 scores[doc_id] += score * config.weights.inverted
         
         # L4: 实体索引
-        if config.enable_entity:
-            entities = self._extract_entities(query)
-            for entity in entities:
+        if config.l4_enabled:
+            for entity in entities or []:
                 for doc_id in self.entity_index.get_docs(entity):
                     candidates.add(doc_id)
                     scores[doc_id] += config.weights.entity
         
         # L5: 图遍历【新增】
-        if config.enable_graph and center_nodes:
-            graph_results = self.knowledge_graph.bfs(
-                start=center_nodes[0],
-                max_depth=2,
-                time_filter=temporal_context.reference_time if temporal_context else None
-            )
-            for depth, items in graph_results.items():
-                depth_weight = 1.0 / (depth + 1)  # 距离衰减
-                for node_id, edge in items:
-                    for episode_id in edge.source_episodes:
-                        candidates.add(episode_id)
-                        scores[episode_id] += depth_weight * config.weights.graph
+        if config.l5_enabled and entities:
+            self._l5_graph_traversal(entities, candidates, scores, config)
         
         # L6: N-gram 索引 - 模糊匹配
-        if config.enable_ngram:
+        if config.l6_enabled:
             ngram_results = self.ngram_index.search(query)
             for doc_id in ngram_results:
                 candidates.add(doc_id)
                 scores[doc_id] += config.weights.ngram
         
         # L7: 向量粗筛
-        if config.enable_vector and self.vector_index:
-            vector_results = self.vector_index.search(query, top_k=config.vector_top_k)
+        if config.l7_enabled and self.vector_index:
+            vector_results = self.vector_index.search(query, top_k=config.l7_vector_top_k)
             for doc_id, sim in vector_results:
                 candidates.add(doc_id)
                 scores[doc_id] += sim * config.weights.vector
         
         # L8: 向量精排
-        if config.enable_vector_fine and len(candidates) > config.fine_rank_threshold:
-            # 对 top candidates 重新计算精确相似度
-            top_candidates = sorted(candidates, key=lambda x: scores[x], reverse=True)[:100]
-            fine_scores = self.vector_index.rerank(query, top_candidates)
-            for doc_id, score in fine_scores.items():
-                scores[doc_id] = scores[doc_id] * 0.5 + score * 0.5
+        if config.l8_enabled and len(candidates) > config.fine_rank_threshold:
+            self._l8_vector_fine(query, candidates, scores, config)
         
-        # L9: Cross-Encoder 重排序【新增】
-        if config.enable_cross_encoder and self.cross_encoder:
-            top_candidates = sorted(candidates, key=lambda x: scores[x], reverse=True)[:50]
-            ce_scores = self.cross_encoder.score(query, top_candidates)
-            for doc_id, score in ce_scores.items():
-                scores[doc_id] = scores[doc_id] * 0.3 + score * 0.7
+        # L9: TF-IDF 重排序
+        if config.l9_enabled:
+            self._l9_rerank(query, candidates, scores)
         
-        # L10: LLM 重排序（可选，高成本）
-        if config.enable_llm_rerank and self.llm_client:
-            top_candidates = sorted(candidates, key=lambda x: scores[x], reverse=True)[:20]
-            llm_scores = await self._llm_rerank(query, top_candidates)
-            for doc_id, score in llm_scores.items():
-                scores[doc_id] = score  # LLM 分数直接覆盖
+        # L10: Cross-Encoder 重排序【新增，可选】
+        if config.l10_enabled and self.cross_encoder:
+            self._l10_cross_encoder(query, candidates, scores, config)
+        
+        # L11: LLM 重排序【可选，高成本】
+        if config.l11_enabled and self.llm_client:
+            candidates, scores = await self._l11_llm_filter(query, candidates, scores, config)
         
         # 最终排序
         final_results = sorted(
@@ -535,7 +519,7 @@ class TenLayerRetriever:
         
         return [
             RetrievalResult(id=doc_id, score=score, content=self._get_content(doc_id))
-            for doc_id, score in final_results[:config.top_k]
+            for doc_id, score in final_results[:config.final_top_k]
         ]
 ```
 
@@ -786,7 +770,7 @@ class RecallMCPServer:
 │ ┌─────────────────┐  ┌─────────────────────────┐  ┌─────────────────────────┐ │
 │ │   智能抽取层    │  │      知识图谱层          │  │       检索层            │ │
 │ │ ┌─────────────┐ │  │ ┌─────────────────────┐ │  │ ┌─────────────────────┐ │ │
-│ │ │SmartExtract │ │  │ │TemporalKnowledgeGraph│ │  │ │ TenLayerRetriever   │ │ │
+│ │ │SmartExtract │ │  │ │TemporalKnowledgeGraph│ │  │ │ ElevenLayerRetriever│ │ │
 │ │ │ - Local     │ │  │ │ - Nodes (Unified)   │ │  │ │ - Bloom Filter     │ │ │
 │ │ │ - Hybrid    │ │  │ │ - Edges (Temporal)  │ │  │ │ - Temporal Filter  │ │ │
 │ │ │ - LLM       │ │  │ │ - Episodes          │ │  │ │ - Inverted Index   │ │ │
@@ -1158,18 +1142,1080 @@ SMART_EXTRACTOR_DAILY_BUDGET=1.0
 
 ### Phase 3: 检索升级（2周）
 
-**目标：十层漏斗检索器**
+**目标：十一层漏斗检索器 + 时态/图谱检索能力**
 
-| 周次 | 任务 | 产出 |
-|------|------|------|
-| W6 | `TenLayerRetriever` 重构 | 新增 L2 时态 + L5 图遍历 + L9 CrossEncoder |
-| W6 | `RetrievalConfig` | 可配置的检索策略 |
-| W7 | RRF 融合优化 | 自适应权重 |
-| W7 | 性能优化 | 缓存 + 并行 |
+将现有 8 层检索器升级为 11 层，新增：
+- **L2 时态过滤**：利用 Phase 1 的 `TemporalIndex` 实现时间范围预筛选
+- **L5 图遍历**：利用 Phase 1 的 `TemporalKnowledgeGraph.bfs()` 实现关系扩展检索
+- **L10 CrossEncoder**：可选的交叉编码器精排，提升排序质量
+
+同时重构配置系统，从 dict 升级为类型安全的 `RetrievalConfig` dataclass。
+
+| 周次 | 任务 | 产出 | 状态 |
+|------|------|------|------|
+| W6 | `RetrievalConfig` 配置类 | 可配置的检索策略 | ⏳ 待开始 |
+| W6 | `ElevenLayerRetriever` 框架 | 11 层检索器骨架 | ⏳ 待开始 |
+| W6 | L2 时态过滤层 | 时间范围预筛选 | ⏳ 待开始 |
+| W6 | L5 图遍历层 | BFS 关系扩展 | ⏳ 待开始 |
+| W7 | 迁移现有层逻辑 | 从 `EightLayerRetriever` 迁移 | ⏳ 待开始 |
+| W7 | Engine 集成 | 替换旧检索器 | ⏳ 待开始 |
+| W7 | L10 CrossEncoder（可选） | 交叉编码器重排序 | ⏳ 待开始 |
+| W7 | 性能优化 | 缓存 + 并行 | ⏳ 待开始 |
+
+---
+
+#### 📐 现有架构分析
+
+**当前 `EightLayerRetriever` (445 行) - L1 至 L8：**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    EightLayerRetriever (现有)                    │
+├─────────────────────────────────────────────────────────────────┤
+│  L1: Bloom Filter      → 快速否定，O(1) 排除不相关文档           │
+│  L2: Inverted Index    → 关键词匹配，BM25 评分                  │
+│  L3: Entity Index      → 实体关联，命中实体加分                  │
+│  L4: N-gram Index      → 模糊匹配，处理错别字/变体              │
+│  L5: Vector Coarse     → 向量粗筛，top_k=200                    │
+│  L6: Vector Fine       → 向量精排，重计算相似度                  │
+│  L7: Rerank            → TF-IDF 重排序                          │
+│  L8: LLM Filter        → LLM 相关性过滤（可选）                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**现有配置方式：**
+```python
+# 当前使用 dict 配置
+self.config = {
+    'l1_enabled': True,   # Bloom Filter
+    'l2_enabled': True,   # Inverted Index
+    'l3_enabled': True,   # Entity Index
+    'l4_enabled': True,   # N-gram Index
+    'l5_enabled': True,   # Vector Coarse
+    'l6_enabled': True,   # Vector Fine
+    'l7_enabled': True,   # Rerank
+    'l8_enabled': False,  # LLM Filter (默认关闭)
+}
+```
+
+**Engine 集成点：**
+- 初始化位置：[engine.py#L272](recall/engine.py#L272)
+- 调用位置：[engine.py#L862](recall/engine.py#L862) `retriever.retrieve(query, entities, keywords, top_k, filters)`
+
+---
+
+#### 🎯 升级方案：8 层 → 11 层
+
+**升级策略：在现有 8 层基础上插入 3 个新层，保持原有层的相对顺序**
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                         层级映射：EightLayer → ElevenLayer                       │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│  旧层号    新层号    名称                    变化                                │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│  L1    →   L1      Bloom Filter           [保留] 快速否定                       │
+│  -     →   L2      Temporal Filter        [新增] 时间范围预筛选                 │
+│  L2    →   L3      Inverted Index         [保留] 关键词匹配                     │
+│  L3    →   L4      Entity Index           [保留] 实体关联                       │
+│  -     →   L5      Graph Traversal        [新增] BFS 图遍历扩展                 │
+│  L4    →   L6      N-gram Index           [保留] 模糊匹配                       │
+│  L5    →   L7      Vector Coarse          [保留] 向量粗筛                       │
+│  L6    →   L8      Vector Fine            [保留] 向量精排                       │
+│  L7    →   L9      Rerank                 [保留] TF-IDF 重排序                  │
+│  -     →   L10     Cross-Encoder          [新增] 交叉编码器精排（可选）         │
+│  L8    →   L11     LLM Filter             [保留] LLM 最终过滤（可选）           │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+**新架构 `ElevenLayerRetriever`：**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                   ElevenLayerRetriever (目标)                    │
+├─────────────────────────────────────────────────────────────────┤
+│                        === 快速过滤阶段 ===                      │
+│  L1:  Bloom Filter       → [保留] O(1) 快速否定                  │
+│  L2:  Temporal Filter    → [新增] 时间范围预筛选                 │
+│                                                                 │
+│                        === 召回阶段 ===                          │
+│  L3:  Inverted Index     → [保留] 关键词匹配，BM25              │
+│  L4:  Entity Index       → [保留] 实体关联召回                   │
+│  L5:  Graph Traversal    → [新增] BFS 图遍历扩展                 │
+│  L6:  N-gram Index       → [保留] 模糊匹配召回                   │
+│  L7:  Vector Coarse      → [保留] 向量粗筛，ANN                  │
+│                                                                 │
+│                        === 精排阶段 ===                          │
+│  L8:  Vector Fine        → [保留] 向量精排，精确距离             │
+│  L9:  Rerank             → [保留] TF-IDF 多因素重排              │
+│  L10: Cross-Encoder      → [新增] 交叉编码器精排（可选）         │
+│  L11: LLM Filter         → [保留] LLM 语义过滤（可选）           │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**设计原则：**
+1. **快速过滤在前** - L1-L2 快速排除大量不相关文档
+2. **召回在中** - L3-L7 多路召回，确保高召回率
+3. **精排在后** - L8-L11 逐步精细化排序，确保高精度
+4. **成本递增** - 越往后成本越高，候选数越少
+
+---
+
+#### 📋 详细实施计划
+
+##### 步骤 1: 创建 `RetrievalConfig` 类 (~150 行)
+
+**文件：** `recall/retrieval/config.py` (新建)
+
+```python
+from dataclasses import dataclass, field
+from typing import Optional, Dict, Any, List
+from datetime import datetime
+
+@dataclass
+class LayerWeights:
+    """各层权重配置"""
+    inverted: float = 1.0      # 倒排索引权重
+    entity: float = 1.2        # 实体索引权重
+    graph: float = 1.0         # 图遍历权重
+    ngram: float = 0.8         # N-gram 权重
+    vector: float = 1.0        # 向量权重
+    temporal: float = 0.5      # 时态权重
+
+@dataclass
+class TemporalContext:
+    """时态查询上下文"""
+    start: Optional[datetime] = None    # 时间范围起点
+    end: Optional[datetime] = None      # 时间范围终点
+    reference: Optional[datetime] = None  # 参考时间点
+    
+    def has_time_constraint(self) -> bool:
+        """是否有时间约束"""
+        return self.start is not None or self.end is not None
+
+@dataclass
+class LayerStats:
+    """层级执行统计"""
+    layer: str                  # 层名称（如 "L2_TEMPORAL_FILTER"）
+    input_count: int            # 输入候选数
+    output_count: int           # 输出候选数
+    time_ms: float              # 耗时（毫秒）
+
+@dataclass
+class RetrievalResult:
+    """检索结果"""
+    id: str                     # 文档 ID
+    score: float                # 综合得分
+    content: str = ""           # 文档内容（可选填充）
+
+@dataclass
+class RetrievalConfig:
+    """检索配置 - 类型安全 + 默认值"""
+    
+    # === 层开关（L1-L11）===
+    l1_enabled: bool = True     # Bloom Filter
+    l2_enabled: bool = True     # Temporal Filter【新增】
+    l3_enabled: bool = True     # Inverted Index
+    l4_enabled: bool = True     # Entity Index
+    l5_enabled: bool = True     # Graph Traversal【新增】
+    l6_enabled: bool = True     # N-gram Index
+    l7_enabled: bool = True     # Vector Coarse
+    l8_enabled: bool = True     # Vector Fine
+    l9_enabled: bool = True     # Rerank
+    l10_enabled: bool = False   # Cross-Encoder【新增，默认关闭】
+    l11_enabled: bool = False   # LLM Filter【默认关闭】
+    
+    # === Top-K 配置 ===
+    l2_temporal_top_k: int = 500       # 时态层保留数
+    l3_inverted_top_k: int = 100
+    l4_entity_top_k: int = 50
+    l5_graph_top_k: int = 100          # 图遍历保留数
+    l6_ngram_top_k: int = 30
+    l7_vector_top_k: int = 200
+    fine_rank_threshold: int = 100     # 触发 L8 精排的候选数
+    l10_cross_encoder_top_k: int = 50  # CrossEncoder 处理数
+    l11_llm_top_k: int = 20            # LLM 处理数
+    final_top_k: int = 20
+    
+    # === L5 图遍历配置 ===
+    l5_graph_max_depth: int = 2        # BFS 最大深度
+    l5_graph_max_entities: int = 3     # 起始实体数量限制
+    l5_graph_direction: str = "both"   # out | in | both
+    
+    # === L11 LLM 配置 ===
+    l11_llm_timeout: float = 10.0      # 超时时间（秒）
+    
+    # === 权重 ===
+    weights: LayerWeights = field(default_factory=LayerWeights)
+    
+    # === 时态上下文 ===
+    reference_time: Optional[datetime] = None
+    time_range_start: Optional[datetime] = None
+    time_range_end: Optional[datetime] = None
+    
+    @classmethod
+    def default(cls) -> "RetrievalConfig":
+        """默认配置 - 禁用高成本层"""
+        return cls()
+    
+    @classmethod
+    def fast(cls) -> "RetrievalConfig":
+        """快速模式 - 禁用重量级层"""
+        return cls(
+            l8_enabled=False,      # 跳过向量精排
+            l9_enabled=False,      # 跳过重排序
+            l10_enabled=False,     # 跳过 CrossEncoder
+            l11_enabled=False,     # 跳过 LLM
+            l7_vector_top_k=100
+        )
+    
+    @classmethod
+    def accurate(cls) -> "RetrievalConfig":
+        """精准模式 - 启用所有层"""
+        return cls(
+            l10_enabled=True,      # 启用 CrossEncoder
+            l11_enabled=True,      # 启用 LLM
+            l7_vector_top_k=300,
+            l10_cross_encoder_top_k=100
+        )
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典（兼容旧 EightLayerRetriever）"""
+        return {
+            'l1_enabled': self.l1_enabled,
+            'l2_enabled': self.l3_enabled,   # 旧 L2 = 新 L3
+            'l3_enabled': self.l4_enabled,   # 旧 L3 = 新 L4
+            'l4_enabled': self.l6_enabled,   # 旧 L4 = 新 L6
+            'l5_enabled': self.l7_enabled,   # 旧 L5 = 新 L7
+            'l6_enabled': self.l8_enabled,   # 旧 L6 = 新 L8
+            'l7_enabled': self.l9_enabled,   # 旧 L7 = 新 L9
+            'l8_enabled': self.l11_enabled,  # 旧 L8 = 新 L11
+        }
+```
+
+---
+
+##### 步骤 2: 创建 `ElevenLayerRetriever` 框架 (~700 行)
+
+**文件：** `recall/retrieval/eleven_layer.py` (新建)
+
+```python
+import time
+import json
+import asyncio
+import logging
+from enum import Enum
+from typing import List, Dict, Set, Optional, Tuple
+from collections import defaultdict
+
+from .config import (
+    RetrievalConfig, LayerStats, 
+    RetrievalResult, TemporalContext
+)
+
+logger = logging.getLogger(__name__)
+
+
+class RetrievalLayer(Enum):
+    """检索层级 - 11 层"""
+    # === 快速过滤阶段 ===
+    L1_BLOOM_FILTER = "bloom_filter"
+    L2_TEMPORAL_FILTER = "temporal_filter"    # 新增
+    
+    # === 召回阶段 ===
+    L3_INVERTED_INDEX = "inverted_index"
+    L4_ENTITY_INDEX = "entity_index"
+    L5_GRAPH_TRAVERSAL = "graph_traversal"    # 新增
+    L6_NGRAM_INDEX = "ngram_index"
+    L7_VECTOR_COARSE = "vector_coarse"
+    
+    # === 精排阶段 ===
+    L8_VECTOR_FINE = "vector_fine"
+    L9_RERANK = "rerank"
+    L10_CROSS_ENCODER = "cross_encoder"       # 新增
+    L11_LLM_FILTER = "llm_filter"
+
+
+class ElevenLayerRetriever:
+    """十一层漏斗检索器
+    
+    检索流程（3 阶段 11 层）：
+    
+    [快速过滤阶段]
+    L1:  Bloom Filter      - O(1) 快速否定不可能的候选
+    L2:  Temporal Filter   - O(log n) 时间范围预筛选【新增】
+    
+    [召回阶段]
+    L3:  Inverted Index    - O(log n) 关键词匹配
+    L4:  Entity Index      - O(1) 实体关联查找
+    L5:  Graph Traversal   - O(V+E) BFS 图遍历扩展【新增】
+    L6:  N-gram Index      - O(k) 模糊匹配
+    L7:  Vector Coarse     - O(n) 近似最近邻
+    
+    [精排阶段]
+    L8:  Vector Fine       - O(k) 精确距离计算
+    L9:  Rerank            - O(k log k) 多因素综合排序
+    L10: Cross-Encoder     - O(k) 交叉编码器精排【新增，可选】
+    L11: LLM Filter        - O(k) 语义相关性判断【可选】
+    """
+    
+    def __init__(
+        self,
+        # 现有依赖（对应旧 L1-L8，新编号后为 L1, L3-L4, L6-L9, L11）
+        bloom_filter=None,
+        inverted_index=None,
+        entity_index=None,
+        ngram_index=None,
+        vector_index=None,
+        llm_client=None,
+        content_store=None,
+        # 新增依赖（L2, L5, L10）
+        temporal_index=None,           # TemporalIndex (Phase 1)
+        knowledge_graph=None,          # TemporalKnowledgeGraph (Phase 1)
+        cross_encoder=None,            # CrossEncoder 模型
+        # 配置
+        config: RetrievalConfig = None
+    ):
+        # 现有依赖
+        self.bloom_filter = bloom_filter
+        self.inverted_index = inverted_index
+        self.entity_index = entity_index
+        self.ngram_index = ngram_index
+        self.vector_index = vector_index
+        self.llm_client = llm_client
+        self.content_store = content_store
+        
+        # 新增依赖
+        self.temporal_index = temporal_index
+        self.knowledge_graph = knowledge_graph
+        self.cross_encoder = cross_encoder
+        
+        self.config = config or RetrievalConfig.default()
+        
+        # 统计
+        self.stats: List[LayerStats] = []
+    
+    async def retrieve(
+        self,
+        query: str,
+        entities: List[str] = None,
+        keywords: List[str] = None,
+        top_k: int = None,
+        filters: Dict = None,
+        temporal_context: TemporalContext = None,
+        config: RetrievalConfig = None
+    ) -> List[RetrievalResult]:
+        """执行十一层检索（异步，因 L11 需要）"""
+        
+        config = config or self.config
+        top_k = top_k or config.final_top_k
+        
+        candidates = set()
+        scores = defaultdict(float)
+        
+        # ========== 快速过滤阶段 ==========
+        
+        # L1: Bloom Filter - 快速否定
+        if config.l1_enabled and self.bloom_filter:
+            keywords = self._l1_bloom_filter(keywords)
+        
+        # L2: Temporal Filter - 时间范围预筛选【新增】
+        temporal_candidates = None
+        if config.l2_enabled and self.temporal_index and temporal_context:
+            temporal_candidates = self._l2_temporal_filter(temporal_context, config)
+        
+        # ========== 召回阶段 ==========
+        
+        # L3: Inverted Index - 关键词匹配
+        if config.l3_enabled and self.inverted_index:
+            self._l3_inverted_index(keywords, candidates, scores, config, temporal_candidates)
+        
+        # L4: Entity Index - 实体关联
+        if config.l4_enabled and self.entity_index:
+            self._l4_entity_index(entities, candidates, scores, config, temporal_candidates)
+        
+        # L5: Graph Traversal - 图遍历扩展【新增】
+        if config.l5_enabled and self.knowledge_graph and entities:
+            self._l5_graph_traversal(entities, candidates, scores, config)
+        
+        # L6: N-gram Index - 模糊匹配
+        if config.l6_enabled and self.ngram_index:
+            self._l6_ngram_index(query, candidates, scores, config, temporal_candidates)
+        
+        # L7: Vector Coarse - 向量粗筛
+        if config.l7_enabled and self.vector_index:
+            self._l7_vector_coarse(query, candidates, scores, config)
+        
+        # ========== 精排阶段 ==========
+        
+        # L8: Vector Fine - 向量精排
+        if config.l8_enabled and len(candidates) > config.fine_rank_threshold:
+            self._l8_vector_fine(query, candidates, scores, config)
+        
+        # L9: Rerank - TF-IDF 重排序
+        if config.l9_enabled:
+            self._l9_rerank(query, candidates, scores)
+        
+        # L10: Cross-Encoder - 交叉编码器精排【新增，可选】
+        if config.l10_enabled and self.cross_encoder:
+            self._l10_cross_encoder(query, candidates, scores, config)
+        
+        # L11: LLM Filter - LLM 最终过滤【可选】
+        if config.l11_enabled and self.llm_client:
+            candidates, scores = await self._l11_llm_filter(query, candidates, scores, config)
+        
+        return self._build_results(candidates, scores, top_k)
+```
+
+---
+
+##### 步骤 3: 实现新增层 + 迁移层 (~300 行)
+
+**迁移层说明（L1, L3-L4, L6-L9, L11）：**
+
+以下方法从现有 `EightLayerRetriever` 迁移，逻辑基本不变，仅调整参数签名以支持 `temporal_candidates` 过滤：
+
+```python
+# L1: 从 EightLayerRetriever._l1_bloom_filter() 迁移
+def _l1_bloom_filter(self, keywords: List[str]) -> List[str]: ...
+
+# L3: 从 EightLayerRetriever._l2_inverted_index() 迁移
+# 新增 config 和 temporal_candidates 参数，内部使用 config.l3_inverted_top_k
+def _l3_inverted_index(self, keywords, candidates, scores, config, temporal_candidates=None): ...
+
+# L4: 从 EightLayerRetriever._l3_entity_index() 迁移
+# 新增 config 参数，内部使用 config.l4_entity_top_k
+def _l4_entity_index(self, entities, candidates, scores, config, temporal_candidates=None): ...
+
+# L6: 从 EightLayerRetriever._l4_ngram_index() 迁移
+# 新增 config 参数，内部使用 config.l6_ngram_top_k
+def _l6_ngram_index(self, query, candidates, scores, config, temporal_candidates=None): ...
+
+# L7: 从 EightLayerRetriever._l5_vector_coarse() 迁移
+# 内部使用 config.l7_vector_top_k
+def _l7_vector_coarse(self, query, candidates, scores, config): ...
+
+# L8: 从 EightLayerRetriever._l6_vector_fine() 迁移
+def _l8_vector_fine(self, query, candidates, scores, config): ...
+
+# L9: 从 EightLayerRetriever._l7_rerank() 迁移
+def _l9_rerank(self, query, candidates, scores): ...
+
+# L11: 从 EightLayerRetriever._l8_llm_filter() 迁移，改为 async
+# 注意：L11 完整实现已在下方单独给出，此处仅说明迁移来源
+async def _l11_llm_filter(self, query, candidates, scores, config) -> Tuple[Set, Dict]: ...
+```
+
+> 💡 **迁移策略**：迁移时需在每个方法内部添加 `temporal_candidates` 过滤逻辑：
+> ```python
+> if temporal_candidates is not None:
+>     result_ids = result_ids & temporal_candidates  # 交集过滤
+> ```
+
+**辅助方法 `_build_results`：**
+```python
+def _build_results(
+    self,
+    candidates: Set[str],
+    scores: Dict[str, float],
+    top_k: int
+) -> List[RetrievalResult]:
+    """构建最终检索结果"""
+    # 按分数排序
+    sorted_candidates = sorted(
+        candidates,
+        key=lambda x: scores[x],
+        reverse=True
+    )[:top_k]
+    
+    return [
+        RetrievalResult(
+            id=doc_id,
+            score=scores[doc_id],
+            content=self._get_content(doc_id)
+        )
+        for doc_id in sorted_candidates
+    ]
+```
+
+**L2: Temporal Filter（时态过滤）：**
+```python
+def _l2_temporal_filter(
+    self,
+    temporal_context: TemporalContext,
+    config: RetrievalConfig
+) -> Optional[Set[str]]:
+    """L2: 时态过滤 - 使用 TemporalIndex 预筛选时间范围内的文档"""
+    
+    if not temporal_context.has_time_constraint():
+        return None  # 无时间约束，跳过此层
+    
+    start_time = time.perf_counter()
+    
+    # 使用 Phase 1 实现的 TemporalIndex.query_range()
+    results = self.temporal_index.query_range(
+        start=temporal_context.start,
+        end=temporal_context.end,
+        limit=config.l2_temporal_top_k
+    )
+    
+    candidate_ids = {r.episode_id for r in results}
+    
+    # 记录统计
+    self.stats.append(LayerStats(
+        layer=RetrievalLayer.L2_TEMPORAL_FILTER.value,
+        input_count=-1,  # 全量扫描
+        output_count=len(candidate_ids),
+        time_ms=(time.perf_counter() - start_time) * 1000
+    ))
+    
+    return candidate_ids
+```
+
+**L5: Graph Traversal（图遍历扩展）：**
+```python
+def _l5_graph_traversal(
+    self,
+    entities: List[str],
+    candidates: Set[str],
+    scores: Dict[str, float],
+    config: RetrievalConfig
+) -> None:
+    """L5: 图遍历扩展 - 使用 TemporalKnowledgeGraph.bfs() 发现关联文档"""
+    
+    start_time = time.perf_counter()
+    input_count = len(candidates)
+    graph_candidates = []  # 收集图遍历的新候选
+    
+    for start_entity in entities[:config.l5_graph_max_entities]:  # 使用配置限制起点数量
+        # 查找实体在图中的节点 ID
+        node_id = self.knowledge_graph.get_node_by_name(start_entity)
+        if not node_id:
+            continue
+        
+        # 使用 Phase 1 实现的 BFS
+        bfs_results = self.knowledge_graph.bfs(
+            start=node_id,
+            max_depth=config.l5_graph_max_depth,
+            time_filter=config.reference_time,
+            direction=config.l5_graph_direction
+        )
+        
+        # 按深度加权添加候选
+        for depth, items in bfs_results.items():
+            depth_weight = 1.0 / (depth + 1)  # 距离衰减
+            for target_node_id, edge in items:
+                # 获取边关联的 episode
+                for episode_id in edge.source_episodes:
+                    graph_candidates.append((episode_id, depth_weight * config.weights.graph))
+    
+    # 按分数排序并取 top_k
+    graph_candidates.sort(key=lambda x: x[1], reverse=True)
+    for episode_id, score in graph_candidates[:config.l5_graph_top_k]:
+        candidates.add(episode_id)
+        scores[episode_id] += score
+    
+    # 记录统计
+    self.stats.append(LayerStats(
+        layer=RetrievalLayer.L5_GRAPH_TRAVERSAL.value,
+        input_count=input_count,
+        output_count=len(candidates),
+        time_ms=(time.perf_counter() - start_time) * 1000
+    ))
+```
+
+**辅助方法 `_get_content`：**
+```python
+def _get_content(self, doc_id: str) -> str:
+    """获取文档内容 - 委托给 content_store"""
+    if self.content_store:
+        return self.content_store(doc_id)
+    return ""
+```
+
+**L10: Cross-Encoder（交叉编码器精排）：**
+```python
+def _l10_cross_encoder(
+    self,
+    query: str,
+    candidates: Set[str],
+    scores: Dict[str, float],
+    config: RetrievalConfig
+) -> None:
+    """L10: CrossEncoder 重排序 - 使用交叉编码器计算精确相关性"""
+    
+    start_time = time.perf_counter()
+    
+    # 取 top candidates
+    sorted_candidates = sorted(
+        candidates,
+        key=lambda x: scores[x],
+        reverse=True
+    )[:config.l10_cross_encoder_top_k]
+    
+    # 准备 query-document pairs
+    pairs = [
+        (query, self._get_content(doc_id))
+        for doc_id in sorted_candidates
+    ]
+    
+    # CrossEncoder 批量评分
+    ce_scores = self.cross_encoder.predict(pairs)
+    
+    # 融合分数：30% 旧分 + 70% CrossEncoder 分
+    for doc_id, ce_score in zip(sorted_candidates, ce_scores):
+        scores[doc_id] = scores[doc_id] * 0.3 + float(ce_score) * 0.7
+    
+    # 记录统计
+    self.stats.append(LayerStats(
+        layer=RetrievalLayer.L10_CROSS_ENCODER.value,
+        input_count=len(candidates),
+        output_count=len(sorted_candidates),
+        time_ms=(time.perf_counter() - start_time) * 1000
+    ))
+```
+
+**L11: LLM Filter（LLM 语义过滤）：**
+```python
+async def _l11_llm_filter(
+    self,
+    query: str,
+    candidates: Set[str],
+    scores: Dict[str, float],
+    config: RetrievalConfig
+) -> Tuple[Set[str], Dict[str, float]]:
+    """L11: LLM 重排序 - 使用 LLM 进行最终语义相关性判断"""
+    
+    start_time = time.perf_counter()
+    
+    # 取 top candidates
+    sorted_candidates = sorted(
+        candidates,
+        key=lambda x: scores[x],
+        reverse=True
+    )[:config.l11_llm_top_k]
+    
+    # 构建评分 prompt
+    docs_text = "\n\n".join([
+        f"[Doc {i+1}] {self._get_content(doc_id)[:500]}"
+        for i, doc_id in enumerate(sorted_candidates)
+    ])
+    
+    prompt = f"""请根据查询的相关性对以下文档进行评分（0-10分）。
+
+查询: {query}
+
+文档列表:
+{docs_text}
+
+请以 JSON 格式返回评分：{{"scores": [8, 6, 9, ...]}}
+只返回 JSON，不要其他内容。"""
+
+    try:
+        response = await asyncio.wait_for(
+            self.llm_client.complete(prompt=prompt, max_tokens=200, temperature=0.0),
+            timeout=config.l11_llm_timeout
+        )
+        
+        result = json.loads(response)
+        llm_scores = result.get("scores", [])
+        
+        # LLM 分数直接覆盖（最终裁判）
+        for doc_id, llm_score in zip(sorted_candidates, llm_scores):
+            scores[doc_id] = llm_score / 10.0
+        
+    except Exception as e:
+        logger.warning(f"L11 LLM filter failed: {e}, keeping original scores")
+    
+    # 记录统计
+    self.stats.append(LayerStats(
+        layer=RetrievalLayer.L11_LLM_FILTER.value,
+        input_count=len(candidates),
+        output_count=len(sorted_candidates),
+        time_ms=(time.perf_counter() - start_time) * 1000
+    ))
+    
+    return set(sorted_candidates), scores
+```
+
+---
+
+##### 步骤 4: Engine 集成 (~100 行)
+
+**修改 `recall/engine.py`：**
+
+```python
+import os
+
+# 导入新模块
+from recall.retrieval.eleven_layer import ElevenLayerRetriever
+from recall.retrieval.config import RetrievalConfig, LayerWeights
+
+# 在 __init__ 中替换检索器初始化
+self.retriever = ElevenLayerRetriever(
+    # 现有依赖（对应旧 L1-L8，新编号后为 L1, L3-L4, L6-L9, L11）
+    bloom_filter=self.bloom_filter,
+    inverted_index=self.inverted_index,
+    entity_index=self.entity_index,
+    ngram_index=self.ngram_index,
+    vector_index=self.vector_index,
+    llm_client=self.llm_client,
+    content_store=self._get_content,
+    # 新增依赖（L2, L5, L10）
+    temporal_index=self.temporal_index,      # Phase 1 模块
+    knowledge_graph=self.knowledge_graph,    # Phase 1 模块
+    cross_encoder=self._load_cross_encoder() if os.getenv('RETRIEVAL_L10_CROSS_ENCODER_ENABLED', 'false').lower() == 'true' else None,
+    # 配置
+    config=self._build_retrieval_config()  # 从环境变量构建
+)
+
+# 辅助方法：加载 CrossEncoder 模型
+def _load_cross_encoder(self):
+    """按需加载 CrossEncoder 模型"""
+    from sentence_transformers import CrossEncoder
+    model_name = os.getenv(
+        'RETRIEVAL_L10_CROSS_ENCODER_MODEL',
+        'cross-encoder/ms-marco-MiniLM-L-6-v2'
+    )
+    return CrossEncoder(model_name)
+
+# 辅助方法：从环境变量构建检索配置
+def _build_retrieval_config(self) -> RetrievalConfig:
+    """从环境变量构建 RetrievalConfig"""
+    def get_bool(key: str, default: bool) -> bool:
+        return os.getenv(key, str(default)).lower() == 'true'
+    
+    def get_int(key: str, default: int) -> int:
+        return int(os.getenv(key, str(default)))
+    
+    def get_float(key: str, default: float) -> float:
+        return float(os.getenv(key, str(default)))
+    
+    return RetrievalConfig(
+        l1_enabled=get_bool('RETRIEVAL_L1_BLOOM_ENABLED', True),
+        l2_enabled=get_bool('RETRIEVAL_L2_TEMPORAL_ENABLED', True),
+        l3_enabled=get_bool('RETRIEVAL_L3_INVERTED_ENABLED', True),
+        l4_enabled=get_bool('RETRIEVAL_L4_ENTITY_ENABLED', True),
+        l5_enabled=get_bool('RETRIEVAL_L5_GRAPH_ENABLED', True),
+        l6_enabled=get_bool('RETRIEVAL_L6_NGRAM_ENABLED', True),
+        l7_enabled=get_bool('RETRIEVAL_L7_VECTOR_COARSE_ENABLED', True),
+        l8_enabled=get_bool('RETRIEVAL_L8_VECTOR_FINE_ENABLED', True),
+        l9_enabled=get_bool('RETRIEVAL_L9_RERANK_ENABLED', True),
+        l10_enabled=get_bool('RETRIEVAL_L10_CROSS_ENCODER_ENABLED', False),
+        l11_enabled=get_bool('RETRIEVAL_L11_LLM_ENABLED', False),
+        # Top-K 配置（全部 8 项）
+        l2_temporal_top_k=get_int('RETRIEVAL_L2_TEMPORAL_TOP_K', 500),
+        l3_inverted_top_k=get_int('RETRIEVAL_L3_INVERTED_TOP_K', 100),
+        l4_entity_top_k=get_int('RETRIEVAL_L4_ENTITY_TOP_K', 50),
+        l5_graph_top_k=get_int('RETRIEVAL_L5_GRAPH_TOP_K', 100),
+        l6_ngram_top_k=get_int('RETRIEVAL_L6_NGRAM_TOP_K', 30),
+        l7_vector_top_k=get_int('RETRIEVAL_L7_VECTOR_TOP_K', 200),
+        l10_cross_encoder_top_k=get_int('RETRIEVAL_L10_CROSS_ENCODER_TOP_K', 50),
+        l11_llm_top_k=get_int('RETRIEVAL_L11_LLM_TOP_K', 20),
+        # 阈值配置
+        fine_rank_threshold=get_int('RETRIEVAL_FINE_RANK_THRESHOLD', 100),
+        final_top_k=get_int('RETRIEVAL_FINAL_TOP_K', 20),
+        # L5 图遍历配置
+        l5_graph_max_depth=get_int('RETRIEVAL_L5_GRAPH_MAX_DEPTH', 2),
+        l5_graph_max_entities=get_int('RETRIEVAL_L5_GRAPH_MAX_ENTITIES', 3),
+        l5_graph_direction=os.getenv('RETRIEVAL_L5_GRAPH_DIRECTION', 'both'),
+        # L11 LLM 配置
+        l11_llm_timeout=get_float('RETRIEVAL_L11_LLM_TIMEOUT', 10.0),
+        # 权重配置
+        weights=LayerWeights(
+            inverted=get_float('RETRIEVAL_WEIGHT_INVERTED', 1.0),
+            entity=get_float('RETRIEVAL_WEIGHT_ENTITY', 1.2),
+            graph=get_float('RETRIEVAL_WEIGHT_GRAPH', 1.0),
+            ngram=get_float('RETRIEVAL_WEIGHT_NGRAM', 0.8),
+            vector=get_float('RETRIEVAL_WEIGHT_VECTOR', 1.0),
+            temporal=get_float('RETRIEVAL_WEIGHT_TEMPORAL', 0.5),
+        ),
+    )
+```
+
+---
+
+##### 步骤 5: 向后兼容适配器（可选）
+
+**如果需要保持旧 API 兼容：**
+```python
+import asyncio
+
+class EightLayerRetrieverCompat:
+    """向后兼容适配器 - 将旧 8 层同步 API 映射到新 11 层异步"""
+    
+    def __init__(self, eleven_layer: ElevenLayerRetriever):
+        self._impl = eleven_layer
+    
+    def retrieve(self, query, entities=None, keywords=None, top_k=20, filters=None):
+        """旧 API 兼容（同步包装）"""
+        # 创建兼容配置（禁用新增层）
+        config = RetrievalConfig(
+            l2_enabled=False,   # 禁用 Temporal
+            l5_enabled=False,   # 禁用 Graph
+            l10_enabled=False,  # 禁用 CrossEncoder
+            l11_enabled=False,  # 禁用 LLM（异步方法）
+        )
+        # 同步包装异步调用（兼容 Python 3.7+）
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # 没有运行中的事件循环，创建新的
+            return asyncio.run(
+                self._impl.retrieve(
+                    query=query, entities=entities, keywords=keywords,
+                    top_k=top_k, filters=filters, temporal_context=None, config=config
+                )
+            )
+        else:
+            # 已有事件循环，使用 run_until_complete
+            import nest_asyncio
+            nest_asyncio.apply()
+            return loop.run_until_complete(
+                self._impl.retrieve(
+                    query=query, entities=entities, keywords=keywords,
+                    top_k=top_k, filters=filters, temporal_context=None, config=config
+                )
+            )
+```
+
+---
+
+#### ⚙️ 配置项扩展
+
+**需要添加到 `api_keys.env`：**
+
+```env
+# ============================================================================
+# 十一层检索器配置 (Phase 3)
+# Eleven-Layer Retriever Configuration
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# 层开关配置 (Layer Enable/Disable)
+# ----------------------------------------------------------------------------
+# L1: Bloom Filter (默认启用)
+RETRIEVAL_L1_BLOOM_ENABLED=true
+
+# L2: Temporal Filter - 时态过滤【新增】
+RETRIEVAL_L2_TEMPORAL_ENABLED=true
+
+# L3: Inverted Index (默认启用)
+RETRIEVAL_L3_INVERTED_ENABLED=true
+
+# L4: Entity Index (默认启用)
+RETRIEVAL_L4_ENTITY_ENABLED=true
+
+# L5: Graph Traversal - 图遍历【新增】
+RETRIEVAL_L5_GRAPH_ENABLED=true
+
+# L6: N-gram Index (默认启用)
+RETRIEVAL_L6_NGRAM_ENABLED=true
+
+# L7: Vector Coarse (默认启用)
+RETRIEVAL_L7_VECTOR_COARSE_ENABLED=true
+
+# L8: Vector Fine (默认启用)
+RETRIEVAL_L8_VECTOR_FINE_ENABLED=true
+
+# L9: Rerank (默认启用)
+RETRIEVAL_L9_RERANK_ENABLED=true
+
+# L10: CrossEncoder - 交叉编码器【新增，默认关闭】
+RETRIEVAL_L10_CROSS_ENCODER_ENABLED=false
+
+# L11: LLM Filter (默认关闭，高成本)
+RETRIEVAL_L11_LLM_ENABLED=false
+
+# ----------------------------------------------------------------------------
+# Top-K 配置 (各层候选数限制)
+# ----------------------------------------------------------------------------
+# L2: 时态过滤保留数
+RETRIEVAL_L2_TEMPORAL_TOP_K=500
+
+# L3: 倒排索引保留数
+RETRIEVAL_L3_INVERTED_TOP_K=100
+
+# L4: 实体索引保留数
+RETRIEVAL_L4_ENTITY_TOP_K=50
+
+# L5: 图遍历保留数
+RETRIEVAL_L5_GRAPH_TOP_K=100
+
+# L6: N-gram 保留数
+RETRIEVAL_L6_NGRAM_TOP_K=30
+
+# L7: 向量粗筛保留数
+RETRIEVAL_L7_VECTOR_TOP_K=200
+
+# ----------------------------------------------------------------------------
+# 阈值与最终输出配置
+# ----------------------------------------------------------------------------
+# 触发 L8 向量精排的候选数阈值
+RETRIEVAL_FINE_RANK_THRESHOLD=100
+
+# 最终返回结果数
+RETRIEVAL_FINAL_TOP_K=20
+
+# ----------------------------------------------------------------------------
+# L5 图遍历配置
+# ----------------------------------------------------------------------------
+# BFS 最大深度 (1-5)
+RETRIEVAL_L5_GRAPH_MAX_DEPTH=2
+
+# 每次图遍历的最大起始实体数 (1-10)
+RETRIEVAL_L5_GRAPH_MAX_ENTITIES=3
+
+# 遍历方向: out(出边) | in(入边) | both(双向)
+RETRIEVAL_L5_GRAPH_DIRECTION=both
+
+# ----------------------------------------------------------------------------
+# L10 CrossEncoder 配置
+# ----------------------------------------------------------------------------
+# CrossEncoder 模型名称
+RETRIEVAL_L10_CROSS_ENCODER_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2
+
+# CrossEncoder 处理的最大候选数
+RETRIEVAL_L10_CROSS_ENCODER_TOP_K=50
+
+# ----------------------------------------------------------------------------
+# L11 LLM 配置
+# ----------------------------------------------------------------------------
+# LLM 处理的最大文档数
+RETRIEVAL_L11_LLM_TOP_K=20
+
+# LLM 超时时间（秒）
+RETRIEVAL_L11_LLM_TIMEOUT=10.0
+
+# ----------------------------------------------------------------------------
+# 权重配置 (可选，高级调优)
+# ----------------------------------------------------------------------------
+# 倒排索引命中权重
+RETRIEVAL_WEIGHT_INVERTED=1.0
+
+# 实体索引命中权重
+RETRIEVAL_WEIGHT_ENTITY=1.2
+
+# 图遍历命中权重
+RETRIEVAL_WEIGHT_GRAPH=1.0
+
+# N-gram 命中权重
+RETRIEVAL_WEIGHT_NGRAM=0.8
+
+# 向量相似度权重
+RETRIEVAL_WEIGHT_VECTOR=1.0
+
+# 时态相关性权重
+RETRIEVAL_WEIGHT_TEMPORAL=0.5
+```
+
+---
+
+#### 🔗 依赖关系
+
+**Phase 1 模块依赖（已完成）：**
+- `TemporalIndex.query_range()` → L2 时态过滤
+- `TemporalKnowledgeGraph.bfs()` → L5 图遍历
+
+**可选外部依赖：**
+- `sentence-transformers` (CrossEncoder) → L10
+- `nest_asyncio` → 向后兼容适配器（仅在已有事件循环时需要）
+
+---
+
+**预计产出文件：**
+```
+recall/retrieval/config.py             # ~150 行 - 检索配置类 + 辅助类
+recall/retrieval/eleven_layer.py       # ~700 行 - 十一层检索器
+recall/retrieval/__init__.py           # 更新 - 模块导出
+recall/engine.py                       # 更新 - 集成新检索器
+start.ps1                              # 更新 - Phase 3 配置项
+start.sh                               # 更新 - Phase 3 配置项
+tests/test_eleven_layer.py             # ~250 行 - 检索器测试
+tests/test_retrieval_benchmark.py      # ~150 行 - 性能基准测试
+```
+
+**📊 代码统计预估：**
+| 类别 | 文件数 | 总行数 |
+|------|--------|--------|
+| 核心模块 | 2 | ~950 行 |
+| 更新文件 | 4 | ~250 行修改 |
+| 测试文件 | 2 | ~400 行 |
+| **合计** | **8** | **~1,600 行** |
+
+---
+
+**🔑 关键 API 摘要：**
+
+| 模块 | 核心类/方法 | 功能 |
+|------|-------------|------|
+| `config.py` | `RetrievalConfig` | 类型安全的 11 层检索配置 |
+| `config.py` | `RetrievalConfig.default()` | 默认配置（L10/L11 关闭） |
+| `config.py` | `RetrievalConfig.fast()` | 快速模式（跳过精排层） |
+| `config.py` | `RetrievalConfig.accurate()` | 精准模式（启用所有层） |
+| `config.py` | `LayerWeights` | 各层权重配置 |
+| `eleven_layer.py` | `ElevenLayerRetriever` | 十一层漏斗检索器 |
+| `eleven_layer.py` | `ElevenLayerRetriever.retrieve()` | 主检索方法 |
+| `eleven_layer.py` | `_l2_temporal_filter()` | L2 时态过滤 |
+| `eleven_layer.py` | `_l5_graph_traversal()` | L5 图遍历扩展 |
+| `eleven_layer.py` | `_l10_cross_encoder()` | L10 交叉编码器精排 |
+| `eleven_layer.py` | `_l11_llm_filter()` | L11 LLM 语义过滤 |
+| `eleven_layer.py` | `RetrievalLayer` | 11 层枚举定义 |
+
+---
+
+**📡 REST API 更新：**
+
+| 端点 | 方法 | 功能 | 说明 |
+|------|------|------|------|
+| `/v1/search` | POST | 增强搜索 | 新增 `temporal_filter` 和 `graph_expand` 参数 |
+| `/v1/search/config` | GET | 获取检索配置 | 返回当前 `RetrievalConfig` |
+| `/v1/search/config` | PUT | 更新检索配置 | 动态调整检索策略 |
+
+**搜索 API 参数扩展：**
+```json
+{
+  "query": "Alice 的工作经历",
+  "top_k": 20,
+  "temporal_filter": {
+    "start": "2024-01-01",
+    "end": "2024-12-31"
+  },
+  "graph_expand": {
+    "center_entities": ["Alice"],
+    "max_depth": 2,
+    "direction": "both"
+  },
+  "config_preset": "accurate"  // default | fast | accurate
+}
+```
+
+---
+
+**🌐 通用性说明：**
+
+Phase 3 所有代码都是 **100% 平台无关** 的通用实现：
+- ✅ 纯 Python 实现，无特定前端依赖
+- ✅ 通过 REST API 暴露，任何客户端可调用
+- ✅ 配置通过环境变量控制，易于 Docker/K8s 部署
+- ✅ CrossEncoder 为可选依赖，不影响基础功能
+
+---
 
 **验收标准：**
-- [ ] 检索延迟 < 100ms (p95)
-- [ ] 召回率提升 ≥10%
+- [ ] 检索延迟 < 100ms (p95，不含 LLM 层)
+- [ ] 召回率提升 ≥10%（对比 EightLayerRetriever）
+- [ ] 所有现有测试通过（向后兼容）
+- [ ] L2 时态过滤可正常工作
+- [ ] L5 图遍历可正常工作
+- [ ] L10 CrossEncoder 可选启用
+- [ ] L11 LLM Filter 可选启用
+- [ ] Engine 集成完成，旧 `EightLayerRetriever` 平滑替换
+- [ ] 向后兼容适配器可用
+- [ ] 配置项已添加到 `api_keys.env`
+- [ ] `start.ps1` / `start.sh` 支持 Phase 3 配置项
+- [ ] REST API `/v1/search` 支持新参数
+- [ ] 基准测试脚本可运行
 
 ### Phase 4: 集成层（2周）
 
@@ -1204,7 +2250,7 @@ SMART_EXTRACTOR_DAILY_BUDGET=1.0
 | **图数据库依赖** | 必需 | 可选 | 🏆 Recall |
 | **智能抽取** | 纯 LLM | 三模式自适应 | 🏆 Recall |
 | **运行成本** | 高 | 可控 | 🏆 Recall |
-| **检索层数** | 3层 | 10层 | 🏆 Recall |
+| **检索层数** | 3层 | 11层 | 🏆 Recall |
 | **去重阶段** | 2阶段 | 3阶段 | 🏆 Recall |
 | **MCP 工具数** | 8个 | 15+个 | 🏆 Recall |
 | **离线运行** | ❌ | ✅ | 🏆 Recall |
