@@ -127,9 +127,15 @@ class EightLayerRetriever:
         entities: Optional[List[str]] = None,
         keywords: Optional[List[str]] = None,
         top_k: int = 10,
-        filters: Optional[Dict[str, Any]] = None
+        filters: Optional[Dict[str, Any]] = None,
+        temporal_context: Optional[Any] = None,  # Phase 3 兼容：接受但忽略
+        config: Optional[Any] = None  # Phase 3 兼容：接受但忽略
     ) -> List[RetrievalResult]:
-        """执行八层检索"""
+        """执行八层检索
+        
+        Note: temporal_context 和 config 参数用于 Phase 3 兼容，
+        在 EightLayerRetriever 中被忽略，仅 ElevenLayerRetriever 使用。
+        """
         self.stats = []
         candidates: Set[str] = set()  # 候选ID集合
         results: List[RetrievalResult] = []

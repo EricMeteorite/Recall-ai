@@ -86,6 +86,48 @@ SUPPORTED_CONFIG_KEYS = {
     'DEDUP_SEMANTIC_THRESHOLD',       # 语义相似度阈值（阶段2 高）
     'DEDUP_SEMANTIC_LOW_THRESHOLD',   # 语义相似度低阈值（阶段2 低）
     'DEDUP_LLM_ENABLED',              # 是否启用 LLM 确认（阶段3）
+    
+    # ====== v4.0 Phase 3 十一层检索器配置项 ======
+    'ELEVEN_LAYER_RETRIEVER_ENABLED', # 是否启用十一层检索器
+    # 层开关配置
+    'RETRIEVAL_L1_BLOOM_ENABLED',
+    'RETRIEVAL_L2_TEMPORAL_ENABLED',
+    'RETRIEVAL_L3_INVERTED_ENABLED',
+    'RETRIEVAL_L4_ENTITY_ENABLED',
+    'RETRIEVAL_L5_GRAPH_ENABLED',
+    'RETRIEVAL_L6_NGRAM_ENABLED',
+    'RETRIEVAL_L7_VECTOR_COARSE_ENABLED',
+    'RETRIEVAL_L8_VECTOR_FINE_ENABLED',
+    'RETRIEVAL_L9_RERANK_ENABLED',
+    'RETRIEVAL_L10_CROSS_ENCODER_ENABLED',
+    'RETRIEVAL_L11_LLM_ENABLED',
+    # Top-K 配置
+    'RETRIEVAL_L2_TEMPORAL_TOP_K',
+    'RETRIEVAL_L3_INVERTED_TOP_K',
+    'RETRIEVAL_L4_ENTITY_TOP_K',
+    'RETRIEVAL_L5_GRAPH_TOP_K',
+    'RETRIEVAL_L6_NGRAM_TOP_K',
+    'RETRIEVAL_L7_VECTOR_TOP_K',
+    'RETRIEVAL_L10_CROSS_ENCODER_TOP_K',
+    'RETRIEVAL_L11_LLM_TOP_K',
+    # 阈值与最终输出配置
+    'RETRIEVAL_FINE_RANK_THRESHOLD',
+    'RETRIEVAL_FINAL_TOP_K',
+    # L5 图遍历配置
+    'RETRIEVAL_L5_GRAPH_MAX_DEPTH',
+    'RETRIEVAL_L5_GRAPH_MAX_ENTITIES',
+    'RETRIEVAL_L5_GRAPH_DIRECTION',
+    # L10 CrossEncoder 配置
+    'RETRIEVAL_L10_CROSS_ENCODER_MODEL',
+    # L11 LLM 配置
+    'RETRIEVAL_L11_LLM_TIMEOUT',
+    # 权重配置
+    'RETRIEVAL_WEIGHT_INVERTED',
+    'RETRIEVAL_WEIGHT_ENTITY',
+    'RETRIEVAL_WEIGHT_GRAPH',
+    'RETRIEVAL_WEIGHT_NGRAM',
+    'RETRIEVAL_WEIGHT_VECTOR',
+    'RETRIEVAL_WEIGHT_TEMPORAL',
 }
 
 
@@ -480,12 +522,29 @@ class AddMemoryResponse(BaseModel):
     consistency_warnings: List[str] = []  # 一致性检查警告
 
 
+class TemporalFilterRequest(BaseModel):
+    """时态过滤请求 - Phase 3"""
+    start: Optional[str] = Field(default=None, description="时间范围起点 (ISO 格式)")
+    end: Optional[str] = Field(default=None, description="时间范围终点 (ISO 格式)")
+
+
+class GraphExpandRequest(BaseModel):
+    """图遍历扩展请求 - Phase 3"""
+    center_entities: List[str] = Field(default=[], description="中心实体列表")
+    max_depth: int = Field(default=2, ge=1, le=5, description="BFS 最大深度")
+    direction: str = Field(default="both", description="遍历方向: out|in|both")
+
+
 class SearchRequest(BaseModel):
     """搜索请求"""
     query: str = Field(..., description="搜索查询")
     user_id: str = Field(default="default", description="用户ID")
     top_k: int = Field(default=10, ge=1, le=100, description="返回数量")
     filters: Optional[Dict[str, Any]] = Field(default=None, description="过滤条件")
+    # Phase 3 新增参数
+    temporal_filter: Optional[TemporalFilterRequest] = Field(default=None, description="时态过滤（Phase 3）")
+    graph_expand: Optional[GraphExpandRequest] = Field(default=None, description="图遍历扩展（Phase 3）")
+    config_preset: Optional[str] = Field(default=None, description="配置预设: default|fast|accurate（Phase 3）")
 
 
 class SearchResultItem(BaseModel):
@@ -495,6 +554,46 @@ class SearchResultItem(BaseModel):
     score: float
     metadata: Dict[str, Any] = {}
     entities: List[str] = []
+
+
+class RetrievalConfigRequest(BaseModel):
+    """检索配置请求 - Phase 3"""
+    # 层开关
+    l1_enabled: Optional[bool] = Field(default=None, description="L1 Bloom Filter")
+    l2_enabled: Optional[bool] = Field(default=None, description="L2 Temporal Filter")
+    l3_enabled: Optional[bool] = Field(default=None, description="L3 Inverted Index")
+    l4_enabled: Optional[bool] = Field(default=None, description="L4 Entity Index")
+    l5_enabled: Optional[bool] = Field(default=None, description="L5 Graph Traversal")
+    l6_enabled: Optional[bool] = Field(default=None, description="L6 N-gram Index")
+    l7_enabled: Optional[bool] = Field(default=None, description="L7 Vector Coarse")
+    l8_enabled: Optional[bool] = Field(default=None, description="L8 Vector Fine")
+    l9_enabled: Optional[bool] = Field(default=None, description="L9 Rerank")
+    l10_enabled: Optional[bool] = Field(default=None, description="L10 CrossEncoder")
+    l11_enabled: Optional[bool] = Field(default=None, description="L11 LLM Filter")
+    # Top-K 配置
+    l7_vector_top_k: Optional[int] = Field(default=None, ge=10, le=1000, description="向量粗筛数量")
+    final_top_k: Optional[int] = Field(default=None, ge=1, le=100, description="最终返回数量")
+    # 预设
+    preset: Optional[str] = Field(default=None, description="应用预设: default|fast|accurate")
+
+
+class RetrievalConfigResponse(BaseModel):
+    """检索配置响应 - Phase 3"""
+    retriever_type: str = Field(description="检索器类型: ElevenLayer|EightLayer")
+    l1_enabled: bool
+    l2_enabled: bool
+    l3_enabled: bool
+    l4_enabled: bool
+    l5_enabled: bool
+    l6_enabled: bool
+    l7_enabled: bool
+    l8_enabled: bool
+    l9_enabled: bool
+    l10_enabled: bool
+    l11_enabled: bool
+    l7_vector_top_k: int
+    final_top_k: int
+    weights: Dict[str, float] = {}
 
 
 class ContextRequest(BaseModel):
@@ -814,17 +913,55 @@ async def add_memory(request: AddMemoryRequest):
 
 @app.post("/v1/memories/search", response_model=List[SearchResultItem], tags=["Memories"])
 async def search_memories(request: SearchRequest):
-    """搜索记忆"""
+    """搜索记忆
+    
+    Phase 3 新增参数：
+    - temporal_filter: 时态过滤（时间范围）
+    - graph_expand: 图遍历扩展（关联实体发现）
+    - config_preset: 配置预设（default/fast/accurate）
+    """
     query_preview = request.query[:50].replace('\n', ' ') if len(request.query) > 50 else request.query.replace('\n', ' ')
     print(f"[Recall][Memory] 🔍 搜索请求: user={request.user_id}, top_k={request.top_k}")
     print(f"[Recall][Memory]    查询: {query_preview}{'...' if len(request.query) > 50 else ''}")
+    
+    # Phase 3: 处理新参数
+    temporal_context = None
+    if request.temporal_filter:
+        from datetime import datetime
+        try:
+            start = datetime.fromisoformat(request.temporal_filter.start) if request.temporal_filter.start else None
+            end = datetime.fromisoformat(request.temporal_filter.end) if request.temporal_filter.end else None
+            from recall.retrieval.config import TemporalContext
+            temporal_context = TemporalContext(start=start, end=end)
+            print(f"[Recall][Memory]    时态过滤: {start} ~ {end}")
+        except Exception as e:
+            print(f"[Recall][Memory]    时态过滤解析失败: {e}")
+    
+    # Phase 3: 处理图遍历扩展参数（添加到 filters）
+    filters = request.filters or {}
+    if request.graph_expand and request.graph_expand.center_entities:
+        filters['graph_expand'] = {
+            'center_entities': request.graph_expand.center_entities,
+            'max_depth': request.graph_expand.max_depth,
+            'direction': request.graph_expand.direction
+        }
+        print(f"[Recall][Memory]    图遍历: 实体={request.graph_expand.center_entities}, 深度={request.graph_expand.max_depth}")
+    
+    # Phase 3: 处理配置预设
+    config_preset = None
+    if request.config_preset:
+        config_preset = request.config_preset
+        filters['config_preset'] = request.config_preset
+        print(f"[Recall][Memory]    配置预设: {request.config_preset}")
     
     engine = get_engine()
     results = engine.search(
         query=request.query,
         user_id=request.user_id,
         top_k=request.top_k,
-        filters=request.filters
+        filters=filters,
+        temporal_context=temporal_context,
+        config_preset=config_preset
     )
     
     print(f"[Recall][Memory] 📊 搜索结果: 找到 {len(results)} 条记忆")
@@ -2416,6 +2553,169 @@ async def hybrid_search(request: SearchRequest):
             "error": str(e),
             "results": []
         }
+
+
+# ==================== Phase 3: 检索配置 API ====================
+
+@app.get("/v1/search/config", response_model=RetrievalConfigResponse, tags=["Search"])
+async def get_search_config():
+    """获取当前检索配置（Phase 3）
+    
+    返回当前检索器的配置状态，包括：
+    - 检索器类型（ElevenLayer/EightLayer）
+    - 各层开关状态
+    - Top-K 参数
+    - 权重配置
+    """
+    engine = get_engine()
+    retriever = engine.retriever
+    
+    # 判断检索器类型
+    from recall.retrieval.eleven_layer import ElevenLayerRetriever
+    is_eleven_layer = isinstance(retriever, ElevenLayerRetriever)
+    
+    if is_eleven_layer and hasattr(retriever, 'config'):
+        config = retriever.config
+        return RetrievalConfigResponse(
+            retriever_type="ElevenLayer",
+            l1_enabled=config.l1_enabled,
+            l2_enabled=config.l2_enabled,
+            l3_enabled=config.l3_enabled,
+            l4_enabled=config.l4_enabled,
+            l5_enabled=config.l5_enabled,
+            l6_enabled=config.l6_enabled,
+            l7_enabled=config.l7_enabled,
+            l8_enabled=config.l8_enabled,
+            l9_enabled=config.l9_enabled,
+            l10_enabled=config.l10_enabled,
+            l11_enabled=config.l11_enabled,
+            l7_vector_top_k=config.l7_vector_top_k,
+            final_top_k=config.final_top_k,
+            weights={
+                "inverted": config.weights.inverted,
+                "entity": config.weights.entity,
+                "graph": config.weights.graph,
+                "ngram": config.weights.ngram,
+                "vector": config.weights.vector,
+                "temporal": config.weights.temporal,
+            }
+        )
+    else:
+        # EightLayerRetriever 或兼容模式
+        old_config = getattr(retriever, 'config', {})
+        return RetrievalConfigResponse(
+            retriever_type="EightLayer",
+            l1_enabled=old_config.get('l1_enabled', True),
+            l2_enabled=False,  # 旧版无 L2
+            l3_enabled=old_config.get('l2_enabled', True),  # 旧 L2 = 新 L3
+            l4_enabled=old_config.get('l3_enabled', True),  # 旧 L3 = 新 L4
+            l5_enabled=False,  # 旧版无 L5
+            l6_enabled=old_config.get('l4_enabled', True),  # 旧 L4 = 新 L6
+            l7_enabled=old_config.get('l5_enabled', True),  # 旧 L5 = 新 L7
+            l8_enabled=old_config.get('l6_enabled', True),  # 旧 L6 = 新 L8
+            l9_enabled=old_config.get('l7_enabled', True),  # 旧 L7 = 新 L9
+            l10_enabled=False,  # 旧版无 L10
+            l11_enabled=old_config.get('l8_enabled', False),  # 旧 L8 = 新 L11
+            l7_vector_top_k=200,
+            final_top_k=20,
+            weights={}
+        )
+
+
+@app.put("/v1/search/config", response_model=RetrievalConfigResponse, tags=["Search"])
+async def update_search_config(request: RetrievalConfigRequest):
+    """动态更新检索配置（Phase 3）
+    
+    允许在运行时调整检索策略，无需重启服务。
+    
+    使用方式：
+    - 传入 preset="fast" 快速应用预设
+    - 或单独设置各层开关和参数
+    
+    注意：此更改仅影响当前进程，重启后会恢复为环境变量配置。
+    """
+    engine = get_engine()
+    retriever = engine.retriever
+    
+    from recall.retrieval.eleven_layer import ElevenLayerRetriever
+    from recall.retrieval.config import RetrievalConfig
+    
+    if not isinstance(retriever, ElevenLayerRetriever):
+        raise HTTPException(
+            status_code=400,
+            detail="当前使用 EightLayerRetriever，不支持动态配置。请设置 ELEVEN_LAYER_RETRIEVER_ENABLED=true 启用 ElevenLayerRetriever。"
+        )
+    
+    config = retriever.config
+    
+    # 应用预设
+    if request.preset:
+        if request.preset == "fast":
+            new_config = RetrievalConfig.fast()
+        elif request.preset == "accurate":
+            new_config = RetrievalConfig.accurate()
+        elif request.preset == "default":
+            new_config = RetrievalConfig.default()
+        else:
+            raise HTTPException(status_code=400, detail=f"未知预设: {request.preset}")
+        retriever.config = new_config
+        config = new_config
+    else:
+        # 单独更新各字段
+        if request.l1_enabled is not None:
+            config.l1_enabled = request.l1_enabled
+        if request.l2_enabled is not None:
+            config.l2_enabled = request.l2_enabled
+        if request.l3_enabled is not None:
+            config.l3_enabled = request.l3_enabled
+        if request.l4_enabled is not None:
+            config.l4_enabled = request.l4_enabled
+        if request.l5_enabled is not None:
+            config.l5_enabled = request.l5_enabled
+        if request.l6_enabled is not None:
+            config.l6_enabled = request.l6_enabled
+        if request.l7_enabled is not None:
+            config.l7_enabled = request.l7_enabled
+        if request.l8_enabled is not None:
+            config.l8_enabled = request.l8_enabled
+        if request.l9_enabled is not None:
+            config.l9_enabled = request.l9_enabled
+        if request.l10_enabled is not None:
+            config.l10_enabled = request.l10_enabled
+        if request.l11_enabled is not None:
+            config.l11_enabled = request.l11_enabled
+        if request.l7_vector_top_k is not None:
+            config.l7_vector_top_k = request.l7_vector_top_k
+        if request.final_top_k is not None:
+            config.final_top_k = request.final_top_k
+    
+    print(f"[Recall][Config] ⚙️ 检索配置已更新")
+    
+    # 返回更新后的配置
+    return RetrievalConfigResponse(
+        retriever_type="ElevenLayer",
+        l1_enabled=config.l1_enabled,
+        l2_enabled=config.l2_enabled,
+        l3_enabled=config.l3_enabled,
+        l4_enabled=config.l4_enabled,
+        l5_enabled=config.l5_enabled,
+        l6_enabled=config.l6_enabled,
+        l7_enabled=config.l7_enabled,
+        l8_enabled=config.l8_enabled,
+        l9_enabled=config.l9_enabled,
+        l10_enabled=config.l10_enabled,
+        l11_enabled=config.l11_enabled,
+        l7_vector_top_k=config.l7_vector_top_k,
+        final_top_k=config.final_top_k,
+        weights={
+            "inverted": config.weights.inverted,
+            "entity": config.weights.entity,
+            "graph": config.weights.graph,
+            "ngram": config.weights.ngram,
+            "vector": config.weights.vector,
+            "temporal": config.weights.temporal,
+        }
+    )
 
 
 # ==================== v4.0 图谱遍历 API ====================

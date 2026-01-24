@@ -28,6 +28,11 @@ from .processor import (
 # 这些模块仅在配置启用时才会加载
 from .processor.foreshadowing import Foreshadowing
 from .retrieval import EightLayerRetriever, ContextBuilder
+# Phase 3: 可选导入 ElevenLayerRetriever（仅在启用时使用）
+from .retrieval import (
+    ElevenLayerRetriever, RetrievalConfig, 
+    TemporalContext, LayerWeights
+)
 from .utils import (
     LLMClient, WarmupManager, PerformanceMonitor,
     EnvironmentManager
@@ -364,6 +369,95 @@ class RecallEngine:
                 print(f"[Recall v4.0] 全文检索已启用 (BM25 k1={k1}, b={b})")
             except Exception as e:
                 print(f"[Recall v4.0] 全文检索初始化失败（不影响核心功能）: {e}")
+        
+        # 4. Phase 3: 十一层检索器（可选升级）
+        eleven_layer_enabled = os.environ.get('ELEVEN_LAYER_RETRIEVER_ENABLED', 'false').lower() == 'true'
+        if eleven_layer_enabled:
+            self._init_eleven_layer_retriever()
+    
+    def _init_eleven_layer_retriever(self):
+        """初始化 Phase 3 十一层检索器
+        
+        替换默认的 EightLayerRetriever，启用：
+        - L2: 时态过滤（需要 temporal_graph）
+        - L5: 图遍历扩展（需要 temporal_graph）
+        - L10: CrossEncoder 精排（可选）
+        - L11: LLM 过滤（可选）
+        
+        设计原则：
+        1. 通过环境变量 ELEVEN_LAYER_RETRIEVER_ENABLED=true 启用
+        2. 即使部分依赖不可用也能降级运行
+        3. 不影响现有 API 接口
+        """
+        try:
+            # 构建检索配置
+            config = RetrievalConfig.from_env()
+            
+            # 检查 CrossEncoder 是否需要加载
+            cross_encoder = None
+            if config.l10_enabled:
+                cross_encoder = self._load_cross_encoder()
+            
+            # 获取时态索引（如果 temporal_graph 启用）
+            temporal_index = None
+            if self.temporal_graph and hasattr(self.temporal_graph, '_temporal_index'):
+                temporal_index = self.temporal_graph._temporal_index
+            
+            # 创建 ElevenLayerRetriever
+            self.retriever = ElevenLayerRetriever(
+                # 现有依赖（与 EightLayerRetriever 相同）
+                bloom_filter=self._ngram_index.bloom_filter if self._ngram_index else None,
+                inverted_index=self._inverted_index,
+                entity_index=self._entity_index,
+                ngram_index=self._ngram_index,
+                vector_index=self._vector_index,
+                llm_client=self.llm_client,
+                content_store=self._get_memory_content_by_id,
+                # Phase 3 新增依赖
+                temporal_index=temporal_index,
+                knowledge_graph=self.temporal_graph,
+                cross_encoder=cross_encoder,
+                # 配置
+                config=config
+            )
+            
+            # 记录启用状态
+            layers_status = []
+            if config.l2_enabled and temporal_index:
+                layers_status.append("L2:时态过滤")
+            if config.l5_enabled and self.temporal_graph:
+                layers_status.append("L5:图遍历")
+            if config.l10_enabled and cross_encoder:
+                layers_status.append("L10:CrossEncoder")
+            if config.l11_enabled:
+                layers_status.append("L11:LLM过滤")
+            
+            status_str = ", ".join(layers_status) if layers_status else "基础模式"
+            print(f"[Recall v4.0 Phase 3] 十一层检索器已启用 ({status_str})")
+            
+        except Exception as e:
+            print(f"[Recall v4.0 Phase 3] 十一层检索器初始化失败，回退到八层检索器: {e}")
+            # 失败时不修改 self.retriever，保持 EightLayerRetriever
+    
+    def _load_cross_encoder(self):
+        """按需加载 CrossEncoder 模型
+        
+        Returns:
+            CrossEncoder 模型实例，或 None（如果加载失败）
+        """
+        try:
+            from sentence_transformers import CrossEncoder
+            model_name = os.environ.get(
+                'RETRIEVAL_L10_CROSS_ENCODER_MODEL',
+                'cross-encoder/ms-marco-MiniLM-L-6-v2'
+            )
+            return CrossEncoder(model_name)
+        except ImportError:
+            print("[Recall v4.0 Phase 3] sentence-transformers 未安装，CrossEncoder 不可用")
+            return None
+        except Exception as e:
+            print(f"[Recall v4.0 Phase 3] CrossEncoder 加载失败: {e}")
+            return None
     
     def _check_and_rebuild_index(self):
         """检查并为已有伏笔/条件补建 VectorIndex 索引
@@ -838,7 +932,9 @@ class RecallEngine:
         query: str,
         user_id: str = "default",
         top_k: int = 10,
-        filters: Optional[Dict[str, Any]] = None
+        filters: Optional[Dict[str, Any]] = None,
+        temporal_context: Optional[Any] = None,
+        config_preset: Optional[str] = None
     ) -> List[SearchResult]:
         """搜索记忆
         
@@ -847,6 +943,8 @@ class RecallEngine:
             user_id: 用户ID
             top_k: 返回数量
             filters: 过滤条件
+            temporal_context: 时态上下文（Phase 3 新增，用于 L2 时态检索层）
+            config_preset: 配置预设（Phase 3 新增：default/fast/accurate）
         
         Returns:
             List[SearchResult]: 搜索结果
@@ -858,13 +956,25 @@ class RecallEngine:
         # 2. 检测场景
         scenario = self.scenario_detector.detect(query)
         
-        # 3. 执行检索
+        # 3. Phase 3: 构建检索配置
+        retrieval_config = None
+        if config_preset and hasattr(self.retriever, 'config'):
+            from recall.retrieval.config import RetrievalConfig
+            if config_preset == 'fast':
+                retrieval_config = RetrievalConfig.fast()
+            elif config_preset == 'accurate':
+                retrieval_config = RetrievalConfig.accurate()
+            # default 使用 retriever 的默认配置
+        
+        # 4. 执行检索（传递 Phase 3 新参数）
         retrieval_results = self.retriever.retrieve(
             query=query,
             entities=entities,
             keywords=keywords,
             top_k=top_k,
-            filters=filters
+            filters=filters,
+            temporal_context=temporal_context,
+            config=retrieval_config
         )
         
         # 4. 补充从存储获取
