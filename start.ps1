@@ -601,6 +601,18 @@ RETRIEVAL_WEIGHT_TEMPORAL=0.5
 '@
         Set-Content -Path $configFile -Value $defaultConfig -Encoding UTF8
         Write-Host "  $([char]0x2192) 已创建配置文件: $configFile" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "  ⚠️  首次运行，请先配置 API:" -ForegroundColor Yellow
+        Write-Host "     编辑: $configFile" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "  至少需要配置 Embedding API（用于语义搜索）:" -ForegroundColor White
+        Write-Host "    EMBEDDING_API_KEY=your-api-key" -ForegroundColor Cyan
+        Write-Host "    EMBEDDING_API_BASE=https://api.siliconflow.cn/v1" -ForegroundColor Cyan
+        Write-Host "    EMBEDDING_MODEL=BAAI/bge-m3" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "  配置完成后重新运行: .\manage.ps1" -ForegroundColor White
+        Write-Host ""
+        return
     }
 }
 
