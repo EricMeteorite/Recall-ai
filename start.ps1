@@ -250,8 +250,6 @@ EMBEDDING_API_KEY=
 EMBEDDING_API_BASE=
 EMBEDDING_MODEL=
 EMBEDDING_DIMENSION=1024
-EMBEDDING_RATE_LIMIT=10
-EMBEDDING_RATE_WINDOW=60
 
 # Embedding 模式: auto(自动检测), local(本地), api(远程API)
 # Embedding Mode: auto(auto detect), local(local model), api(remote API)
@@ -268,6 +266,18 @@ LLM_MODEL=
 # ╔══════════════════════════════════════════════════════════════════════════╗
 # ║  ⚙️ 可选配置 - OPTIONAL CONFIGURATION (以下内容可保持默认值)              ║
 # ╚══════════════════════════════════════════════════════════════════════════╝
+
+# ----------------------------------------------------------------------------
+# Embedding API 速率限制
+# Embedding API Rate Limiting
+# ----------------------------------------------------------------------------
+# 每时间窗口最大请求数（默认10，设为0禁用）
+# Max requests per time window (default 10, set 0 to disable)
+EMBEDDING_RATE_LIMIT=10
+
+# 速率限制时间窗口（秒，默认60）
+# Rate limit time window in seconds (default 60)
+EMBEDDING_RATE_WINDOW=60
 
 # ----------------------------------------------------------------------------
 # 伏笔分析器配置
@@ -289,24 +299,30 @@ FORESHADOWING_AUTO_PLANT=true
 # Automatically resolve detected foreshadowing (recommend false)
 FORESHADOWING_AUTO_RESOLVE=false
 
-# 获取伏笔时返回的最大数量 / Max foreshadowings returned per query
+# 伏笔召回数量（构建上下文时返回的伏笔数量）
+# Number of foreshadowings to return when building context
 FORESHADOWING_MAX_RETURN=10
 
-# 活跃伏笔上限（超出后自动归档最旧的） / Max active foreshadowings (auto-archive oldest)
+# 活跃伏笔数量上限（超出时自动归档低优先级的伏笔）
+# Max active foreshadowings (auto-archive low-priority ones when exceeded)
 FORESHADOWING_MAX_ACTIVE=50
 
 # ----------------------------------------------------------------------------
-# 持久条件配置
+# 持久条件系统配置
 # Persistent Context Configuration
 # ----------------------------------------------------------------------------
 # 条件提取触发间隔（每N轮对话触发一次LLM提取，最小1）
 # Context extraction trigger interval (trigger every N turns, minimum 1)
 CONTEXT_TRIGGER_INTERVAL=5
 
-# 每种类型最大条件数 / Max contexts per type
+# 对话获取范围（分析时获取的历史轮数，确保有足够上下文）
+# Max context turns for analysis (history turns to fetch for analysis)
+CONTEXT_MAX_CONTEXT_TURNS=20
+
+# 每类型最大条件数 / Max conditions per type
 CONTEXT_MAX_PER_TYPE=10
 
-# 总条件数上限 / Max total contexts
+# 条件总数上限 / Max total conditions
 CONTEXT_MAX_TOTAL=100
 
 # 置信度衰减开始天数 / Days before decay starts
@@ -315,41 +331,41 @@ CONTEXT_DECAY_DAYS=14
 # 每次衰减比例 (0.0-1.0) / Decay rate per check
 CONTEXT_DECAY_RATE=0.05
 
-# 最低置信度阈值（低于此值自动归档） / Min confidence (below this auto-archive)
+# 最低置信度（低于此值自动归档）/ Min confidence before archive
 CONTEXT_MIN_CONFIDENCE=0.1
 
 # ----------------------------------------------------------------------------
-# 智能去重配置
-# Smart Deduplication Configuration
-# ----------------------------------------------------------------------------
-# 是否启用 Embedding 去重 (true/false) / Enable embedding-based deduplication
-DEDUP_EMBEDDING_ENABLED=true
-
-# 高相似度阈值（>=此值自动合并） / High similarity threshold (auto-merge)
-DEDUP_HIGH_THRESHOLD=0.85
-
-# 低相似度阈值（<此值视为不同） / Low similarity threshold (treat as different)
-DEDUP_LOW_THRESHOLD=0.70
-
-# ----------------------------------------------------------------------------
 # 上下文构建配置（100%不遗忘保证）
-# Context Build Configuration (100% Memory Guarantee)
+# Context Building Configuration (100% Memory Guarantee)
 # ----------------------------------------------------------------------------
-# 对话提取最大轮次（用于持久条件提取和伏笔分析）
-# Max conversation turns for extraction (persistent context and foreshadowing analysis)
-CONTEXT_MAX_CONTEXT_TURNS=20
-
-# build_context 默认包含最近对话轮次
-# Default recent turns included in build_context
+# 构建上下文时包含的最近对话数（确保对话连贯性）
+# Recent turns to include when building context
 BUILD_CONTEXT_INCLUDE_RECENT=10
 
-# 启用主动提醒（长期未提及的重要信息会主动提醒）
-# Enable proactive reminder for long-unmentioned important information
+# 是否启用主动提醒（重要信息长期未提及时主动提醒AI）
+# Enable proactive reminders for important info not mentioned for a while
 PROACTIVE_REMINDER_ENABLED=true
 
-# 主动提醒触发轮次阈值（高重要性减半）
-# Proactive reminder threshold turns (halved for high importance)
+# 主动提醒阈值（超过多少轮未提及则触发提醒）
+# Turns threshold to trigger proactive reminder
 PROACTIVE_REMINDER_TURNS=50
+
+# ----------------------------------------------------------------------------
+# 智能去重配置（持久条件和伏笔系统）
+# Smart Deduplication Configuration (Persistent Context & Foreshadowing)
+# ----------------------------------------------------------------------------
+# 是否启用 Embedding 语义去重 (true/false)
+# 启用后使用向量相似度判断重复，更智能；禁用则使用简单词重叠
+# Enable Embedding-based semantic deduplication
+DEDUP_EMBEDDING_ENABLED=true
+
+# 高相似度阈值：超过此值直接合并（0.0-1.0，推荐0.85）
+# High similarity threshold: auto-merge when exceeded (recommend 0.85)
+DEDUP_HIGH_THRESHOLD=0.85
+
+# 低相似度阈值：低于此值视为不相似（0.0-1.0，推荐0.70）
+# Low similarity threshold: considered different when below (recommend 0.70)
+DEDUP_LOW_THRESHOLD=0.70
 
 # ============================================================================
 # v4.0 Phase 1/2 新增配置
@@ -361,15 +377,19 @@ PROACTIVE_REMINDER_TURNS=50
 # Temporal Knowledge Graph Configuration
 # ----------------------------------------------------------------------------
 # 是否启用时态知识图谱（追踪事实随时间的变化）
+# Enable temporal knowledge graph (track facts over time)
 TEMPORAL_GRAPH_ENABLED=true
 
 # 图谱存储后端: file(本地JSON), neo4j, falkordb
+# Graph storage backend: file(local JSON), neo4j, falkordb
 TEMPORAL_GRAPH_BACKEND=file
 
 # 时态信息衰减率（0.0-1.0，值越大衰减越快）
+# Temporal decay rate (0.0-1.0, higher = faster decay)
 TEMPORAL_DECAY_RATE=0.1
 
 # 保留的最大时态历史记录数
+# Max temporal history records to keep
 TEMPORAL_MAX_HISTORY=1000
 
 # ----------------------------------------------------------------------------
@@ -377,24 +397,39 @@ TEMPORAL_MAX_HISTORY=1000
 # Contradiction Detection & Management Configuration
 # ----------------------------------------------------------------------------
 # 是否启用矛盾检测
+# Enable contradiction detection
 CONTRADICTION_DETECTION_ENABLED=true
 
 # 是否自动解决矛盾（推荐 false，让用户确认）
+# Auto-resolve contradictions (recommend false, let user confirm)
 CONTRADICTION_AUTO_RESOLVE=false
 
 # 检测策略: RULE(规则), LLM(大模型判断), MIXED(混合), AUTO(自动选择)
+# Detection strategy: RULE/LLM/MIXED/AUTO (HYBRID is deprecated alias for MIXED)
 CONTRADICTION_DETECTION_STRATEGY=MIXED
 
 # 相似度阈值（用于检测潜在矛盾，0.0-1.0）
+# Similarity threshold for detecting potential contradictions
 CONTRADICTION_SIMILARITY_THRESHOLD=0.8
 
 # ----------------------------------------------------------------------------
 # 全文检索配置 (BM25)
 # Full-text Search Configuration (BM25)
 # ----------------------------------------------------------------------------
+# 是否启用 BM25 全文检索
+# Enable BM25 full-text search
 FULLTEXT_ENABLED=true
+
+# BM25 k1 参数（词频饱和度，推荐 1.2-2.0）
+# BM25 k1 parameter (term frequency saturation)
 FULLTEXT_K1=1.5
+
+# BM25 b 参数（文档长度归一化，0.0-1.0）
+# BM25 b parameter (document length normalization)
 FULLTEXT_B=0.75
+
+# 全文检索在混合搜索中的权重（0.0-1.0）
+# Full-text search weight in hybrid search
 FULLTEXT_WEIGHT=0.3
 
 # ----------------------------------------------------------------------------
@@ -402,26 +437,55 @@ FULLTEXT_WEIGHT=0.3
 # Smart Extractor Configuration
 # ----------------------------------------------------------------------------
 # 抽取模式: RULES(规则), ADAPTIVE(自适应), LLM(全LLM)
+# Extraction mode: RULES/ADAPTIVE/LLM (LOCAL/HYBRID/LLM_FULL are deprecated aliases)
 SMART_EXTRACTOR_MODE=ADAPTIVE
+
+# 复杂度阈值（超过此值使用 LLM 辅助抽取，0.0-1.0）
+# Complexity threshold (use LLM when exceeded)
 SMART_EXTRACTOR_COMPLEXITY_THRESHOLD=0.6
+
+# 是否启用时态检测（识别时间相关信息）
+# Enable temporal detection
 SMART_EXTRACTOR_ENABLE_TEMPORAL=true
 
 # ----------------------------------------------------------------------------
 # 预算管理配置 (BudgetManager)
 # Budget Management Configuration
 # ----------------------------------------------------------------------------
+# 每日预算上限（美元，0=无限制）
+# Daily budget limit in USD (0 = unlimited)
 BUDGET_DAILY_LIMIT=0
+
+# 每小时预算上限（美元，0=无限制）
+# Hourly budget limit in USD (0 = unlimited)
 BUDGET_HOURLY_LIMIT=0
+
+# 保留预算比例（为重要操作预留的预算比例，0.0-1.0）
+# Reserve budget ratio for critical operations
 BUDGET_RESERVE=0.1
+
+# 预算警告阈值（使用量超过此比例时发出警告，0.0-1.0）
+# Budget alert threshold (warn when usage exceeds this ratio)
 BUDGET_ALERT_THRESHOLD=0.8
 
 # ----------------------------------------------------------------------------
 # 三阶段去重配置 (ThreeStageDeduplicator)
 # Three-Stage Deduplication Configuration
 # ----------------------------------------------------------------------------
+# Jaccard 相似度阈值（阶段1 MinHash+LSH，0.0-1.0）
+# Jaccard similarity threshold (Stage 1)
 DEDUP_JACCARD_THRESHOLD=0.7
+
+# 语义相似度高阈值（阶段2，超过此值直接合并）
+# Semantic similarity high threshold (Stage 2, auto-merge when exceeded)
 DEDUP_SEMANTIC_THRESHOLD=0.85
+
+# 语义相似度低阈值（阶段2，低于此值视为不同）
+# Semantic similarity low threshold (Stage 2, considered different when below)
 DEDUP_SEMANTIC_LOW_THRESHOLD=0.70
+
+# 是否启用 LLM 确认（阶段3，用于边界情况）
+# Enable LLM confirmation (Stage 3, for borderline cases)
 DEDUP_LLM_ENABLED=false
 
 # ============================================================================
@@ -429,23 +493,55 @@ DEDUP_LLM_ENABLED=false
 # v4.0 Phase 3 Eleven-Layer Retriever Configuration
 # ============================================================================
 
-# 主开关 / Master Switch
+# ----------------------------------------------------------------------------
+# 主开关
+# Master Switch
+# ----------------------------------------------------------------------------
+# 是否启用十一层检索器（替代默认的八层检索器）
+# Enable eleven-layer retriever (replaces default eight-layer)
 ELEVEN_LAYER_RETRIEVER_ENABLED=false
 
-# 层开关 / Layer Enable/Disable
+# ----------------------------------------------------------------------------
+# 层开关配置
+# Layer Enable/Disable Configuration
+# ----------------------------------------------------------------------------
+# L1: Bloom Filter 快速否定（极低成本排除不相关记忆）
 RETRIEVAL_L1_BLOOM_ENABLED=true
+
+# L2: 时态过滤（根据时间范围筛选，需要 TEMPORAL_GRAPH_ENABLED=true）
 RETRIEVAL_L2_TEMPORAL_ENABLED=true
+
+# L3: 倒排索引（关键词匹配）
 RETRIEVAL_L3_INVERTED_ENABLED=true
+
+# L4: 实体索引（命名实体匹配）
 RETRIEVAL_L4_ENTITY_ENABLED=true
+
+# L5: 知识图谱遍历（实体关系扩展，需要 TEMPORAL_GRAPH_ENABLED=true）
 RETRIEVAL_L5_GRAPH_ENABLED=true
+
+# L6: N-gram 匹配（模糊文本匹配）
 RETRIEVAL_L6_NGRAM_ENABLED=true
+
+# L7: 向量粗排（ANN 近似最近邻）
 RETRIEVAL_L7_VECTOR_COARSE_ENABLED=true
+
+# L8: 向量精排（精确相似度计算）
 RETRIEVAL_L8_VECTOR_FINE_ENABLED=true
+
+# L9: 重排序（综合评分）
 RETRIEVAL_L9_RERANK_ENABLED=true
+
+# L10: CrossEncoder 精排（深度语义匹配，需要 sentence-transformers）
 RETRIEVAL_L10_CROSS_ENCODER_ENABLED=false
+
+# L11: LLM 过滤（大模型最终确认，消耗 API）
 RETRIEVAL_L11_LLM_ENABLED=false
 
-# Top-K 配置 / Top-K Configuration
+# ----------------------------------------------------------------------------
+# Top-K 配置（每层返回的候选数量）
+# Top-K Configuration (candidates returned per layer)
+# ----------------------------------------------------------------------------
 RETRIEVAL_L2_TEMPORAL_TOP_K=500
 RETRIEVAL_L3_INVERTED_TOP_K=100
 RETRIEVAL_L4_ENTITY_TOP_K=50
@@ -455,22 +551,47 @@ RETRIEVAL_L7_VECTOR_TOP_K=200
 RETRIEVAL_L10_CROSS_ENCODER_TOP_K=50
 RETRIEVAL_L11_LLM_TOP_K=20
 
-# 阈值与最终输出 / Thresholds and Final Output
+# ----------------------------------------------------------------------------
+# 阈值与最终输出配置
+# Thresholds and Final Output Configuration
+# ----------------------------------------------------------------------------
+# 精排阈值（进入精排阶段的候选数）
 RETRIEVAL_FINE_RANK_THRESHOLD=100
+
+# 最终返回的记忆数量
 RETRIEVAL_FINAL_TOP_K=20
 
-# L5 图遍历配置 / L5 Graph Traversal Configuration
+# ----------------------------------------------------------------------------
+# L5 知识图谱遍历配置
+# L5 Knowledge Graph Traversal Configuration
+# ----------------------------------------------------------------------------
+# 图遍历最大深度
 RETRIEVAL_L5_GRAPH_MAX_DEPTH=2
+
+# 图遍历起始实体数量
 RETRIEVAL_L5_GRAPH_MAX_ENTITIES=3
+
+# 遍历方向: both(双向), outgoing(出边), incoming(入边)
 RETRIEVAL_L5_GRAPH_DIRECTION=both
 
-# L10 CrossEncoder 配置 / L10 CrossEncoder Configuration
+# ----------------------------------------------------------------------------
+# L10 CrossEncoder 配置
+# L10 CrossEncoder Configuration
+# ----------------------------------------------------------------------------
+# CrossEncoder 模型名称（需要安装 sentence-transformers）
 RETRIEVAL_L10_CROSS_ENCODER_MODEL=cross-encoder/ms-marco-MiniLM-L-6-v2
 
-# L11 LLM 配置 / L11 LLM Configuration
+# ----------------------------------------------------------------------------
+# L11 LLM 配置
+# L11 LLM Configuration
+# ----------------------------------------------------------------------------
+# LLM 判断超时时间（秒）
 RETRIEVAL_L11_LLM_TIMEOUT=10.0
 
-# 权重配置 / Weight Configuration
+# ----------------------------------------------------------------------------
+# 权重配置（调整各检索层的相对权重）
+# Weight Configuration (adjust relative weight of each layer)
+# ----------------------------------------------------------------------------
 RETRIEVAL_WEIGHT_INVERTED=1.0
 RETRIEVAL_WEIGHT_ENTITY=1.2
 RETRIEVAL_WEIGHT_GRAPH=1.0
