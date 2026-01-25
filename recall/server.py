@@ -2521,6 +2521,32 @@ async def list_contradictions(
         }
 
 
+@app.get("/v1/contradictions/stats", tags=["Contradictions"])
+async def get_contradiction_stats(user_id: str = Query(default="default", description="用户ID")):
+    """获取矛盾统计信息"""
+    engine = get_engine()
+    
+    if not hasattr(engine, 'contradiction_manager') or engine.contradiction_manager is None:
+        return {
+            "success": False,
+            "error": "矛盾管理器未启用",
+            "stats": {}
+        }
+    
+    try:
+        stats = engine.contradiction_manager.get_stats()
+        return {
+            "success": True,
+            "stats": stats
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "stats": {}
+        }
+
+
 @app.get("/v1/contradictions/{contradiction_id}", tags=["Contradictions"])
 async def get_contradiction(contradiction_id: str):
     """获取单个矛盾详情"""
@@ -2584,32 +2610,6 @@ async def resolve_contradiction(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/v1/contradictions/stats", tags=["Contradictions"])
-async def get_contradiction_stats(user_id: str = Query(default="default", description="用户ID")):
-    """获取矛盾统计信息"""
-    engine = get_engine()
-    
-    if not hasattr(engine, 'contradiction_manager') or engine.contradiction_manager is None:
-        return {
-            "success": False,
-            "error": "矛盾管理器未启用",
-            "stats": {}
-        }
-    
-    try:
-        stats = engine.contradiction_manager.get_stats()
-        return {
-            "success": True,
-            "stats": stats
-        }
-    except Exception as e:
-        return {
-            "success": False,
-            "error": str(e),
-            "stats": {}
-        }
 
 
 # ==================== v4.0 全文检索 API ====================
@@ -2965,6 +2965,49 @@ async def get_entity_neighbors(
 
 
 # ==================== 实体 API ====================
+
+@app.get("/v1/entities", tags=["Entities"])
+async def list_entities(
+    user_id: str = Query(default="default", description="用户ID"),
+    character_id: str = Query(default="default", description="角色ID"),
+    limit: int = Query(default=100, description="最大返回数量")
+):
+    """获取用户的实体列表
+    
+    返回该用户/角色组合下提取到的所有实体。
+    """
+    engine = get_engine()
+    
+    # 从实体索引获取所有实体
+    entities = []
+    if engine._entity_index:
+        # 获取该用户的所有记忆 ID
+        scope = engine.storage.get_scope(user_id)
+        user_memory_ids = set()
+        for mem in scope._memories:
+            mem_id = mem.get('metadata', {}).get('id', '')
+            if mem_id:
+                user_memory_ids.add(mem_id)
+        
+        # 从索引获取实体，过滤出属于当前用户的
+        # 注意：entities 属性是 Dict[str, IndexedEntity] 即 id → entity
+        for entity_id, indexed_entity in engine._entity_index.entities.items():
+            # 检查该实体是否与当前用户的记忆相关
+            user_turns = [t for t in indexed_entity.turn_references if t in user_memory_ids]
+            if user_turns:
+                entities.append({
+                    "name": indexed_entity.name,
+                    "type": indexed_entity.entity_type if hasattr(indexed_entity, 'entity_type') else "UNKNOWN",
+                    "aliases": indexed_entity.aliases if hasattr(indexed_entity, 'aliases') else [],
+                    "occurrence_count": len(user_turns),
+                    "related_turns": user_turns[:5]  # 只返回前5个相关记忆ID
+                })
+    
+    # 按出现次数排序
+    entities.sort(key=lambda e: -e.get('occurrence_count', 0))
+    
+    return entities[:limit]
+
 
 @app.get("/v1/entities/{name}", tags=["Entities"])
 async def get_entity(name: str):

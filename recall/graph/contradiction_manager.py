@@ -571,6 +571,53 @@ class ContradictionManager:
         """获取已解决矛盾"""
         return self.resolved[-limit:]
     
+    def get_contradiction(self, contradiction_id: str) -> Optional[Contradiction]:
+        """获取单个矛盾记录
+        
+        Args:
+            contradiction_id: 矛盾 ID
+            
+        Returns:
+            Contradiction 对象，不存在则返回 None
+        """
+        # 先从待处理中查找
+        for record in self.pending:
+            if record.contradiction.id == contradiction_id:
+                return record.contradiction
+        # 再从已解决中查找
+        for record in self.resolved:
+            if record.contradiction.id == contradiction_id:
+                return record.contradiction
+        return None
+    
+    def get_contradictions(
+        self, 
+        status: Optional[str] = None, 
+        limit: int = 100
+    ) -> List[Contradiction]:
+        """获取矛盾列表
+        
+        Args:
+            status: 过滤状态 ('pending', 'resolved', None=全部)
+            limit: 最大返回数量
+            
+        Returns:
+            矛盾列表
+        """
+        results = []
+        
+        if status is None or status == 'pending':
+            results.extend([r.contradiction for r in self.pending])
+        
+        if status is None or status == 'resolved':
+            results.extend([r.contradiction for r in self.resolved[-limit:]])
+        
+        return results[:limit]
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """获取统计信息（API 兼容方法）"""
+        return self.stats()
+    
     def stats(self) -> Dict[str, Any]:
         """获取统计信息"""
         return {

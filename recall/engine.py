@@ -1001,18 +1001,32 @@ class RecallEngine:
             # default 使用 retriever 的默认配置
         
         # 4. 执行检索（传递 Phase 3 新参数）
+        # 【BUG-003 修复】先获取当前用户的所有记忆 ID，用于后续过滤
+        scope = self.storage.get_scope(user_id)
+        user_memory_ids = set()
+        for mem in scope._memories:
+            mem_id = mem.get('metadata', {}).get('id', '')
+            if mem_id:
+                user_memory_ids.add(mem_id)
+        
+        # 从全局索引检索（可能包含其他用户的结果）
         retrieval_results = self.retriever.retrieve(
             query=query,
             entities=entities,
             keywords=keywords,
-            top_k=top_k,
+            top_k=top_k * 3,  # 多取一些，因为要过滤
             filters=filters,
             temporal_context=temporal_context,
             config=retrieval_config
         )
         
-        # 4. 补充从存储获取
-        scope = self.storage.get_scope(user_id)
+        # 【BUG-003 修复】过滤结果，只保留属于当前用户的记忆
+        retrieval_results = [
+            r for r in retrieval_results 
+            if r.id in user_memory_ids
+        ]
+        
+        # 4.5 补充从存储获取（已经是用户隔离的）
         stored_memories = scope.search(query, limit=top_k)
         
         # 5. 合并结果
