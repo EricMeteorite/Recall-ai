@@ -6,6 +6,26 @@ import json
 from typing import List, Dict, Set, Optional
 
 
+# Windows GBK 编码兼容的安全打印函数
+def _safe_print(msg: str) -> None:
+    """安全打印函数，替换 emoji 为 ASCII 等价物以避免 Windows GBK 编码错误"""
+    emoji_map = {
+        '📥': '[IN]', '📤': '[OUT]', '🔍': '[SEARCH]', '✅': '[OK]', '❌': '[FAIL]',
+        '⚠️': '[WARN]', '💾': '[SAVE]', '🗃️': '[DB]', '🧹': '[CLEAN]', '📊': '[STATS]',
+        '🔄': '[SYNC]', '📦': '[PKG]', '🚀': '[START]', '🎯': '[TARGET]', '💡': '[HINT]',
+        '🔧': '[FIX]', '📝': '[NOTE]', '🎉': '[DONE]', '⏱️': '[TIME]', '🌐': '[NET]',
+        '🧠': '[BRAIN]', '💬': '[CHAT]', '🏷️': '[TAG]', '📁': '[DIR]', '🔒': '[LOCK]',
+        '🌱': '[PLANT]', '🗑️': '[DEL]', '💫': '[MAGIC]', '🎭': '[MASK]', '📖': '[BOOK]',
+        '⚡': '[FAST]', '🔥': '[HOT]', '💎': '[GEM]', '🌟': '[STAR]', '🎨': '[ART]'
+    }
+    for emoji, ascii_equiv in emoji_map.items():
+        msg = msg.replace(emoji, ascii_equiv)
+    try:
+        print(msg)
+    except UnicodeEncodeError:
+        print(msg.encode('ascii', errors='replace').decode('ascii'))
+
+
 class OptimizedNgramIndex:
     """优化的N-gram索引 - 名词短语索引 + 原文兜底
     
@@ -86,7 +106,7 @@ class OptimizedNgramIndex:
             with open(self._index_file, 'w', encoding='utf-8') as f:
                 json.dump(self.noun_phrases, f, ensure_ascii=False)
         except Exception as e:
-            print(f"[NgramIndex] 保存名词短语索引失败: {e}")
+            _safe_print(f"[NgramIndex] 保存名词短语索引失败: {e}")
     
     def _extract_noun_phrases(self, content: str) -> List[str]:
         """提取名词短语（而非所有n-gram）"""
@@ -203,9 +223,9 @@ class OptimizedNgramIndex:
             try:
                 with open(self._index_file, 'r', encoding='utf-8') as f:
                     self.noun_phrases = json.load(f)
-                print(f"[NgramIndex] 已加载 {len(self.noun_phrases)} 个名词短语索引")
+                _safe_print(f"[NgramIndex] 已加载 {len(self.noun_phrases)} 个名词短语索引")
             except Exception as e:
-                print(f"[NgramIndex] 加载索引失败: {e}")
+                _safe_print(f"[NgramIndex] 加载索引失败: {e}")
         
         # 加载原文内容（JSONL 格式，支持增量写入）
         if self._raw_content_file and os.path.exists(self._raw_content_file):
@@ -219,9 +239,9 @@ class OptimizedNgramIndex:
                                 self._raw_content[item['id']] = item['content']
                             except json.JSONDecodeError:
                                 continue
-                print(f"[NgramIndex] 已加载 {len(self._raw_content)} 条原文内容")
+                _safe_print(f"[NgramIndex] 已加载 {len(self._raw_content)} 条原文内容")
             except Exception as e:
-                print(f"[NgramIndex] 加载原文失败: {e}")
+                _safe_print(f"[NgramIndex] 加载原文失败: {e}")
     
     def save(self):
         """保存索引数据到磁盘"""
@@ -236,7 +256,7 @@ class OptimizedNgramIndex:
                 with open(self._index_file, 'w', encoding='utf-8') as f:
                     json.dump(self.noun_phrases, f, ensure_ascii=False)
             except Exception as e:
-                print(f"[NgramIndex] 保存索引失败: {e}")
+                _safe_print(f"[NgramIndex] 保存索引失败: {e}")
         
         # 保存原文内容（完全重写，避免重复）
         if self._raw_content_file:
@@ -245,7 +265,7 @@ class OptimizedNgramIndex:
                     for memory_id, content in self._raw_content.items():
                         f.write(json.dumps({'id': memory_id, 'content': content}, ensure_ascii=False) + '\n')
             except Exception as e:
-                print(f"[NgramIndex] 保存原文失败: {e}")
+                _safe_print(f"[NgramIndex] 保存原文失败: {e}")
     
     def append_raw_content(self, memory_id: str, content: str):
         """增量追加原文（高效写入，不用每次全量保存）"""
@@ -256,7 +276,7 @@ class OptimizedNgramIndex:
                 with open(self._raw_content_file, 'a', encoding='utf-8') as f:
                     f.write(json.dumps({'id': memory_id, 'content': content}, ensure_ascii=False) + '\n')
             except Exception as e:
-                print(f"[NgramIndex] 追加原文失败: {e}")
+                _safe_print(f"[NgramIndex] 追加原文失败: {e}")
     
     def __len__(self) -> int:
         """返回索引的原文数量"""

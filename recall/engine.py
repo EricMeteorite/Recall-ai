@@ -42,6 +42,26 @@ from .embedding import EmbeddingConfig
 from .embedding.base import EmbeddingBackendType
 
 
+# Windows GBK 编码兼容的安全打印函数
+def _safe_print(msg: str) -> None:
+    """安全打印函数，替换 emoji 为 ASCII 等价物以避免 Windows GBK 编码错误"""
+    emoji_map = {
+        '📥': '[IN]', '📤': '[OUT]', '🔍': '[SEARCH]', '✅': '[OK]', '❌': '[FAIL]',
+        '⚠️': '[WARN]', '💾': '[SAVE]', '🗃️': '[DB]', '🧹': '[CLEAN]', '📊': '[STATS]',
+        '🔄': '[SYNC]', '📦': '[PKG]', '🚀': '[START]', '🎯': '[TARGET]', '💡': '[HINT]',
+        '🔧': '[FIX]', '📝': '[NOTE]', '🎉': '[DONE]', '⏱️': '[TIME]', '🌐': '[NET]',
+        '🧠': '[BRAIN]', '💬': '[CHAT]', '🏷️': '[TAG]', '📁': '[DIR]', '🔒': '[LOCK]',
+        '🌱': '[PLANT]', '🗑️': '[DEL]', '💫': '[MAGIC]', '🎭': '[MASK]', '📖': '[BOOK]',
+        '⚡': '[FAST]', '🔥': '[HOT]', '💎': '[GEM]', '🌟': '[STAR]', '🎨': '[ART]'
+    }
+    for emoji, ascii_equiv in emoji_map.items():
+        msg = msg.replace(emoji, ascii_equiv)
+    try:
+        print(msg)
+    except UnicodeEncodeError:
+        print(msg.encode('ascii', errors='replace').decode('ascii'))
+
+
 @dataclass
 class AddResult:
     """添加记忆结果"""
@@ -163,7 +183,7 @@ class RecallEngine:
         
         # 打印模式信息
         mode = self._get_mode_name()
-        print(f"[Recall v{__version__}] 引擎初始化完成 ({mode})")
+        _safe_print(f"[Recall v{__version__}] 引擎初始化完成 ({mode})")
     
     def _get_mode_name(self) -> str:
         """获取当前模式名称"""
@@ -193,9 +213,9 @@ class RecallEngine:
         self.llm_client = LLMClient(model=model, api_key=api_key, api_base=api_base) if api_key else None
         
         if self.llm_client:
-            print(f"[Recall] LLM 客户端已初始化 (模型: {model})")
+            _safe_print(f"[Recall] LLM 客户端已初始化 (模型: {model})")
         else:
-            print("[Recall] LLM 客户端未初始化（未配置 LLM_API_KEY）")
+            _safe_print("[Recall] LLM 客户端未初始化（未配置 LLM_API_KEY）")
         
         # 存储层
         self.storage = MultiTenantStorage(
@@ -336,9 +356,9 @@ class RecallEngine:
                     data_path=os.path.join(self.data_root, 'data'),
                     backend=graph_backend
                 )
-                print(f"[Recall v4.0] 时态知识图谱已启用 (backend={graph_backend})")
+                _safe_print(f"[Recall v4.0] 时态知识图谱已启用 (backend={graph_backend})")
             except Exception as e:
-                print(f"[Recall v4.0] 时态知识图谱初始化失败（不影响核心功能）: {e}")
+                _safe_print(f"[Recall v4.0] 时态知识图谱初始化失败（不影响核心功能）: {e}")
         
         # 2. 矛盾检测管理器
         if contradiction_enabled:
@@ -365,9 +385,9 @@ class RecallEngine:
                     strategy=strategy,
                     llm_client=self.llm_client
                 )
-                print(f"[Recall v4.0] 矛盾检测已启用 (策略: {strategy.value})")
+                _safe_print(f"[Recall v4.0] 矛盾检测已启用 (策略: {strategy.value})")
             except Exception as e:
-                print(f"[Recall v4.0] 矛盾检测初始化失败（不影响核心功能）: {e}")
+                _safe_print(f"[Recall v4.0] 矛盾检测初始化失败（不影响核心功能）: {e}")
         
         # 3. 全文检索索引 (BM25)
         if fulltext_enabled:
@@ -380,9 +400,9 @@ class RecallEngine:
                     data_path=os.path.join(self.data_root, 'index', 'fulltext'),
                     config=BM25Config(k1=k1, b=b)
                 )
-                print(f"[Recall v4.0] 全文检索已启用 (BM25 k1={k1}, b={b})")
+                _safe_print(f"[Recall v4.0] 全文检索已启用 (BM25 k1={k1}, b={b})")
             except Exception as e:
-                print(f"[Recall v4.0] 全文检索初始化失败（不影响核心功能）: {e}")
+                _safe_print(f"[Recall v4.0] 全文检索初始化失败（不影响核心功能）: {e}")
         
         # 4. Phase 3: 十一层检索器（可选升级）
         eleven_layer_enabled = os.environ.get('ELEVEN_LAYER_RETRIEVER_ENABLED', 'false').lower() == 'true'
@@ -447,10 +467,10 @@ class RecallEngine:
                 layers_status.append("L11:LLM过滤")
             
             status_str = ", ".join(layers_status) if layers_status else "基础模式"
-            print(f"[Recall v4.0 Phase 3] 十一层检索器已启用 ({status_str})")
+            _safe_print(f"[Recall v4.0 Phase 3] 十一层检索器已启用 ({status_str})")
             
         except Exception as e:
-            print(f"[Recall v4.0 Phase 3] 十一层检索器初始化失败，回退到八层检索器: {e}")
+            _safe_print(f"[Recall v4.0 Phase 3] 十一层检索器初始化失败，回退到八层检索器: {e}")
             # 失败时不修改 self.retriever，保持 EightLayerRetriever
     
     def _load_cross_encoder(self):
@@ -467,10 +487,10 @@ class RecallEngine:
             )
             return CrossEncoder(model_name)
         except ImportError:
-            print("[Recall v4.0 Phase 3] sentence-transformers 未安装，CrossEncoder 不可用")
+            _safe_print("[Recall v4.0 Phase 3] sentence-transformers 未安装，CrossEncoder 不可用")
             return None
         except Exception as e:
-            print(f"[Recall v4.0 Phase 3] CrossEncoder 加载失败: {e}")
+            _safe_print(f"[Recall v4.0 Phase 3] CrossEncoder 加载失败: {e}")
             return None
     
     def _check_and_rebuild_index(self):
@@ -649,7 +669,7 @@ class RecallEngine:
             
             return memories
         except Exception as e:
-            print(f"[Recall] 获取记忆失败: {e}")
+            _safe_print(f"[Recall] 获取记忆失败: {e}")
             return []
     
     def _get_memory_content_by_id(self, memory_id: str) -> Optional[str]:
@@ -722,10 +742,10 @@ class RecallEngine:
                                     self.retriever.cache_content(mem_id, content)
                                     count += 1
                     except Exception as e:
-                        print(f"[Recall] 加载 {memories_file} 失败: {e}")
+                        _safe_print(f"[Recall] 加载 {memories_file} 失败: {e}")
         
         if count > 0:
-            print(f"[Recall] 已恢复 {count} 条记忆内容到缓存")
+            _safe_print(f"[Recall] 已恢复 {count} 条记忆内容到缓存")
     
     def _warmup(self):
         """预热模型（仅 Local 模式）"""
@@ -781,7 +801,7 @@ class RecallEngine:
             for mem in existing_memories:
                 existing_content = mem.get('content', '').strip()
                 if existing_content == content_normalized:
-                    print(f"[Recall] 跳过重复记忆: content_len={len(content)}, user={user_id}")
+                    _safe_print(f"[Recall] 跳过重复记忆: content_len={len(content)}, user={user_id}")
                     return AddResult(
                         id=mem.get('metadata', {}).get('id', 'unknown'),
                         success=False,
@@ -808,7 +828,7 @@ class RecallEngine:
                     for v in consistency.violations:
                         warning_msg = v.description
                         consistency_warnings.append(warning_msg)
-                        print(f"[Recall] 一致性警告: {warning_msg}")
+                        _safe_print(f"[Recall] 一致性警告: {warning_msg}")
             
             # 4. 生成ID并存储
             memory_id = f"mem_{uuid.uuid4().hex[:12]}"
@@ -846,7 +866,7 @@ class RecallEngine:
                     'created_at': time.time()
                 })
             except Exception as e:
-                print(f"[Recall] Archive保存失败（不影响主流程）: {e}")
+                _safe_print(f"[Recall] Archive保存失败（不影响主流程）: {e}")
             
             # 5. 更新索引（失败不影响主流程）
             try:
@@ -871,14 +891,14 @@ class RecallEngine:
             except Exception as e:
                 # 打印更详细的错误信息
                 import traceback
-                print(f"[Recall] 索引更新失败（不影响主流程）: {type(e).__name__}: {e}")
+                _safe_print(f"[Recall] 索引更新失败（不影响主流程）: {type(e).__name__}: {e}")
                 traceback.print_exc()
             
             # 5.5 缓存内容到检索器（确保检索时能获取内容）
             try:
                 self.retriever.cache_content(memory_id, content)
             except Exception as e:
-                print(f"[Recall] 缓存更新失败（不影响主流程）: {type(e).__name__}: {e}")
+                _safe_print(f"[Recall] 缓存更新失败（不影响主流程）: {type(e).__name__}: {e}")
             
             # 5.6 更新长期记忆（L1 ConsolidatedMemory）
             # 每个实体都会被自动整合和验证
@@ -893,7 +913,7 @@ class RecallEngine:
                 )
                 self.consolidated_memory.add_or_update(consolidated_entity)
             except Exception as e:
-                print(f"[Recall] 长期记忆更新失败（不影响主流程）: {e}")
+                _safe_print(f"[Recall] 长期记忆更新失败（不影响主流程）: {e}")
             
             # 6. 更新知识图谱（失败不影响主流程）
             try:
@@ -907,7 +927,7 @@ class RecallEngine:
                         source_text=source_text
                     )
             except Exception as e:
-                print(f"[Recall] 知识图谱更新失败（不影响主流程）: {e}")
+                _safe_print(f"[Recall] 知识图谱更新失败（不影响主流程）: {e}")
             
             # 7. 自动提取持久条件（已移至 server.py 中处理，避免 character_id 传递问题）
             # 注意：之前这里调用 extract_from_text 时没有传递 character_id，
@@ -932,7 +952,7 @@ class RecallEngine:
             )
         
         except Exception as e:
-            print(f"[Recall] 添加记忆异常: {type(e).__name__}: {e}")
+            _safe_print(f"[Recall] 添加记忆异常: {type(e).__name__}: {e}")
             import traceback
             traceback.print_exc()
             return AddResult(
@@ -1197,9 +1217,9 @@ class RecallEngine:
         proactive_turns = int(_os.environ.get('PROACTIVE_REMINDER_TURNS', '50'))
         
         query_preview = query[:50].replace('\n', ' ') if len(query) > 50 else query.replace('\n', ' ')
-        print(f"[Recall][Engine] 📦 构建上下文: user={user_id}, char={character_id}")
-        print(f"[Recall][Engine]    查询: {query_preview}{'...' if len(query) > 50 else ''}")
-        print(f"[Recall][Engine]    参数: max_tokens={max_tokens}, recent={include_recent}, proactive={proactive_enabled}")
+        _safe_print(f"[Recall][Engine] 📦 构建上下文: user={user_id}, char={character_id}")
+        _safe_print(f"[Recall][Engine]    查询: {query_preview}{'...' if len(query) > 50 else ''}")
+        _safe_print(f"[Recall][Engine]    参数: max_tokens={max_tokens}, recent={include_recent}, proactive={proactive_enabled}")
         parts = []
         
         # ========== 0. 场景检测（决定检索策略）==========
@@ -1297,10 +1317,10 @@ class RecallEngine:
         
         elapsed = _time.time() - start_time
         total_len = sum(len(p) for p in parts)
-        print(f"[Recall][Engine] ✅ 构建完成: 耗时={elapsed:.3f}s")
-        print(f"[Recall][Engine]    层数={len(parts)}, 总长度={total_len}字符")
+        _safe_print(f"[Recall][Engine] ✅ 构建完成: 耗时={elapsed:.3f}s")
+        _safe_print(f"[Recall][Engine]    层数={len(parts)}, 总长度={total_len}字符")
         if parts:
-            print(f"[Recall][Engine]    包含: {[p[:20] + '...' for p in parts]}")
+            _safe_print(f"[Recall][Engine]    包含: {[p[:20] + '...' for p in parts]}")
         
         return "\n".join(parts)
     
@@ -2022,7 +2042,7 @@ class RecallEngine:
                 content = m.get('content', m.get('memory', ''))
                 if memory_id and content:
                     memories_to_index.append((memory_id, content))
-            print(f"[Recall] 重建向量索引: user={user_id}, 记忆数={len(memories_to_index)}")
+            _safe_print(f"[Recall] 重建向量索引: user={user_id}, 记忆数={len(memories_to_index)}")
         else:
             # 重建所有用户
             for scope_key, scope in self.storage._scopes.items():
@@ -2031,7 +2051,7 @@ class RecallEngine:
                     content = m.get('content', m.get('memory', ''))
                     if memory_id and content:
                         memories_to_index.append((memory_id, content))
-            print(f"[Recall] 重建向量索引: 全部用户, 记忆数={len(memories_to_index)}")
+            _safe_print(f"[Recall] 重建向量索引: 全部用户, 记忆数={len(memories_to_index)}")
         
         if not memories_to_index:
             return {
@@ -2163,7 +2183,7 @@ class RecallEngine:
         # 移动到整合层
         # TODO: 实现实际的整合逻辑
         
-        print(f"[Recall] 整合完成: {len(working)} -> {len(merged)}")
+        _safe_print(f"[Recall] 整合完成: {len(working)} -> {len(merged)}")
     
     def reset(self, user_id: Optional[str] = None):
         """重置（谨慎使用）"""
@@ -2178,7 +2198,7 @@ class RecallEngine:
             if not self.lightweight:
                 self._init_indexes()
         
-        print(f"[Recall] 重置完成")
+        _safe_print(f"[Recall] 重置完成")
     
     def close(self):
         """关闭引擎"""
@@ -2194,7 +2214,7 @@ class RecallEngine:
         if self._vector_index:
             self._vector_index.close()
         
-        print("[Recall] 引擎已关闭")
+        _safe_print("[Recall] 引擎已关闭")
 
 
 # 便捷函数

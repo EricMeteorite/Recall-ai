@@ -5,6 +5,27 @@ import sys
 import json
 from datetime import datetime
 
+# Windows GBK 编码兼容的安全打印函数
+def _safe_print(msg: str) -> None:
+    """安全打印函数，替换 emoji 为 ASCII 等价物以避免 Windows GBK 编码错误"""
+    emoji_map = {
+        '📥': '[IN]', '📤': '[OUT]', '🔍': '[SEARCH]', '✅': '[OK]', '❌': '[FAIL]',
+        '⚠️': '[WARN]', '💾': '[SAVE]', '🗃️': '[DB]', '🧹': '[CLEAN]', '📊': '[STATS]',
+        '🔄': '[SYNC]', '📦': '[PKG]', '🚀': '[START]', '🎯': '[TARGET]', '💡': '[HINT]',
+        '🔧': '[FIX]', '📝': '[NOTE]', '🎉': '[DONE]', '⏱️': '[TIME]', '🌐': '[NET]',
+        '🧠': '[BRAIN]', '💬': '[CHAT]', '🏷️': '[TAG]', '📁': '[DIR]', '🔒': '[LOCK]',
+        '🌱': '[PLANT]', '🗑️': '[DEL]', '💫': '[MAGIC]', '🎭': '[MASK]', '📖': '[BOOK]',
+        '⚡': '[FAST]', '🔥': '[HOT]', '💎': '[GEM]', '🌟': '[STAR]', '🎨': '[ART]'
+    }
+    for emoji, ascii_equiv in emoji_map.items():
+        msg = msg.replace(emoji, ascii_equiv)
+    try:
+        print(msg)
+    except UnicodeEncodeError:
+        print(msg.encode('ascii', errors='replace').decode('ascii'))
+
+
+
 
 class RecallInit:
     """初始化向导 - 简单3步，无痕安装（所有数据在项目目录内）"""
@@ -90,24 +111,24 @@ class RecallInit:
         self.setup_environment(base_path)
         root = self.ensure_directories(base_path)
         
-        print("🧠 欢迎使用 Recall - AI永久记忆系统")
-        print("=" * 40)
-        print(f"\n📂 数据目录：{root}")
-        print("📦 所有数据都存储在此目录内，删除项目文件夹即可完全卸载。")
-        print("   不会在用户目录或系统目录创建任何文件。")
-        print("   你需要自己的 AI API key 来调用大模型。\n")
+        _safe_print("🧠 欢迎使用 Recall - AI永久记忆系统")
+        _safe_print("=" * 40)
+        _safe_print(f"\n📂 数据目录：{root}")
+        _safe_print("📦 所有数据都存储在此目录内，删除项目文件夹即可完全卸载。")
+        _safe_print("   不会在用户目录或系统目录创建任何文件。")
+        _safe_print("   你需要自己的 AI API key 来调用大模型。\n")
         
         # 获取 API key（优先 LLM_API_KEY，兼容 OPENAI_API_KEY）
         api_key = os.environ.get('LLM_API_KEY') or os.environ.get('OPENAI_API_KEY')
         if not api_key:
-            print("支持的 API 提供商：")
-            print("  - OpenAI (sk-xxx)")
-            print("  - Claude (sk-ant-xxx)")
-            print("  - 其他兼容 OpenAI 格式的 API\n")
+            _safe_print("支持的 API 提供商：")
+            _safe_print("  - OpenAI (sk-xxx)")
+            _safe_print("  - Claude (sk-ant-xxx)")
+            _safe_print("  - 其他兼容 OpenAI 格式的 API\n")
             api_key = input("请输入你的 API key: ").strip()
         
         if not api_key:
-            print("⚠️  未设置 API key，Recall 将只提供记忆存储功能，无法自动总结。")
+            _safe_print("⚠️  未设置 API key，Recall 将只提供记忆存储功能，无法自动总结。")
         
         # 保存配置
         config = {
@@ -118,12 +139,12 @@ class RecallInit:
         }
         self._save_config(config, root)
         
-        print("\n✅ 初始化完成！")
-        print(f"   数据目录: {root}")
-        print("\n🗑️ 卸载方法：")
-        print(f"   1. pip uninstall recall-ai")
-        print(f"   2. 删除目录: {root}")
-        print("\n现在可以使用 'recall chat' 开始对话了！")
+        _safe_print("\n✅ 初始化完成！")
+        _safe_print(f"   数据目录: {root}")
+        _safe_print("\n🗑️ 卸载方法：")
+        _safe_print(f"   1. pip uninstall recall-ai")
+        _safe_print(f"   2. 删除目录: {root}")
+        _safe_print("\n现在可以使用 'recall chat' 开始对话了！")
         
         return config
     

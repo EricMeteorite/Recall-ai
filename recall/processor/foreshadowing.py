@@ -20,6 +20,27 @@ from typing import List, Optional, Dict, Any, Tuple
 from dataclasses import dataclass, field
 
 
+# Windows GBK 编码兼容的安全打印函数
+def _safe_print(msg: str) -> None:
+    """安全打印函数，替换 emoji 为 ASCII 等价物以避免 Windows GBK 编码错误"""
+    emoji_map = {
+        '📥': '[IN]', '📤': '[OUT]', '🔍': '[SEARCH]', '✅': '[OK]', '❌': '[FAIL]',
+        '⚠️': '[WARN]', '💾': '[SAVE]', '🗃️': '[DB]', '🧹': '[CLEAN]', '📊': '[STATS]',
+        '🔄': '[SYNC]', '📦': '[PKG]', '🚀': '[START]', '🎯': '[TARGET]', '💡': '[HINT]',
+        '🔧': '[FIX]', '📝': '[NOTE]', '🎉': '[DONE]', '⏱️': '[TIME]', '🌐': '[NET]',
+        '🧠': '[BRAIN]', '💬': '[CHAT]', '🏷️': '[TAG]', '📁': '[DIR]', '🔒': '[LOCK]',
+        '🌱': '[PLANT]', '🗑️': '[DEL]', '💫': '[MAGIC]', '🎭': '[MASK]', '📖': '[BOOK]'
+    }
+    for emoji, ascii_equiv in emoji_map.items():
+        msg = msg.replace(emoji, ascii_equiv)
+    try:
+        print(msg)
+    except UnicodeEncodeError:
+        print(msg.encode('ascii', errors='replace').decode('ascii'))
+
+
+
+
 class ForeshadowingStatus(Enum):
     """伏笔状态"""
     PLANTED = "planted"        # 已埋下
@@ -312,7 +333,7 @@ class ForeshadowingTracker:
                         for k, v in loaded.get('foreshadowings', {}).items()
                     }
                 except Exception as e:
-                    print(f"[Recall] 加载伏笔数据失败 ({user_id}/{character_id}): {e}")
+                    _safe_print(f"[Recall] 加载伏笔数据失败 ({user_id}/{character_id}): {e}")
         
         self._user_data[cache_key] = data
         return data
@@ -847,9 +868,9 @@ class ForeshadowingTracker:
         logger = logging.getLogger(__name__)
         
         content_preview = content[:50].replace('\n', ' ') if len(content) > 50 else content.replace('\n', ' ')
-        print(f"[ForeshadowingTracker] 🌱 埋下伏笔: user={user_id}, char={character_id}")
-        print(f"[ForeshadowingTracker]    内容: {content_preview}{'...' if len(content) > 50 else ''}")
-        print(f"[ForeshadowingTracker]    重要性={importance}, 实体={related_entities}")
+        _safe_print(f"[ForeshadowingTracker] 🌱 埋下伏笔: user={user_id}, char={character_id}")
+        _safe_print(f"[ForeshadowingTracker]    内容: {content_preview}{'...' if len(content) > 50 else ''}")
+        _safe_print(f"[ForeshadowingTracker]    重要性={importance}, 实体={related_entities}")
         
         # 1. 预计算Embedding
         new_embedding = self._get_embedding(content)
@@ -861,9 +882,9 @@ class ForeshadowingTracker:
         
         if similar:
             similar_preview = similar.content[:40].replace('\n', ' ')
-            print(f"[ForeshadowingTracker] 🔄 发现相似伏笔:")
-            print(f"[ForeshadowingTracker]    方法={sim_method}, 相似度={sim_score:.3f}")
-            print(f"[ForeshadowingTracker]    已有: {similar_preview}...")
+            _safe_print(f"[ForeshadowingTracker] 🔄 发现相似伏笔:")
+            _safe_print(f"[ForeshadowingTracker]    方法={sim_method}, 相似度={sim_score:.3f}")
+            _safe_print(f"[ForeshadowingTracker]    已有: {similar_preview}...")
             
             # 合并策略：增加重要性
             if sim_method == "exact":
@@ -915,7 +936,7 @@ class ForeshadowingTracker:
         user_data['foreshadowings'][foreshadowing_id] = foreshadowing
         self._save_user_data(user_id, character_id)
         
-        print(f"[ForeshadowingTracker] ✅ 新伏笔已创建: id={foreshadowing_id}")
+        _safe_print(f"[ForeshadowingTracker] ✅ 新伏笔已创建: id={foreshadowing_id}")
         
         # 检查是否超出活跃伏笔数量限制，如果超出则归档最旧的
         self._archive_overflow_foreshadowings(user_id, character_id)
@@ -949,7 +970,7 @@ class ForeshadowingTracker:
         foreshadowings = user_data.get('foreshadowings', {})
         
         if foreshadowing_id not in foreshadowings:
-            print(f"[ForeshadowingTracker] ❌ 解决失败: 伏笔不存在 id={foreshadowing_id}")
+            _safe_print(f"[ForeshadowingTracker] ❌ 解决失败: 伏笔不存在 id={foreshadowing_id}")
             return False
         
         fsh = foreshadowings[foreshadowing_id]
@@ -957,9 +978,9 @@ class ForeshadowingTracker:
         fsh.resolution = resolution
         fsh.resolved_at = time.time()
         
-        print(f"[ForeshadowingTracker] ✅ 伏笔已解决: id={foreshadowing_id}")
-        print(f"[ForeshadowingTracker]    内容: {fsh.content[:50]}...")
-        print(f"[ForeshadowingTracker]    解决: {resolution[:50]}..." if len(resolution) > 50 else f"[ForeshadowingTracker]    解决: {resolution}")
+        _safe_print(f"[ForeshadowingTracker] ✅ 伏笔已解决: id={foreshadowing_id}")
+        _safe_print(f"[ForeshadowingTracker]    内容: {fsh.content[:50]}...")
+        _safe_print(f"[ForeshadowingTracker]    解决: {resolution[:50]}..." if len(resolution) > 50 else f"[ForeshadowingTracker]    解决: {resolution}")
         
         # 归档已解决的伏笔并从活跃列表移除
         self._archive_foreshadowing(fsh, user_id, character_id)
@@ -975,14 +996,14 @@ class ForeshadowingTracker:
         foreshadowings = user_data.get('foreshadowings', {})
         
         if foreshadowing_id not in foreshadowings:
-            print(f"[ForeshadowingTracker] ❌ 放弃失败: 伏笔不存在 id={foreshadowing_id}")
+            _safe_print(f"[ForeshadowingTracker] ❌ 放弃失败: 伏笔不存在 id={foreshadowing_id}")
             return False
         
         fsh = foreshadowings[foreshadowing_id]
         fsh.status = ForeshadowingStatus.ABANDONED
         
-        print(f"[ForeshadowingTracker] 🗑️ 伏笔已放弃: id={foreshadowing_id}")
-        print(f"[ForeshadowingTracker]    内容: {fsh.content[:50]}...")
+        _safe_print(f"[ForeshadowingTracker] 🗑️ 伏笔已放弃: id={foreshadowing_id}")
+        _safe_print(f"[ForeshadowingTracker]    内容: {fsh.content[:50]}...")
         
         # 归档已放弃的伏笔并从活跃列表移除
         self._archive_foreshadowing(fsh, user_id, character_id)

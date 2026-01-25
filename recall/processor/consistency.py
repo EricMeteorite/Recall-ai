@@ -13,6 +13,27 @@ from typing import List, Dict, Any, Optional, Tuple, Set
 from dataclasses import dataclass, field
 from enum import Enum
 
+# Windows GBK 编码兼容的安全打印函数
+def _safe_print(msg: str) -> None:
+    """安全打印函数，替换 emoji 为 ASCII 等价物以避免 Windows GBK 编码错误"""
+    emoji_map = {
+        '📥': '[IN]', '📤': '[OUT]', '🔍': '[SEARCH]', '✅': '[OK]', '❌': '[FAIL]',
+        '⚠️': '[WARN]', '💾': '[SAVE]', '🗃️': '[DB]', '🧹': '[CLEAN]', '📊': '[STATS]',
+        '🔄': '[SYNC]', '📦': '[PKG]', '🚀': '[START]', '🎯': '[TARGET]', '💡': '[HINT]',
+        '🔧': '[FIX]', '📝': '[NOTE]', '🎉': '[DONE]', '⏱️': '[TIME]', '🌐': '[NET]',
+        '🧠': '[BRAIN]', '💬': '[CHAT]', '🏷️': '[TAG]', '📁': '[DIR]', '🔒': '[LOCK]',
+        '🌱': '[PLANT]', '🗑️': '[DEL]', '💫': '[MAGIC]', '🎭': '[MASK]', '📖': '[BOOK]',
+        '⚡': '[FAST]', '🔥': '[HOT]', '💎': '[GEM]', '🌟': '[STAR]', '🎨': '[ART]'
+    }
+    for emoji, ascii_equiv in emoji_map.items():
+        msg = msg.replace(emoji, ascii_equiv)
+    try:
+        print(msg)
+    except UnicodeEncodeError:
+        print(msg.encode('ascii', errors='replace').decode('ascii'))
+
+
+
 
 class ViolationType(Enum):
     """违规类型"""
@@ -1293,7 +1314,7 @@ class ConsistencyChecker:
             llm_client: LLMClient实例
         """
         self._llm_client = llm_client
-        print(f"[ConsistencyChecker] LLM客户端已设置，绝对规则检测已启用")
+        _safe_print(f"[ConsistencyChecker] LLM客户端已设置，绝对规则检测已启用")
     
     def _check_absolute_rules(self, content: str) -> List[Violation]:
         """使用LLM检测内容是否违反绝对规则
@@ -1311,7 +1332,7 @@ class ConsistencyChecker:
         try:
             return self._check_rules_with_llm(content)
         except Exception as e:
-            print(f"[ConsistencyChecker] LLM规则检测失败: {e}，回退到关键词检测")
+            _safe_print(f"[ConsistencyChecker] LLM规则检测失败: {e}，回退到关键词检测")
             return self._check_absolute_rules_fallback(content)
     
     def _check_rules_with_llm(self, content: str) -> List[Violation]:
@@ -1385,7 +1406,7 @@ VIOLATION|3|内容中出现了脏话"XXX"，违反了禁止脏话的规则
             return violations
             
         except Exception as e:
-            print(f"[ConsistencyChecker] LLM调用失败: {e}")
+            _safe_print(f"[ConsistencyChecker] LLM调用失败: {e}")
             return []
     
     def _check_absolute_rules_fallback(self, content: str) -> List[Violation]:
@@ -1399,9 +1420,9 @@ VIOLATION|3|内容中出现了脏话"XXX"，违反了禁止脏话的规则
         # 如果有规则但没有 LLM，首次调用时提示一次
         if self.absolute_rules and not hasattr(self, '_fallback_warned'):
             self._fallback_warned = True
-            print(f"[ConsistencyChecker] ⚠️ 检测到 {len(self.absolute_rules)} 条绝对规则，但未配置 LLM")
-            print(f"[ConsistencyChecker]    绝对规则需要语义理解才能准确检测")
-            print(f"[ConsistencyChecker]    建议在 api_keys.env 中配置 LLM_API_KEY 以启用语义检测")
+            _safe_print(f"[ConsistencyChecker] ⚠️ 检测到 {len(self.absolute_rules)} 条绝对规则，但未配置 LLM")
+            _safe_print(f"[ConsistencyChecker]    绝对规则需要语义理解才能准确检测")
+            _safe_print(f"[ConsistencyChecker]    建议在 api_keys.env 中配置 LLM_API_KEY 以启用语义检测")
         
         # 不做误导性的关键词检测，直接返回空
         # 用户自定义的规则（如"角色温柔"）无法通过关键词匹配
@@ -1412,7 +1433,7 @@ VIOLATION|3|内容中出现了脏话"XXX"，违反了禁止脏话的规则
         # 过滤空字符串、纯空白规则，并去重
         self.absolute_rules = self._dedupe_rules(rules)
         llm_status = "LLM语义检测" if self._llm_client else "⚠️ 无LLM（规则检测未生效）"
-        print(f"[ConsistencyChecker] 已更新 {len(self.absolute_rules)} 条绝对规则（{llm_status}）")
+        _safe_print(f"[ConsistencyChecker] 已更新 {len(self.absolute_rules)} 条绝对规则（{llm_status}）")
     
     def _dedupe_rules(self, rules: List[str]) -> List[str]:
         """去重规则列表，保持顺序"""

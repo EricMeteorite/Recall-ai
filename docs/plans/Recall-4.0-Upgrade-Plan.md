@@ -2299,6 +2299,367 @@ Phase 3 所有代码都是 **100% 平台无关** 的通用实现：
 
 ---
 
+## 🐛 已知问题与修复计划
+
+> 📅 发现日期：2026-01-25
+> 🔍 来源：Phase 1-3 功能验证测试
+
+### 问题概览
+
+| # | 问题 | 严重程度 | 影响范围 | 状态 |
+|---|------|----------|----------|------|
+| BUG-001 | 矛盾检测 API 500 错误 | 🟡 中 | `/v1/contradictions/stats` | 待修复 |
+| BUG-002 | 知识图谱实体 API 无数据 | 🟡 中 | `/v1/entities/{name}` | 待修复 |
+| BUG-003 | 多用户隔离失效 | 🔴 高 | 搜索 API 跨用户泄露 | 待修复 |
+
+---
+
+### BUG-001: 矛盾检测 API 500 错误
+
+#### 问题描述
+调用 `/v1/contradictions/stats` 端点时返回 500 错误：
+```
+{"detail":"'ContradictionManager' object has no attribute 'get_contradiction'"}
+```
+
+#### 根因分析
+`ContradictionManager` 类缺少 `get_contradiction` 方法，但 API 端点尝试调用此方法。
+
+#### 相关文件
+- `recall/graph/contradiction_manager.py` - 矛盾管理器类
+- `recall/server.py` - API 端点定义（约 line 2650+）
+
+#### 修复方案
+
+**方案 A：添加缺失方法（推荐）**
+```python
+# recall/graph/contradiction_manager.py
+
+class ContradictionManager:
+    # ... 现有代码 ...
+    
+    def get_contradiction(self, contradiction_id: str) -> Optional[Contradiction]:
+        """获取单个矛盾记录
+        
+        Args:
+            contradiction_id: 矛盾 ID
+            
+        Returns:
+            Contradiction 对象，不存在则返回 None
+        """
+        for c in self.contradictions:
+            if c.id == contradiction_id:
+                return c
+        return None
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """获取矛盾统计信息
+        
+        Returns:
+            包含统计数据的字典
+        """
+        total = len(self.contradictions)
+        resolved = sum(1 for c in self.contradictions if c.resolved)
+        unresolved = total - resolved
+        
+        return {
+            "total": total,
+            "resolved": resolved,
+            "unresolved": unresolved,
+            "by_type": self._count_by_type(),
+            "by_severity": self._count_by_severity()
+        }
+    
+    def _count_by_type(self) -> Dict[str, int]:
+        counts = {}
+        for c in self.contradictions:
+            ctype = c.contradiction_type.value if hasattr(c, 'contradiction_type') else 'unknown'
+            counts[ctype] = counts.get(ctype, 0) + 1
+        return counts
+    
+    def _count_by_severity(self) -> Dict[str, int]:
+        counts = {}
+        for c in self.contradictions:
+            severity = c.severity if hasattr(c, 'severity') else 'medium'
+            counts[severity] = counts.get(severity, 0) + 1
+        return counts
+```
+
+**方案 B：修复 API 端点调用**
+检查 `server.py` 中的端点实现，确保调用正确的方法名。
+
+#### 测试验证
+```bash
+# 修复后验证
+curl http://localhost:18888/v1/contradictions/stats?user_id=test
+# 预期返回: {"total": 0, "resolved": 0, "unresolved": 0, ...}
+```
+
+#### 优先级
+🟡 **中** - 不影响核心功能，但影响 Phase 1 矛盾检测特性完整性
+
+---
+
+### BUG-002: 知识图谱实体 API 无数据
+
+#### 问题描述
+调用 `/v1/entities/{name}` 端点返回 404：
+```
+GET /v1/entities/樱 → 404 Not Found
+```
+
+尽管通过 `/v1/stats` 显示有 8 个 `consolidated_entities`。
+
+#### 根因分析
+1. 实体存储在 `ConsolidatedEntity` 中，但 API 端点可能查询的是不同的数据源
+2. API 端点与 Engine 中的实体索引未正确关联
+3. 可能是 scope/user_id 隔离导致查询不到
+
+#### 相关文件
+- `recall/server.py` - `/v1/entities/{name}` 端点定义
+- `recall/engine.py` - `get_entity()` 方法
+- `recall/index/entity_index.py` - 实体索引
+- `recall/storage/layer1_consolidated.py` - 实体存储
+
+#### 修复方案
+
+**Step 1：检查 API 端点实现**
+```python
+# recall/server.py - 检查端点实现
+@app.get("/v1/entities/{name}")
+async def get_entity(
+    name: str,
+    user_id: str = Query(None),
+    character_id: str = Query(None)
+):
+    engine = get_engine()
+    # 检查是否正确传递了 user_id/character_id
+    entity = engine.get_entity(name, user_id, character_id)
+    if not entity:
+        raise HTTPException(status_code=404, detail="Entity not found")
+    return entity
+```
+
+**Step 2：检查 Engine 方法**
+```python
+# recall/engine.py - 确保方法正确查询实体
+def get_entity(self, name: str, user_id: str = None, character_id: str = None):
+    """获取实体信息"""
+    # 1. 先查询实体索引
+    indexed = self.entity_index.get_entity(name)
+    if indexed:
+        return indexed
+    
+    # 2. 查询 Consolidated 存储
+    if user_id:
+        scope = self.storage.get_scope(user_id, character_id)
+        for entity in scope.get_entities():
+            if entity.name == name:
+                return entity
+    
+    # 3. 查询所有 scope
+    for scope in self.storage.get_all_scopes():
+        for entity in scope.get_entities():
+            if entity.name == name:
+                return entity
+    
+    return None
+```
+
+**Step 3：验证实体索引同步**
+确保添加记忆时实体被正确索引：
+```python
+# 在 add() 方法中检查
+entities = self.entity_extractor.extract(content)
+for entity in entities:
+    self.entity_index.add_entity(entity, memory_id)  # 确保这行被执行
+```
+
+#### 测试验证
+```bash
+# 1. 添加测试记忆
+curl -X POST http://localhost:18888/v1/memories \
+  -d '{"user_id":"test", "content":"Alice去了北京", "role":"user"}'
+
+# 2. 查询实体
+curl http://localhost:18888/v1/entities/Alice
+# 预期返回: {"name": "Alice", "type": "PERSON", ...}
+
+# 3. 查询相关实体
+curl http://localhost:18888/v1/entities/Alice/related
+```
+
+#### 优先级
+🟡 **中** - 不影响记忆搜索核心功能，但影响知识图谱可视化和查询
+
+---
+
+### BUG-003: 多用户隔离失效
+
+#### 问题描述
+用户 A 搜索记忆时，能够搜索到用户 B 的私密记忆：
+```python
+# user_other 创建的记忆
+POST /v1/memories {"user_id": "user_other", "content": "这是另一个用户的私密记忆"}
+
+# rp_test 搜索时能找到 user_other 的记忆！
+POST /v1/memories/search {"user_id": "rp_test", "query": "私密记忆"}
+# 返回了 user_other 的记忆 ❌
+```
+
+#### 根因分析
+`EightLayerRetriever.retrieve()` 方法使用**共享索引**进行搜索，未按 `user_id` 过滤：
+
+```python
+# recall/retrieval/eight_layer.py - 当前实现问题
+def retrieve(self, query, entities, keywords, top_k, filters, ...):
+    # ❌ 问题：以下索引都是全局共享的，未按 user_id 隔离
+    inverted_results = self.inverted_index.search_any(keywords)
+    entity_results = self.entity_index.get_related_turns(entity)
+    vector_results = self.vector_index.search(query_embedding, top_k)
+    # ...
+```
+
+#### 相关文件
+- `recall/retrieval/eight_layer.py` - 八层检索器（核心问题所在）
+- `recall/retrieval/eleven_layer.py` - 十一层检索器（可能有同样问题）
+- `recall/engine.py` - `search()` 方法
+- `recall/index/vector_index.py` - 向量索引
+- `recall/index/inverted_index.py` - 倒排索引
+- `recall/index/entity_index.py` - 实体索引
+
+#### 修复方案
+
+**方案 A：索引层过滤（推荐 - 性能最优）**
+
+为每个索引添加 `user_id` 过滤支持：
+
+```python
+# recall/index/vector_index.py
+class VectorIndex:
+    def search(
+        self, 
+        query_embedding: List[float], 
+        top_k: int = 10,
+        user_id: str = None  # 新增参数
+    ) -> List[SearchResult]:
+        results = self._raw_search(query_embedding, top_k * 2)  # 多取一些
+        if user_id:
+            results = [r for r in results if r.metadata.get('user_id') == user_id]
+        return results[:top_k]
+
+# recall/index/inverted_index.py
+class InvertedIndex:
+    def search_any(
+        self, 
+        keywords: List[str],
+        user_id: str = None  # 新增参数
+    ) -> List[str]:
+        results = self._raw_search(keywords)
+        if user_id:
+            results = [r for r in results if self._get_user_id(r) == user_id]
+        return results
+```
+
+**方案 B：检索器层过滤（简单但性能略差）**
+
+在 `EightLayerRetriever` 中添加结果过滤：
+
+```python
+# recall/retrieval/eight_layer.py
+def retrieve(
+    self,
+    query: str,
+    entities: List[str] = None,
+    keywords: List[str] = None,
+    top_k: int = 10,
+    filters: Dict[str, Any] = None,
+    user_id: str = None,  # 新增参数
+    ...
+) -> List[RetrievalResult]:
+    # ... 现有检索逻辑 ...
+    
+    # 最终结果过滤
+    if user_id:
+        results = [r for r in results if r.metadata.get('user_id') == user_id]
+    
+    return results[:top_k]
+```
+
+**方案 C：Engine 层过滤（最简单但性能最差）**
+
+在 `RecallEngine.search()` 中过滤结果：
+
+```python
+# recall/engine.py
+def search(self, query, user_id, top_k, ...):
+    # 获取更多结果
+    raw_results = self.retriever.retrieve(query, ..., top_k=top_k * 3)
+    
+    # 过滤
+    filtered = [r for r in raw_results if r.metadata.get('user_id') == user_id]
+    
+    return filtered[:top_k]
+```
+
+#### 推荐实施方案
+
+**Phase 1：快速修复（方案 C）**
+- 修改 `recall/engine.py` 的 `search()` 方法
+- 在返回结果前按 `user_id` 过滤
+- 预计工作量：30 分钟
+
+**Phase 2：彻底修复（方案 A）**
+- 重构索引层，支持 `user_id` 参数
+- 修改所有索引的 `search()` 方法签名
+- 更新检索器调用
+- 预计工作量：2-3 小时
+
+#### 测试验证
+```python
+# 测试脚本
+import requests
+
+# 1. 创建 user_a 的记忆
+requests.post('/v1/memories', json={
+    'user_id': 'user_a', 
+    'content': 'user_a的秘密信息'
+})
+
+# 2. 创建 user_b 的记忆
+requests.post('/v1/memories', json={
+    'user_id': 'user_b', 
+    'content': 'user_b的秘密信息'
+})
+
+# 3. user_a 搜索
+results = requests.post('/v1/memories/search', json={
+    'user_id': 'user_a',
+    'query': '秘密信息'
+}).json()
+
+# 4. 验证：results 中不应包含 user_b 的记忆
+for r in results:
+    assert 'user_b' not in r.get('content', ''), "用户隔离失败！"
+
+print("✅ 多用户隔离测试通过")
+```
+
+#### 优先级
+🔴 **高** - 严重安全问题，可能导致用户数据泄露
+
+---
+
+### 修复优先级排序
+
+| 优先级 | 问题 | 预计工时 | 建议时间 |
+|--------|------|----------|----------|
+| 1 | BUG-003 多用户隔离 | 30min (快速) / 3h (彻底) | 立即 |
+| 2 | BUG-001 矛盾检测 | 1h | Phase 1 完善 |
+| 3 | BUG-002 知识图谱实体 | 2h | Phase 2 集成 |
+
+---
+
 ## ✅ 成功标准
 
 1. **功能完整性**

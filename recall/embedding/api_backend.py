@@ -9,6 +9,26 @@ import numpy as np
 from .base import EmbeddingBackend, EmbeddingConfig, EmbeddingBackendType
 
 
+# Windows GBK 编码兼容的安全打印函数
+def _safe_print(msg: str) -> None:
+    """安全打印函数，替换 emoji 为 ASCII 等价物以避免 Windows GBK 编码错误"""
+    emoji_map = {
+        '📥': '[IN]', '📤': '[OUT]', '🔍': '[SEARCH]', '✅': '[OK]', '❌': '[FAIL]',
+        '⚠️': '[WARN]', '💾': '[SAVE]', '🗃️': '[DB]', '🧹': '[CLEAN]', '📊': '[STATS]',
+        '🔄': '[SYNC]', '📦': '[PKG]', '🚀': '[START]', '🎯': '[TARGET]', '💡': '[HINT]',
+        '🔧': '[FIX]', '📝': '[NOTE]', '🎉': '[DONE]', '⏱️': '[TIME]', '🌐': '[NET]',
+        '🧠': '[BRAIN]', '💬': '[CHAT]', '🏷️': '[TAG]', '📁': '[DIR]', '🔒': '[LOCK]',
+        '🌱': '[PLANT]', '🗑️': '[DEL]', '💫': '[MAGIC]', '🎭': '[MASK]', '📖': '[BOOK]',
+        '⚡': '[FAST]', '🔥': '[HOT]', '💎': '[GEM]', '🌟': '[STAR]', '🎨': '[ART]'
+    }
+    for emoji, ascii_equiv in emoji_map.items():
+        msg = msg.replace(emoji, ascii_equiv)
+    try:
+        print(msg)
+    except UnicodeEncodeError:
+        print(msg.encode('ascii', errors='replace').decode('ascii'))
+
+
 class RateLimiter:
     """简单的速率限制器
     
@@ -55,11 +75,11 @@ class RateLimiter:
             
             # 检查是否超时
             if time.time() - start_time + wait_time > timeout:
-                print(f"[Embedding] 速率限制等待超时 ({timeout}秒)")
+                _safe_print(f"[Embedding] 速率限制等待超时 ({timeout}秒)")
                 return False
             
             # 等待
-            print(f"[Embedding] API 限流，等待 {wait_time:.1f} 秒...")
+            _safe_print(f"[Embedding] API 限流，等待 {wait_time:.1f} 秒...")
             time.sleep(min(wait_time, 10))  # 最多等待10秒后重新检查
 
 
@@ -199,7 +219,7 @@ class APIEmbeddingBackend(EmbeddingBackend):
                 if '429' in error_str or 'rate limit' in error_str:
                     if attempt < max_retries - 1:
                         wait_time = (attempt + 1) * 15  # 指数退避: 15, 30, 45 秒
-                        print(f"[Embedding] API 限流 (429)，等待 {wait_time} 秒后重试 ({attempt + 1}/{max_retries})")
+                        _safe_print(f"[Embedding] API 限流 (429)，等待 {wait_time} 秒后重试 ({attempt + 1}/{max_retries})")
                         time.sleep(wait_time)
                         continue
                 
@@ -244,7 +264,7 @@ class APIEmbeddingBackend(EmbeddingBackend):
                     if '429' in error_str or 'rate limit' in error_str:
                         if attempt < max_retries - 1:
                             wait_time = (attempt + 1) * 15
-                            print(f"[Embedding] API 限流 (429)，等待 {wait_time} 秒后重试")
+                            _safe_print(f"[Embedding] API 限流 (429)，等待 {wait_time} 秒后重试")
                             time.sleep(wait_time)
                             continue
                     

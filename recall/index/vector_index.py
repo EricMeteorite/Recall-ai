@@ -10,6 +10,26 @@ from ..embedding import EmbeddingBackend, EmbeddingConfig, create_embedding_back
 from ..embedding.base import EmbeddingBackendType
 
 
+# Windows GBK 编码兼容的安全打印函数
+def _safe_print(msg: str) -> None:
+    """安全打印函数，替换 emoji 为 ASCII 等价物以避免 Windows GBK 编码错误"""
+    emoji_map = {
+        '📥': '[IN]', '📤': '[OUT]', '🔍': '[SEARCH]', '✅': '[OK]', '❌': '[FAIL]',
+        '⚠️': '[WARN]', '💾': '[SAVE]', '🗃️': '[DB]', '🧹': '[CLEAN]', '📊': '[STATS]',
+        '🔄': '[SYNC]', '📦': '[PKG]', '🚀': '[START]', '🎯': '[TARGET]', '💡': '[HINT]',
+        '🔧': '[FIX]', '📝': '[NOTE]', '🎉': '[DONE]', '⏱️': '[TIME]', '🌐': '[NET]',
+        '🧠': '[BRAIN]', '💬': '[CHAT]', '🏷️': '[TAG]', '📁': '[DIR]', '🔒': '[LOCK]',
+        '🌱': '[PLANT]', '🗑️': '[DEL]', '💫': '[MAGIC]', '🎭': '[MASK]', '📖': '[BOOK]',
+        '⚡': '[FAST]', '🔥': '[HOT]', '💎': '[GEM]', '🌟': '[STAR]', '🎨': '[ART]'
+    }
+    for emoji, ascii_equiv in emoji_map.items():
+        msg = msg.replace(emoji, ascii_equiv)
+    try:
+        print(msg)
+    except UnicodeEncodeError:
+        print(msg.encode('ascii', errors='replace').decode('ascii'))
+
+
 class VectorIndex:
     """向量索引 - 使用 FAISS 实现高效相似度搜索
     
@@ -60,7 +80,7 @@ class VectorIndex:
         # 检查是否启用
         if self.embedding_config.backend == EmbeddingBackendType.NONE:
             self._enabled = False
-            print("[VectorIndex] Lite 模式，向量索引已禁用")
+            _safe_print("[VectorIndex] Lite 模式，向量索引已禁用")
     
     def _load_or_create_config(self) -> EmbeddingConfig:
         """加载已有配置或自动选择"""
@@ -75,7 +95,7 @@ class VectorIndex:
                     dimension=data.get('dimension', 384)
                 )
             except Exception as e:
-                print(f"[VectorIndex] 配置加载失败，自动选择: {e}")
+                _safe_print(f"[VectorIndex] 配置加载失败，自动选择: {e}")
         
         # 自动选择
         from ..embedding.factory import auto_select_backend
@@ -128,8 +148,8 @@ class VectorIndex:
             
             # 检查维度是否匹配
             if self._index.d != self.dimension:
-                print(f"[VectorIndex] 警告: 索引维度({self._index.d})与当前模型维度({self.dimension})不匹配")
-                print(f"[VectorIndex] 正在重建索引...")
+                _safe_print(f"[VectorIndex] 警告: 索引维度({self._index.d})与当前模型维度({self.dimension})不匹配")
+                _safe_print(f"[VectorIndex] 正在重建索引...")
                 self._index = faiss.IndexFlatIP(self.dimension)
                 self.turn_mapping = []
                 self._save_config()
@@ -171,8 +191,8 @@ class VectorIndex:
         embedding_dim = embedding.shape[1]
         if self.index.d != embedding_dim:
             import faiss
-            print(f"[VectorIndex] 运行时维度不匹配: 索引维度={self.index.d}, 向量维度={embedding_dim}")
-            print(f"[VectorIndex] 正在重建索引...")
+            _safe_print(f"[VectorIndex] 运行时维度不匹配: 索引维度={self.index.d}, 向量维度={embedding_dim}")
+            _safe_print(f"[VectorIndex] 正在重建索引...")
             self._index = faiss.IndexFlatIP(embedding_dim)
             self.turn_mapping = []
             self._save_config()
@@ -203,8 +223,8 @@ class VectorIndex:
         
         # 检查维度是否匹配
         if query_embedding.shape[1] != self.index.d:
-            print(f"[VectorIndex] 搜索时维度不匹配: 索引维度={self.index.d}, 查询维度={query_embedding.shape[1]}")
-            print(f"[VectorIndex] 向量索引需要重建，暂时返回空结果")
+            _safe_print(f"[VectorIndex] 搜索时维度不匹配: 索引维度={self.index.d}, 查询维度={query_embedding.shape[1]}")
+            _safe_print(f"[VectorIndex] 向量索引需要重建，暂时返回空结果")
             return []
         
         distances, indices = self.index.search(
@@ -314,7 +334,7 @@ class VectorIndex:
             成功索引的记忆数量
         """
         if not self._enabled:
-            print("[VectorIndex] 向量索引未启用，跳过重建")
+            _safe_print("[VectorIndex] 向量索引未启用，跳过重建")
             return 0
         
         import faiss
@@ -323,7 +343,7 @@ class VectorIndex:
         self._index = faiss.IndexFlatIP(self.dimension)
         self.turn_mapping = []
         
-        print(f"[VectorIndex] 开始重建向量索引，共 {len(memories)} 条记忆...")
+        _safe_print(f"[VectorIndex] 开始重建向量索引，共 {len(memories)} 条记忆...")
         
         success_count = 0
         for i, (memory_id, content) in enumerate(memories):
@@ -337,15 +357,15 @@ class VectorIndex:
                 
                 # 每 50 条打印进度
                 if (i + 1) % 50 == 0:
-                    print(f"[VectorIndex] 重建进度: {i + 1}/{len(memories)}")
+                    _safe_print(f"[VectorIndex] 重建进度: {i + 1}/{len(memories)}")
             except Exception as e:
-                print(f"[VectorIndex] 记忆 {memory_id} 索引失败: {e}")
+                _safe_print(f"[VectorIndex] 记忆 {memory_id} 索引失败: {e}")
         
         # 保存
         self._save()
         self._save_config()
         
-        print(f"[VectorIndex] 重建完成: 成功 {success_count}/{len(memories)}")
+        _safe_print(f"[VectorIndex] 重建完成: 成功 {success_count}/{len(memories)}")
         return success_count
     
     def get_stats(self) -> dict:

@@ -19,6 +19,27 @@ from typing import List, Dict, Set, Optional, Tuple, Any, Callable
 from enum import Enum
 from collections import defaultdict
 
+
+# Windows GBK 编码兼容的安全打印函数
+def _safe_print(msg: str) -> None:
+    """安全打印函数，替换 emoji 为 ASCII 等价物以避免 Windows GBK 编码错误"""
+    emoji_map = {
+        '📥': '[IN]', '📤': '[OUT]', '🔍': '[SEARCH]', '✅': '[OK]', '❌': '[FAIL]',
+        '⚠️': '[WARN]', '💾': '[SAVE]', '🗃️': '[DB]', '🧹': '[CLEAN]', '📊': '[STATS]',
+        '🔄': '[SYNC]', '📦': '[PKG]', '🚀': '[START]', '🎯': '[TARGET]', '💡': '[HINT]',
+        '🔧': '[FIX]', '📝': '[NOTE]', '🎉': '[DONE]', '⏱️': '[TIME]', '🌐': '[NET]',
+        '🧠': '[BRAIN]', '💬': '[CHAT]', '🏷️': '[TAG]', '📁': '[DIR]', '🔒': '[LOCK]',
+        '🌱': '[PLANT]', '🗑️': '[DEL]', '💫': '[MAGIC]', '🎭': '[MASK]', '📖': '[BOOK]',
+        '⚡': '[FAST]', '🔥': '[HOT]', '💎': '[GEM]', '🌟': '[STAR]', '🎨': '[ART]'
+    }
+    for emoji, ascii_equiv in emoji_map.items():
+        msg = msg.replace(emoji, ascii_equiv)
+    try:
+        print(msg)
+    except UnicodeEncodeError:
+        print(msg.encode('ascii', errors='replace').decode('ascii'))
+
+
 # 可选导入
 try:
     import numpy as np
@@ -520,7 +541,7 @@ class ThreeStageDeduplicator:
             return None
         
         except Exception as e:
-            print(f"[ThreeStageDeduplicator] 语义匹配失败: {e}")
+            _safe_print(f"[ThreeStageDeduplicator] 语义匹配失败: {e}")
             return None
     
     def _cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
@@ -544,7 +565,7 @@ class ThreeStageDeduplicator:
         if self.budget_manager:
             estimated_cost = len(result.pending_items) * 0.001  # 粗略估算
             if not self.budget_manager.can_afford(estimated_cost, operation="dedup"):
-                print("[ThreeStageDeduplicator] 预算不足，跳过 LLM 确认")
+                _safe_print("[ThreeStageDeduplicator] 预算不足，跳过 LLM 确认")
                 # 将所有待确认项标记为新项目
                 for item, _ in result.pending_items[:]:
                     result.move_to_new(item)
@@ -586,7 +607,7 @@ class ThreeStageDeduplicator:
                     )
                     
             except Exception as e:
-                print(f"[ThreeStageDeduplicator] LLM 确认失败: {e}")
+                _safe_print(f"[ThreeStageDeduplicator] LLM 确认失败: {e}")
                 result.move_to_new(item)
     
     def add_to_index(self, item: DedupItem):

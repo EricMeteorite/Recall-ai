@@ -25,6 +25,27 @@ from dataclasses import dataclass, field, asdict
 from typing import List, Dict, Any, Optional, Tuple
 from enum import Enum
 
+# Windows GBK 编码兼容的安全打印函数
+def _safe_print(msg: str) -> None:
+    """安全打印函数，替换 emoji 为 ASCII 等价物以避免 Windows GBK 编码错误"""
+    emoji_map = {
+        '📥': '[IN]', '📤': '[OUT]', '🔍': '[SEARCH]', '✅': '[OK]', '❌': '[FAIL]',
+        '⚠️': '[WARN]', '💾': '[SAVE]', '🗃️': '[DB]', '🧹': '[CLEAN]', '📊': '[STATS]',
+        '🔄': '[SYNC]', '📦': '[PKG]', '🚀': '[START]', '🎯': '[TARGET]', '💡': '[HINT]',
+        '🔧': '[FIX]', '📝': '[NOTE]', '🎉': '[DONE]', '⏱️': '[TIME]', '🌐': '[NET]',
+        '🧠': '[BRAIN]', '💬': '[CHAT]', '🏷️': '[TAG]', '📁': '[DIR]', '🔒': '[LOCK]',
+        '🌱': '[PLANT]', '🗑️': '[DEL]', '💫': '[MAGIC]', '🎭': '[MASK]', '📖': '[BOOK]',
+        '⚡': '[FAST]', '🔥': '[HOT]', '💎': '[GEM]', '🌟': '[STAR]', '🎨': '[ART]'
+    }
+    for emoji, ascii_equiv in emoji_map.items():
+        msg = msg.replace(emoji, ascii_equiv)
+    try:
+        print(msg)
+    except UnicodeEncodeError:
+        print(msg.encode('ascii', errors='replace').decode('ascii'))
+
+
+
 
 class ContextType(Enum):
     """上下文类型"""
@@ -348,7 +369,7 @@ class ContextTracker:
                         PersistentContext.from_dict(item) for item in data
                     ]
             except Exception as e:
-                print(f"[Recall] 加载上下文数据失败 ({user_id}/{character_id}): {e}")
+                _safe_print(f"[Recall] 加载上下文数据失败 ({user_id}/{character_id}): {e}")
                 self.contexts[cache_key] = []
     
     def _save_user(self, user_id: str, character_id: str = "default"):
@@ -369,7 +390,7 @@ class ContextTracker:
                      返回格式：[{'content': '...', 'metadata': {'role': 'user/assistant', ...}}]
         """
         self._memory_provider = provider
-        print(f"[ContextTracker] 🔗 已设置 memory_provider")
+        _safe_print(f"[ContextTracker] 🔗 已设置 memory_provider")
     
     def on_turn(self, user_id: str = "default", character_id: str = "default") -> Dict[str, Any]:
         """通知一轮对话完成，检查是否应该触发条件提取
@@ -394,8 +415,8 @@ class ContextTracker:
         
         # 检查是否应该触发分析
         if current_count >= self._trigger_interval:
-            print(f"[ContextTracker] 🔄 触发条件提取: user={user_id}, char={character_id}")
-            print(f"[ContextTracker]    轮次={current_count}, 间隔={self._trigger_interval}")
+            _safe_print(f"[ContextTracker] 🔄 触发条件提取: user={user_id}, char={character_id}")
+            _safe_print(f"[ContextTracker]    轮次={current_count}, 间隔={self._trigger_interval}")
             
             # 重置计数
             self._turn_counters[cache_key] = 0
@@ -409,7 +430,7 @@ class ContextTracker:
                     'extracted': [{'id': ctx.id, 'content': ctx.content, 'type': ctx.context_type.value} for ctx in extracted]
                 }
             else:
-                print(f"[ContextTracker]    ⏭️ LLM 或 memory_provider 未配置，跳过")
+                _safe_print(f"[ContextTracker]    ⏭️ LLM 或 memory_provider 未配置，跳过")
                 return {'triggered': False, 'reason': 'LLM or memory_provider not configured'}
         
         return {
@@ -436,11 +457,11 @@ class ContextTracker:
         conversation_context = self._get_conversation_context(user_id, character_id, max_turns=self._max_context_turns * 2)
         
         if not conversation_context:
-            print(f"[ContextTracker] ⏭️ 无对话上下文，跳过提取")
+            _safe_print(f"[ContextTracker] ⏭️ 无对话上下文，跳过提取")
             return []
         
-        print(f"[ContextTracker] 🔍 从对话历史提取条件")
-        print(f"[ContextTracker]    对话长度: {len(conversation_context)} 字符")
+        _safe_print(f"[ContextTracker] 🔍 从对话历史提取条件")
+        _safe_print(f"[ContextTracker]    对话长度: {len(conversation_context)} 字符")
         
         # 使用 LLM 提取
         return self._extract_with_llm("", user_id, character_id, conversation_context)
@@ -496,7 +517,7 @@ class ContextTracker:
             return "\n".join(lines)
             
         except Exception as e:
-            print(f"[ContextTracker] ⚠️ 获取对话上下文失败: {e}")
+            _safe_print(f"[ContextTracker] ⚠️ 获取对话上下文失败: {e}")
             return ""
 
     # =========================
@@ -1241,17 +1262,17 @@ class ContextTracker:
             # 发现相似条件，进行合并而不是创建新条件
             content_preview = content[:35].replace('\n', ' ')
             similar_preview = similar.content[:35].replace('\n', ' ')
-            print(f"[ContextTracker] 🔄 去重合并:")
-            print(f"[ContextTracker]    新: {content_preview}...")
-            print(f"[ContextTracker]    旧: {similar_preview}...")
-            print(f"[ContextTracker]    方法={sim_method}, 相似度={sim_score:.3f}")
+            _safe_print(f"[ContextTracker] 🔄 去重合并:")
+            _safe_print(f"[ContextTracker]    新: {content_preview}...")
+            _safe_print(f"[ContextTracker]    旧: {similar_preview}...")
+            _safe_print(f"[ContextTracker]    方法={sim_method}, 相似度={sim_score:.3f}")
             
             # 合并策略
             if sim_method == "exact":
                 # 完全相同，只更新使用信息
                 similar.use_count += 1
                 similar.last_used = time.time()
-                print(f"[ContextTracker]    ✅ 完全相同，更新使用计数: {similar.use_count}")
+                _safe_print(f"[ContextTracker]    ✅ 完全相同，更新使用计数: {similar.use_count}")
             elif sim_method.endswith("_uncertain"):
                 # 中等相似度，谨慎合并
                 similar.confidence = min(1.0, similar.confidence + 0.05)  # 较小增量
@@ -1302,9 +1323,9 @@ class ContextTracker:
         if ctx not in self.contexts[cache_key]:
             # 条件被淘汰了（因为置信度不够高），标记为不活跃
             ctx.is_active = False
-            print(f"[ContextTracker] 新条件因数量限制被淘汰: {content[:50]}...")
+            _safe_print(f"[ContextTracker] 新条件因数量限制被淘汰: {content[:50]}...")
         else:
-            print(f"[ContextTracker] 创建新条件: type={context_type.value}, content={content[:50]}...")
+            _safe_print(f"[ContextTracker] 创建新条件: type={context_type.value}, content={content[:50]}...")
         
         self._save_user(user_id, character_id)
         return ctx
@@ -1415,17 +1436,17 @@ class ContextTracker:
             use_conversation_context: 是否获取对话历史作为上下文（默认True）
         """
         text_preview = text[:60].replace('\n', ' ') if len(text) > 60 else text.replace('\n', ' ')
-        print(f"[ContextTracker] 🔍 开始提取: user={user_id}, char={character_id}")
-        print(f"[ContextTracker]    文本({len(text)}字): {text_preview}{'...' if len(text) > 60 else ''}")
+        _safe_print(f"[ContextTracker] 🔍 开始提取: user={user_id}, char={character_id}")
+        _safe_print(f"[ContextTracker]    文本({len(text)}字): {text_preview}{'...' if len(text) > 60 else ''}")
         
         # 获取对话上下文（如果配置了 memory_provider）
         conversation_context = ""
         if use_conversation_context and self.llm_client and self._memory_provider:
             conversation_context = self._get_conversation_context(user_id, character_id, max_turns=10)
             if conversation_context:
-                print(f"[ContextTracker]    📜 获取到对话上下文: {len(conversation_context)} 字符")
+                _safe_print(f"[ContextTracker]    📜 获取到对话上下文: {len(conversation_context)} 字符")
         
-        print(f"[ContextTracker]    模式: {'LLM' if self.llm_client else '规则'}")
+        _safe_print(f"[ContextTracker]    模式: {'LLM' if self.llm_client else '规则'}")
         
         if self.llm_client:
             # 传入对话上下文以帮助 LLM 更好地理解
@@ -1434,11 +1455,11 @@ class ContextTracker:
             result = self._extract_with_rules(text, user_id, character_id)
         
         if result:
-            print(f"[ContextTracker] ✅ 提取完成: 新增 {len(result)} 条条件")
+            _safe_print(f"[ContextTracker] ✅ 提取完成: 新增 {len(result)} 条条件")
             for ctx in result:
-                print(f"[ContextTracker]    🌱 [{ctx.context_type.value}] {ctx.content[:50]}{'...' if len(ctx.content) > 50 else ''}")
+                _safe_print(f"[ContextTracker]    🌱 [{ctx.context_type.value}] {ctx.content[:50]}{'...' if len(ctx.content) > 50 else ''}")
         else:
-            print(f"[ContextTracker] ⏭️ 提取完成: 未发现新条件")
+            _safe_print(f"[ContextTracker] ⏭️ 提取完成: 未发现新条件")
         
         return result
     
@@ -1499,7 +1520,7 @@ class ContextTracker:
             conversation_context: 对话历史上下文（可选，帮助 LLM 更好理解）
         """
         try:
-            print(f"[ContextTracker] 🤖 调用 LLM 提取条件...")
+            _safe_print(f"[ContextTracker] 🤖 调用 LLM 提取条件...")
             
             # 构建提取内容：如果有对话上下文，则合并
             if conversation_context:
@@ -1509,13 +1530,13 @@ class ContextTracker:
 
 【当前消息】
 {text}"""
-                print(f"[ContextTracker]    📝 提取内容: 对话历史 + 当前消息 = {len(extract_content)} 字符")
+                _safe_print(f"[ContextTracker]    📝 提取内容: 对话历史 + 当前消息 = {len(extract_content)} 字符")
             else:
                 extract_content = text
             
             prompt = self.extraction_prompt.format(content=extract_content)
             response = self.llm_client.complete(prompt, max_tokens=800)
-            print(f"[ContextTracker]    LLM 响应: {len(response)} 字符")
+            _safe_print(f"[ContextTracker]    LLM 响应: {len(response)} 字符")
             
             # 解析 JSON
             import json
@@ -1523,7 +1544,7 @@ class ContextTracker:
             json_match = re.search(r'\[[\s\S]*\]', response)
             if json_match:
                 items = json.loads(json_match.group(0))
-                print(f"[ContextTracker]    解析到 {len(items)} 条候选条件")
+                _safe_print(f"[ContextTracker]    解析到 {len(items)} 条候选条件")
                 
                 extracted = []
                 for item in items:
@@ -1537,14 +1558,14 @@ class ContextTracker:
                         )
                         extracted.append(ctx)
                     except (KeyError, ValueError) as e:
-                        print(f"[ContextTracker]    ⚠️ 跳过无效条件: {e}")
+                        _safe_print(f"[ContextTracker]    ⚠️ 跳过无效条件: {e}")
                         continue
                 
                 return extracted
             else:
-                print(f"[ContextTracker]    ⚠️ LLM 响应中未找到 JSON 数组")
+                _safe_print(f"[ContextTracker]    ⚠️ LLM 响应中未找到 JSON 数组")
         except Exception as e:
-            print(f"[ContextTracker] ❌ LLM提取失败，回退到规则: {e}")
+            _safe_print(f"[ContextTracker] ❌ LLM提取失败，回退到规则: {e}")
         
         # 回退到规则提取
         return self._extract_with_rules(text, user_id, character_id)
@@ -1735,7 +1756,7 @@ class ContextTracker:
                 raise ValueError("LLM 响应格式无效")
                         
         except Exception as e:
-            print(f"[ContextTracker] LLM压缩失败: {e}")
+            _safe_print(f"[ContextTracker] LLM压缩失败: {e}")
             # 回退：简单保留置信度最高的
             contexts.sort(key=lambda c: -c.confidence)
             for ctx in contexts[self.MAX_PER_TYPE:]:

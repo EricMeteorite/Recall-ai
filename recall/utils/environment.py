@@ -9,6 +9,26 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+# Windows GBK 编码兼容的安全打印函数
+def _safe_print(msg: str) -> None:
+    """安全打印函数，替换 emoji 为 ASCII 等价物以避免 Windows GBK 编码错误"""
+    emoji_map = {
+        '📥': '[IN]', '📤': '[OUT]', '🔍': '[SEARCH]', '✅': '[OK]', '❌': '[FAIL]',
+        '⚠️': '[WARN]', '💾': '[SAVE]', '🗃️': '[DB]', '🧹': '[CLEAN]', '📊': '[STATS]',
+        '🔄': '[SYNC]', '📦': '[PKG]', '🚀': '[START]', '🎯': '[TARGET]', '💡': '[HINT]',
+        '🔧': '[FIX]', '📝': '[NOTE]', '🎉': '[DONE]', '⏱️': '[TIME]', '🌐': '[NET]',
+        '🧠': '[BRAIN]', '💬': '[CHAT]', '🏷️': '[TAG]', '📁': '[DIR]', '🔒': '[LOCK]',
+        '🌱': '[PLANT]', '🗑️': '[DEL]', '💫': '[MAGIC]', '🎭': '[MASK]', '📖': '[BOOK]',
+        '⚡': '[FAST]', '🔥': '[HOT]', '💎': '[GEM]', '🌟': '[STAR]', '🎨': '[ART]'
+    }
+    for emoji, ascii_equiv in emoji_map.items():
+        msg = msg.replace(emoji, ascii_equiv)
+    try:
+        print(msg)
+    except UnicodeEncodeError:
+        print(msg.encode('ascii', errors='replace').decode('ascii'))
+
+
 @dataclass
 class EnvironmentInfo:
     """环境信息"""
@@ -63,7 +83,7 @@ class EnvironmentManager:
             return True
         
         except Exception as e:
-            print(f"[Recall] 环境设置失败: {e}")
+            _safe_print(f"[Recall] 环境设置失败: {e}")
             return False
     
     def _setup_cache_dirs(self):
@@ -189,7 +209,7 @@ class EnvironmentManager:
             with open(config_path, 'w', encoding='utf-8') as f:
                 json.dump(config, f, ensure_ascii=False, indent=2)
         except IOError as e:
-            print(f"[Recall] 警告：保存配置失败（建议使用 api_keys.env）: {e}")
+            _safe_print(f"[Recall] 警告：保存配置失败（建议使用 api_keys.env）: {e}")
     
     def cleanup_temp(self):
         """清理临时文件"""
@@ -236,16 +256,16 @@ class EnvironmentManager:
         info = self.get_info()
         usage = self.get_disk_usage()
         
-        print("\n=== Recall 环境状态 ===")
-        print(f"Python: {info.python_version.split()[0]}")
-        print(f"平台: {info.platform}")
-        print(f"数据目录: {info.data_root}")
-        print(f"隔离模式: {'是' if info.is_isolated else '否'}")
-        print("\n磁盘使用:")
+        _safe_print("\n=== Recall 环境状态 ===")
+        _safe_print(f"Python: {info.python_version.split()[0]}")
+        _safe_print(f"平台: {info.platform}")
+        _safe_print(f"数据目录: {info.data_root}")
+        _safe_print(f"隔离模式: {'是' if info.is_isolated else '否'}")
+        _safe_print("\n磁盘使用:")
         for name, size in usage.items():
             size_mb = size / 1024 / 1024
-            print(f"  {name}: {size_mb:.2f} MB")
-        print()
+            _safe_print(f"  {name}: {size_mb:.2f} MB")
+        _safe_print("")
 
 
 # 全局环境管理器

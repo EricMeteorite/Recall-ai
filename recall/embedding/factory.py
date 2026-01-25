@@ -7,6 +7,26 @@ from .local_backend import LocalEmbeddingBackend
 from .api_backend import APIEmbeddingBackend
 
 
+# Windows GBK 编码兼容的安全打印函数
+def _safe_print(msg: str) -> None:
+    """安全打印函数，替换 emoji 为 ASCII 等价物以避免 Windows GBK 编码错误"""
+    emoji_map = {
+        '📥': '[IN]', '📤': '[OUT]', '🔍': '[SEARCH]', '✅': '[OK]', '❌': '[FAIL]',
+        '⚠️': '[WARN]', '💾': '[SAVE]', '🗃️': '[DB]', '🧹': '[CLEAN]', '📊': '[STATS]',
+        '🔄': '[SYNC]', '📦': '[PKG]', '🚀': '[START]', '🎯': '[TARGET]', '💡': '[HINT]',
+        '🔧': '[FIX]', '📝': '[NOTE]', '🎉': '[DONE]', '⏱️': '[TIME]', '🌐': '[NET]',
+        '🧠': '[BRAIN]', '💬': '[CHAT]', '🏷️': '[TAG]', '📁': '[DIR]', '🔒': '[LOCK]',
+        '🌱': '[PLANT]', '🗑️': '[DEL]', '💫': '[MAGIC]', '🎭': '[MASK]', '📖': '[BOOK]',
+        '⚡': '[FAST]', '🔥': '[HOT]', '💎': '[GEM]', '🌟': '[STAR]', '🎨': '[ART]'
+    }
+    for emoji, ascii_equiv in emoji_map.items():
+        msg = msg.replace(emoji, ascii_equiv)
+    try:
+        print(msg)
+    except UnicodeEncodeError:
+        print(msg.encode('ascii', errors='replace').decode('ascii'))
+
+
 def create_embedding_backend(config: Optional[EmbeddingConfig] = None) -> EmbeddingBackend:
     """创建 Embedding 后端
     
@@ -54,14 +74,14 @@ def create_embedding_backend(config: Optional[EmbeddingConfig] = None) -> Embedd
     elif backend_type == EmbeddingBackendType.LOCAL:
         backend = LocalEmbeddingBackend(config)
         if not backend.is_available:
-            print("[Embedding] 警告: sentence-transformers 未安装，回退到 Lite 模式")
+            _safe_print("[Embedding] 警告: sentence-transformers 未安装，回退到 Lite 模式")
             return NoneBackend(EmbeddingConfig.lite())
         return backend
     
     elif backend_type in (EmbeddingBackendType.OPENAI, EmbeddingBackendType.SILICONFLOW, EmbeddingBackendType.CUSTOM):
         backend = APIEmbeddingBackend(config)
         if not backend.is_available:
-            print(f"[Embedding] 警告: {backend_type.value} API key 未配置，回退到 Lite 模式")
+            _safe_print(f"[Embedding] 警告: {backend_type.value} API key 未配置，回退到 Lite 模式")
             return NoneBackend(EmbeddingConfig.lite())
         return backend
     
@@ -127,7 +147,7 @@ def auto_select_backend() -> EmbeddingConfig:
     mode = os.environ.get('RECALL_EMBEDDING_MODE', '').lower()
     
     if mode == 'none':
-        print("[Embedding] 使用: Lite 模式（仅关键词搜索）")
+        _safe_print("[Embedding] 使用: Lite 模式（仅关键词搜索）")
         return EmbeddingConfig.lite()
     
     if mode == 'custom':
@@ -137,20 +157,20 @@ def auto_select_backend() -> EmbeddingConfig:
         dimension = int(os.environ.get('EMBEDDING_DIMENSION', '1536'))
         
         if api_key and api_base:
-            print(f"[Embedding] 使用: 自定义 Cloud API ({api_base})")
+            _safe_print(f"[Embedding] 使用: 自定义 Cloud API ({api_base})")
             return EmbeddingConfig.cloud_custom(api_key, api_base, api_model, dimension)
         else:
-            print("[Embedding] 警告: 自定义 API 配置不完整，回退到 Lite 模式")
+            _safe_print("[Embedding] 警告: 自定义 API 配置不完整，回退到 Lite 模式")
             return EmbeddingConfig.lite()
     
     if mode == 'siliconflow':
         api_key = os.environ.get('SILICONFLOW_API_KEY', '')
         model = os.environ.get('SILICONFLOW_MODEL', 'BAAI/bge-large-zh-v1.5')
         if api_key:
-            print(f"[Embedding] 使用: 硅基流动 Cloud API (模型: {model})")
+            _safe_print(f"[Embedding] 使用: 硅基流动 Cloud API (模型: {model})")
             return EmbeddingConfig.cloud_siliconflow(api_key, model=model)
         else:
-            print("[Embedding] 警告: SILICONFLOW_API_KEY 未设置，回退到 Lite 模式")
+            _safe_print("[Embedding] 警告: SILICONFLOW_API_KEY 未设置，回退到 Lite 模式")
             return EmbeddingConfig.lite()
     
     if mode == 'openai':
@@ -158,19 +178,19 @@ def auto_select_backend() -> EmbeddingConfig:
         api_base = os.environ.get('OPENAI_API_BASE', '')  # 支持自定义 base
         model = os.environ.get('OPENAI_MODEL', 'text-embedding-3-small')
         if api_key:
-            print(f"[Embedding] 使用: OpenAI Cloud API (模型: {model})" + (f" ({api_base})" if api_base else ""))
+            _safe_print(f"[Embedding] 使用: OpenAI Cloud API (模型: {model})" + (f" ({api_base})" if api_base else ""))
             return EmbeddingConfig.cloud_openai(api_key, api_base if api_base else None, model=model)
         else:
-            print("[Embedding] 警告: OPENAI_API_KEY 未设置，回退到 Lite 模式")
+            _safe_print("[Embedding] 警告: OPENAI_API_KEY 未设置，回退到 Lite 模式")
             return EmbeddingConfig.lite()
     
     if mode == 'local':
         try:
             import sentence_transformers
-            print("[Embedding] 使用: Local 模式（本地模型）")
+            _safe_print("[Embedding] 使用: Local 模式（本地模型）")
             return EmbeddingConfig.local()
         except ImportError:
-            print("[Embedding] 警告: sentence-transformers 未安装，回退到 Lite 模式")
+            _safe_print("[Embedding] 警告: sentence-transformers 未安装，回退到 Lite 模式")
             return EmbeddingConfig.lite()
     
     # 未指定模式，自动检测
@@ -180,13 +200,13 @@ def auto_select_backend() -> EmbeddingConfig:
         api_base = os.environ['EMBEDDING_API_BASE']
         api_model = os.environ.get('EMBEDDING_MODEL', 'text-embedding-3-small')
         dimension = int(os.environ.get('EMBEDDING_DIMENSION', '1536'))
-        print(f"[Embedding] 自动选择: 自定义 Cloud API ({api_base})")
+        _safe_print(f"[Embedding] 自动选择: 自定义 Cloud API ({api_base})")
         return EmbeddingConfig.cloud_custom(api_key, api_base, api_model, dimension)
     
     # 然后 Cloud API（内存低）
     if os.environ.get('SILICONFLOW_API_KEY'):
         model = os.environ.get('SILICONFLOW_MODEL', 'BAAI/bge-large-zh-v1.5')
-        print(f"[Embedding] 自动选择: 硅基流动 Cloud API (模型: {model})")
+        _safe_print(f"[Embedding] 自动选择: 硅基流动 Cloud API (模型: {model})")
         return EmbeddingConfig.cloud_siliconflow(
             os.environ['SILICONFLOW_API_KEY'],
             model=model
@@ -195,7 +215,7 @@ def auto_select_backend() -> EmbeddingConfig:
     if os.environ.get('OPENAI_API_KEY'):
         api_base = os.environ.get('OPENAI_API_BASE', '')
         model = os.environ.get('OPENAI_MODEL', 'text-embedding-3-small')
-        print(f"[Embedding] 自动选择: OpenAI Cloud API (模型: {model})" + (f" ({api_base})" if api_base else ""))
+        _safe_print(f"[Embedding] 自动选择: OpenAI Cloud API (模型: {model})" + (f" ({api_base})" if api_base else ""))
         return EmbeddingConfig.cloud_openai(
             os.environ['OPENAI_API_KEY'],
             api_base if api_base else None,
@@ -205,11 +225,11 @@ def auto_select_backend() -> EmbeddingConfig:
     # 其次本地
     try:
         import sentence_transformers
-        print("[Embedding] 自动选择: Local 模式（本地模型）")
+        _safe_print("[Embedding] 自动选择: Local 模式（本地模型）")
         return EmbeddingConfig.local()
     except ImportError:
         pass
     
     # 最后 Lite
-    print("[Embedding] 自动选择: Lite 模式（无语义搜索）")
+    _safe_print("[Embedding] 自动选择: Lite 模式（无语义搜索）")
     return EmbeddingConfig.lite()

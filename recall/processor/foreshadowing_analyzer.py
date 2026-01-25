@@ -34,6 +34,27 @@ from dataclasses import dataclass, field
 if TYPE_CHECKING:
     from .foreshadowing import ForeshadowingTracker
 
+# Windows GBK 编码兼容的安全打印函数
+def _safe_print(msg: str) -> None:
+    """安全打印函数，替换 emoji 为 ASCII 等价物以避免 Windows GBK 编码错误"""
+    emoji_map = {
+        '📥': '[IN]', '📤': '[OUT]', '🔍': '[SEARCH]', '✅': '[OK]', '❌': '[FAIL]',
+        '⚠️': '[WARN]', '💾': '[SAVE]', '🗃️': '[DB]', '🧹': '[CLEAN]', '📊': '[STATS]',
+        '🔄': '[SYNC]', '📦': '[PKG]', '🚀': '[START]', '🎯': '[TARGET]', '💡': '[HINT]',
+        '🔧': '[FIX]', '📝': '[NOTE]', '🎉': '[DONE]', '⏱️': '[TIME]', '🌐': '[NET]',
+        '🧠': '[BRAIN]', '💬': '[CHAT]', '🏷️': '[TAG]', '📁': '[DIR]', '🔒': '[LOCK]',
+        '🌱': '[PLANT]', '🗑️': '[DEL]', '💫': '[MAGIC]', '🎭': '[MASK]', '📖': '[BOOK]',
+        '⚡': '[FAST]', '🔥': '[HOT]', '💎': '[GEM]', '🌟': '[STAR]', '🎨': '[ART]'
+    }
+    for emoji, ascii_equiv in emoji_map.items():
+        msg = msg.replace(emoji, ascii_equiv)
+    try:
+        print(msg)
+    except UnicodeEncodeError:
+        print(msg.encode('ascii', errors='replace').decode('ascii'))
+
+
+
 class AnalyzerBackend(Enum):
     """分析器后端类型"""
     MANUAL = "manual"  # 手动模式（默认）- 不做任何自动分析
@@ -338,9 +359,9 @@ Important:
         try:
             with open(markers_file, 'r', encoding='utf-8') as f:
                 self._analysis_markers = json.load(f)
-            print(f"[Recall] 已加载伏笔分析状态（{len(self._analysis_markers)} 个用户）")
+            _safe_print(f"[Recall] 已加载伏笔分析状态（{len(self._analysis_markers)} 个用户）")
         except Exception as e:
-            print(f"[Recall] 加载分析标记失败: {e}")
+            _safe_print(f"[Recall] 加载分析标记失败: {e}")
             self._analysis_markers = {}
     
     def _save_analysis_markers(self):
@@ -353,7 +374,7 @@ Important:
             with open(markers_file, 'w', encoding='utf-8') as f:
                 json.dump(self._analysis_markers, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            print(f"[Recall] 保存分析标记失败: {e}")
+            _safe_print(f"[Recall] 保存分析标记失败: {e}")
     
     def _update_analysis_marker(self, user_id: str, memory_id: Optional[str] = None):
         """更新指定用户的分析标记"""
@@ -366,7 +387,7 @@ Important:
     def _init_llm_client(self):
         """初始化 LLM 客户端"""
         if not self.config.llm_api_key:
-            print("[Recall] 警告：LLM 模式需要配置 API key")
+            _safe_print("[Recall] 警告：LLM 模式需要配置 API key")
             return
         
         try:
@@ -377,7 +398,7 @@ Important:
                 api_base=self.config.llm_base_url
             )
         except ImportError as e:
-            print(f"[Recall] 警告：LLM 客户端初始化失败: {e}")
+            _safe_print(f"[Recall] 警告：LLM 客户端初始化失败: {e}")
             self._llm_client = None
     
     @property
@@ -435,8 +456,8 @@ Important:
         if self.config.backend == AnalyzerBackend.LLM:
             current_count = self._turn_counters[cache_key]
             if current_count >= self.config.trigger_interval:
-                print(f"[ForeshadowAnalyzer] 🔄 触发分析: user={cache_key}")
-                print(f"[ForeshadowAnalyzer]    轮次={current_count}, 间隔={self.config.trigger_interval}")
+                _safe_print(f"[ForeshadowAnalyzer] 🔄 触发分析: user={cache_key}")
+                _safe_print(f"[ForeshadowAnalyzer]    轮次={current_count}, 间隔={self.config.trigger_interval}")
                 self._turn_counters[cache_key] = 0
                 return self._trigger_llm_analysis(user_id, character_id)
         
@@ -514,7 +535,7 @@ Important:
             return conversations
             
         except Exception as e:
-            print(f"[Recall] 从记忆获取对话失败: {e}，回退到 buffer")
+            _safe_print(f"[Recall] 从记忆获取对话失败: {e}，回退到 buffer")
             return self._buffers.get(cache_key, [])
     
     def _trigger_llm_analysis(self, user_id: str, character_id: str = "default") -> AnalysisResult:
@@ -537,7 +558,7 @@ Important:
         
         # 尝试获取锁，如果已经有分析在进行则跳过
         if not user_lock.acquire(blocking=False):
-            print(f"[ForeshadowAnalyzer] ⏭️ 跳过: 用户 {cache_key} 的分析正在进行中")
+            _safe_print(f"[ForeshadowAnalyzer] ⏭️ 跳过: 用户 {cache_key} 的分析正在进行中")
             return AnalysisResult(
                 triggered=False,
                 error="分析正在进行中"
@@ -577,14 +598,14 @@ Important:
             )
             
             # 调用 LLM
-            print(f"[ForeshadowAnalyzer] 🤖 调用 LLM 分析...")
-            print(f"[ForeshadowAnalyzer]    用户={cache_key}, 对话数={len(conversations)}, 活跃伏笔={len(active)}")
+            _safe_print(f"[ForeshadowAnalyzer] 🤖 调用 LLM 分析...")
+            _safe_print(f"[ForeshadowAnalyzer]    用户={cache_key}, 对话数={len(conversations)}, 活跃伏笔={len(active)}")
             response = self._llm_client.chat(
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.3,  # 低温度，更确定性
                 max_tokens=1000
             )
-            print(f"[ForeshadowAnalyzer]    LLM 响应: {len(response.content)} 字符")
+            _safe_print(f"[ForeshadowAnalyzer]    LLM 响应: {len(response.content)} 字符")
             
             # 解析结果
             result = self._parse_llm_response(response.content)
@@ -592,11 +613,11 @@ Important:
             
             # 处理结果：自动埋下伏笔
             if self.config.auto_plant and result.new_foreshadowings:
-                print(f"[ForeshadowAnalyzer] 🌱 自动埋下 {len(result.new_foreshadowings)} 个新伏笔")
+                _safe_print(f"[ForeshadowAnalyzer] 🌱 自动埋下 {len(result.new_foreshadowings)} 个新伏笔")
                 for fsh_data in result.new_foreshadowings:
                     try:
                         content = fsh_data.get('content', '')
-                        print(f"[ForeshadowAnalyzer]    埋下: {content[:50]}..." if len(content) > 50 else f"[ForeshadowAnalyzer]    埋下: {content}")
+                        _safe_print(f"[ForeshadowAnalyzer]    埋下: {content[:50]}..." if len(content) > 50 else f"[ForeshadowAnalyzer]    埋下: {content}")
                         self.tracker.plant(
                             content=content,
                             user_id=user_id,
@@ -605,22 +626,22 @@ Important:
                             related_entities=fsh_data.get('related_entities', [])
                         )
                     except Exception as e:
-                        print(f"[ForeshadowAnalyzer] ❌ 埋下失败: {e}")
+                        _safe_print(f"[ForeshadowAnalyzer] ❌ 埋下失败: {e}")
             
             # 处理结果：自动解决伏笔
             if self.config.auto_resolve and result.potentially_resolved:
-                print(f"[ForeshadowAnalyzer] ✅ 检测到 {len(result.potentially_resolved)} 个可能解决的伏笔")
+                _safe_print(f"[ForeshadowAnalyzer] ✅ 检测到 {len(result.potentially_resolved)} 个可能解决的伏笔")
                 for resolved_data in result.potentially_resolved:
                     fsh_id = resolved_data.get('foreshadowing_id')
                     confidence = resolved_data.get('confidence', 0)
                     evidence = resolved_data.get('evidence', '')
                     
-                    print(f"[ForeshadowAnalyzer]    检测: id={fsh_id}, 置信度={confidence:.2f}")
+                    _safe_print(f"[ForeshadowAnalyzer]    检测: id={fsh_id}, 置信度={confidence:.2f}")
                     
                     # 只有置信度高于0.8才自动解决
                     if fsh_id and confidence >= 0.8:
                         try:
-                            print(f"[ForeshadowAnalyzer]    自动解决: {evidence[:50]}..." if len(evidence) > 50 else f"[ForeshadowAnalyzer]    自动解决: {evidence}")
+                            _safe_print(f"[ForeshadowAnalyzer]    自动解决: {evidence[:50]}..." if len(evidence) > 50 else f"[ForeshadowAnalyzer]    自动解决: {evidence}")
                             self.tracker.resolve(
                                 foreshadowing_id=fsh_id,
                                 resolution=f"[自动检测] {evidence}",
@@ -628,9 +649,9 @@ Important:
                                 character_id=character_id
                             )
                         except Exception as e:
-                            print(f"[ForeshadowAnalyzer] ❌ 自动解决失败: {e}")
+                            _safe_print(f"[ForeshadowAnalyzer] ❌ 自动解决失败: {e}")
                     else:
-                        print(f"[ForeshadowAnalyzer]    跳过: 置信度不足 ({confidence:.2f} < 0.8)")
+                        _safe_print(f"[ForeshadowAnalyzer]    跳过: 置信度不足 ({confidence:.2f} < 0.8)")
             
             # 【改进】更新分析标记（记录最后分析的记忆ID）
             cache_key = f"{user_id}/{character_id}"
@@ -642,12 +663,12 @@ Important:
             # 清空已分析的缓冲区
             self._buffers[cache_key] = []
             
-            print(f"[ForeshadowAnalyzer] ✅ 分析完成: 新伏笔={len(result.new_foreshadowings)}, 可能解决={len(result.potentially_resolved)}")
+            _safe_print(f"[ForeshadowAnalyzer] ✅ 分析完成: 新伏笔={len(result.new_foreshadowings)}, 可能解决={len(result.potentially_resolved)}")
             
             return result
             
         except Exception as e:
-            print(f"[ForeshadowAnalyzer] ❌ LLM 分析异常: {e}")
+            _safe_print(f"[ForeshadowAnalyzer] ❌ LLM 分析异常: {e}")
             import traceback
             traceback.print_exc()
             return AnalysisResult(
@@ -775,12 +796,12 @@ Important:
         self._init_llm_client()
         
         if self._llm_client:
-            print(f"[Recall] 伏笔分析器已切换到 LLM 模式 (model={model})")
+            _safe_print(f"[Recall] 伏笔分析器已切换到 LLM 模式 (model={model})")
         else:
-            print("[Recall] 警告：LLM 客户端初始化失败")
+            _safe_print("[Recall] 警告：LLM 客户端初始化失败")
     
     def disable_llm_mode(self):
         """动态禁用 LLM 模式，切换回手动模式（无需重启服务）"""
         self.config.backend = AnalyzerBackend.MANUAL
         self._llm_client = None
-        print("[Recall] 伏笔分析器已切换到手动模式")
+        _safe_print("[Recall] 伏笔分析器已切换到手动模式")

@@ -8,6 +8,26 @@ from dataclasses import dataclass
 from enum import Enum
 
 
+# Windows GBK 编码兼容的安全打印函数
+def _safe_print(msg: str) -> None:
+    """安全打印函数，替换 emoji 为 ASCII 等价物以避免 Windows GBK 编码错误"""
+    emoji_map = {
+        '📥': '[IN]', '📤': '[OUT]', '🔍': '[SEARCH]', '✅': '[OK]', '❌': '[FAIL]',
+        '⚠️': '[WARN]', '💾': '[SAVE]', '🗃️': '[DB]', '🧹': '[CLEAN]', '📊': '[STATS]',
+        '🔄': '[SYNC]', '📦': '[PKG]', '🚀': '[START]', '🎯': '[TARGET]', '💡': '[HINT]',
+        '🔧': '[FIX]', '📝': '[NOTE]', '🎉': '[DONE]', '⏱️': '[TIME]', '🌐': '[NET]',
+        '🧠': '[BRAIN]', '💬': '[CHAT]', '🏷️': '[TAG]', '📁': '[DIR]', '🔒': '[LOCK]',
+        '🌱': '[PLANT]', '🗑️': '[DEL]', '💫': '[MAGIC]', '🎭': '[MASK]', '📖': '[BOOK]',
+        '⚡': '[FAST]', '🔥': '[HOT]', '💎': '[GEM]', '🌟': '[STAR]', '🎨': '[ART]'
+    }
+    for emoji, ascii_equiv in emoji_map.items():
+        msg = msg.replace(emoji, ascii_equiv)
+    try:
+        print(msg)
+    except UnicodeEncodeError:
+        print(msg.encode('ascii', errors='replace').decode('ascii'))
+
+
 class MaintenanceType(Enum):
     """维护类型"""
     CONSOLIDATE = "consolidate"     # 记忆整合
@@ -79,7 +99,7 @@ class AutoMaintainer:
         )
         self._scheduler_thread.start()
         
-        print("[Recall] 自动维护器已启动")
+        _safe_print("[Recall] 自动维护器已启动")
     
     def stop(self):
         """停止维护调度器"""
@@ -89,7 +109,7 @@ class AutoMaintainer:
         if self._scheduler_thread:
             self._scheduler_thread.join(timeout=5.0)
         
-        print("[Recall] 自动维护器已停止")
+        _safe_print("[Recall] 自动维护器已停止")
     
     def _scheduler_loop(self):
         """调度循环"""
@@ -104,12 +124,12 @@ class AutoMaintainer:
             
             for task in tasks_to_run:
                 try:
-                    print(f"[Recall] 执行维护任务: {task.name}")
+                    _safe_print(f"[Recall] 执行维护任务: {task.name}")
                     task.handler()
                     task.last_run = time.time()
                     task.next_run = task.last_run + task.interval_hours * 3600
                 except Exception as e:
-                    print(f"[Recall] 维护任务失败 {task.name}: {e}")
+                    _safe_print(f"[Recall] 维护任务失败 {task.name}: {e}")
             
             # 每分钟检查一次
             self._stop_event.wait(60)
@@ -121,13 +141,13 @@ class AutoMaintainer:
         
         task = self.tasks[name]
         try:
-            print(f"[Recall] 手动执行维护任务: {task.name}")
+            _safe_print(f"[Recall] 手动执行维护任务: {task.name}")
             task.handler()
             task.last_run = time.time()
             task.next_run = task.last_run + task.interval_hours * 3600
             return True
         except Exception as e:
-            print(f"[Recall] 维护任务失败 {task.name}: {e}")
+            _safe_print(f"[Recall] 维护任务失败 {task.name}: {e}")
             return False
     
     def enable(self, name: str):
@@ -221,7 +241,7 @@ def create_default_maintainer(
         monitor = get_monitor()
         health = monitor.get_health()
         if not health['healthy']:
-            print(f"[Recall] 健康检查警告: {health['issues']}")
+            _safe_print(f"[Recall] 健康检查警告: {health['issues']}")
     
     maintainer.register(
         'health_check',

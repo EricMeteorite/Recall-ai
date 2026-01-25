@@ -6,6 +6,26 @@ from typing import List, Set
 from dataclasses import dataclass
 
 
+# Windows GBK 编码兼容的安全打印函数
+def _safe_print(msg: str) -> None:
+    """安全打印函数，替换 emoji 为 ASCII 等价物以避免 Windows GBK 编码错误"""
+    emoji_map = {
+        '📥': '[IN]', '📤': '[OUT]', '🔍': '[SEARCH]', '✅': '[OK]', '❌': '[FAIL]',
+        '⚠️': '[WARN]', '💾': '[SAVE]', '🗃️': '[DB]', '🧹': '[CLEAN]', '📊': '[STATS]',
+        '🔄': '[SYNC]', '📦': '[PKG]', '🚀': '[START]', '🎯': '[TARGET]', '💡': '[HINT]',
+        '🔧': '[FIX]', '📝': '[NOTE]', '🎉': '[DONE]', '⏱️': '[TIME]', '🌐': '[NET]',
+        '🧠': '[BRAIN]', '💬': '[CHAT]', '🏷️': '[TAG]', '📁': '[DIR]', '🔒': '[LOCK]',
+        '🌱': '[PLANT]', '🗑️': '[DEL]', '💫': '[MAGIC]', '🎭': '[MASK]', '📖': '[BOOK]',
+        '⚡': '[FAST]', '🔥': '[HOT]', '💎': '[GEM]', '🌟': '[STAR]', '🎨': '[ART]'
+    }
+    for emoji, ascii_equiv in emoji_map.items():
+        msg = msg.replace(emoji, ascii_equiv)
+    try:
+        print(msg)
+    except UnicodeEncodeError:
+        print(msg.encode('ascii', errors='replace').decode('ascii'))
+
+
 @dataclass
 class ExtractedEntity:
     """提取的实体"""
@@ -80,7 +100,7 @@ class EntityExtractor:
                 last_error = str(e)
         
         # 如果都失败，使用空白模型（基础功能仍可用）
-        print(f"[Recall] 警告：无法加载 NLP 模型，实体识别功能将使用简化版本 (原因: {last_error})")
+        _safe_print(f"[Recall] 警告：无法加载 NLP 模型，实体识别功能将使用简化版本 (原因: {last_error})")
         return spacy.blank('zh')  # 空白模型，只有分词，没有NER
     
     def extract(self, text: str) -> List[ExtractedEntity]:

@@ -15,41 +15,27 @@ from pydantic import BaseModel, Field
 from .version import __version__
 from .engine import RecallEngine
 
-
-# ==================== 安全打印函数 ====================
-# Windows 后台进程使用 GBK 编码，无法处理 emoji
-# 将 emoji 替换为 ASCII 安全字符
-
-_EMOJI_MAP = {
-    '📥': '[IN]',
-    '📤': '[OUT]',
-    '🔍': '[SEARCH]',
-    '✅': '[OK]',
-    '❌': '[FAIL]',
-    '⏭️': '[SKIP]',
-    '📊': '[STATS]',
-    '📋': '[LIST]',
-    '🗑️': '[DEL]',
-    '📦': '[PKG]',
-    '⚠️': '[WARN]',
-    '🔄': '[SYNC]',
-    '💡': '[TIP]',
-    '🎯': '[TARGET]',
-    '📝': '[NOTE]',
-    '🧠': '[BRAIN]',
-}
-
-def safe_print(msg: str):
-    """打印消息，自动处理 Windows GBK 编码问题"""
-    # 替换 emoji 为 ASCII
-    for emoji, ascii_repr in _EMOJI_MAP.items():
-        msg = msg.replace(emoji, ascii_repr)
-    
+# Windows GBK 编码兼容的安全打印函数
+def _safe_print(msg: str) -> None:
+    """安全打印函数，替换 emoji 为 ASCII 等价物以避免 Windows GBK 编码错误"""
+    emoji_map = {
+        '📥': '[IN]', '📤': '[OUT]', '🔍': '[SEARCH]', '✅': '[OK]', '❌': '[FAIL]',
+        '⚠️': '[WARN]', '💾': '[SAVE]', '🗃️': '[DB]', '🧹': '[CLEAN]', '📊': '[STATS]',
+        '🔄': '[SYNC]', '📦': '[PKG]', '🚀': '[START]', '🎯': '[TARGET]', '💡': '[HINT]',
+        '🔧': '[FIX]', '📝': '[NOTE]', '🎉': '[DONE]', '⏱️': '[TIME]', '🌐': '[NET]',
+        '🧠': '[BRAIN]', '💬': '[CHAT]', '🏷️': '[TAG]', '📁': '[DIR]', '🔒': '[LOCK]',
+        '🌱': '[PLANT]', '🗑️': '[DEL]', '💫': '[MAGIC]', '🎭': '[MASK]', '📖': '[BOOK]',
+        '⚡': '[FAST]', '🔥': '[HOT]', '💎': '[GEM]', '🌟': '[STAR]', '🎨': '[ART]'
+    }
+    for emoji, ascii_equiv in emoji_map.items():
+        msg = msg.replace(emoji, ascii_equiv)
     try:
         print(msg)
     except UnicodeEncodeError:
-        # 如果还有其他无法编码的字符，用 ASCII 安全方式输出
-        print(msg.encode('ascii', 'replace').decode('ascii'))
+        print(msg.encode('ascii', errors='replace').decode('ascii'))
+
+
+
 
 
 # ==================== 配置文件管理 ====================
@@ -575,7 +561,7 @@ def load_api_keys_from_file():
         # 创建默认配置文件
         config_file.parent.mkdir(parents=True, exist_ok=True)
         config_file.write_text(get_default_config_content(), encoding='utf-8')
-        print(f"[Config] 已创建配置文件: {config_file}")
+        _safe_print(f"[Config] 已创建配置文件: {config_file}")
         return
     
     # 先清除所有支持的配置项（热更新时确保旧配置被清除）
@@ -608,11 +594,11 @@ def load_api_keys_from_file():
                         loaded_configs.append(f"{key}={display_value}")
         
         if loaded_configs:
-            print(f"[Config] 已加载配置: {', '.join(loaded_configs)}")
+            _safe_print(f"[Config] 已加载配置: {', '.join(loaded_configs)}")
         else:
-            print(f"[Config] 配置文件为空或无有效配置")
+            _safe_print(f"[Config] 配置文件为空或无有效配置")
     except Exception as e:
-        print(f"[Config] 读取配置文件失败: {e}")
+        _safe_print(f"[Config] 读取配置文件失败: {e}")
 
 
 def save_config_to_file(updates: Dict[str, str]):
@@ -634,7 +620,7 @@ def save_config_to_file(updates: Dict[str, str]):
         with open(config_file, 'r', encoding='utf-8') as f:
             lines = f.readlines()
     except Exception as e:
-        print(f"[Config] 读取配置文件失败: {e}")
+        _safe_print(f"[Config] 读取配置文件失败: {e}")
         return
     
     # 更新配置
@@ -672,9 +658,9 @@ def save_config_to_file(updates: Dict[str, str]):
     try:
         with open(config_file, 'w', encoding='utf-8') as f:
             f.writelines(new_lines)
-        print(f"[Config] 已保存配置: {list(updates.keys())}")
+        _safe_print(f"[Config] 已保存配置: {list(updates.keys())}")
     except Exception as e:
-        print(f"[Config] 保存配置文件失败: {e}")
+        _safe_print(f"[Config] 保存配置文件失败: {e}")
 
 
 # ==================== 请求/响应模型 ====================
@@ -922,13 +908,13 @@ def _build_foreshadowing_config():
             auto_plant=auto_plant_str in ('true', '1', 'yes'),
             auto_resolve=auto_resolve_str in ('true', '1', 'yes')
         )
-        safe_print(f"[Recall] 伏笔分析器: LLM 模式已启用")
+        _safe_print(f"[Recall] 伏笔分析器: LLM 模式已启用")
         return config
     else:
         if llm_api_key and not llm_enabled:
-            print("[Recall] 伏笔分析器: 手动模式 (LLM 已配置但未启用)")
+            _safe_print("[Recall] 伏笔分析器: 手动模式 (LLM 已配置但未启用)")
         else:
-            print("[Recall] 伏笔分析器: 手动模式 (未配置 LLM API)")
+            _safe_print("[Recall] 伏笔分析器: 手动模式 (未配置 LLM API)")
         return None
 
 
@@ -988,7 +974,7 @@ def reload_engine():
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     # 启动时
-    print(f"[Recall API] 服务启动 v{__version__}")
+    _safe_print(f"[Recall API] 服务启动 v{__version__}")
     get_engine()  # 预初始化
     
     yield
@@ -996,7 +982,7 @@ async def lifespan(app: FastAPI):
     # 关闭时
     if _engine:
         _engine.close()
-    print("[Recall API] 服务关闭")
+    _safe_print("[Recall API] 服务关闭")
 
 
 # ==================== FastAPI 应用 ====================
@@ -1056,8 +1042,8 @@ async def add_memory(request: AddMemoryRequest):
     role = request.metadata.get('role', 'unknown') if request.metadata else 'unknown'
     
     content_preview = request.content[:80].replace('\n', ' ') if len(request.content) > 80 else request.content.replace('\n', ' ')
-    safe_print(f"[Recall][Memory] 📥 添加请求: user={user_id}, char={character_id}, role={role}")
-    safe_print(f"[Recall][Memory]    内容({len(request.content)}字): {content_preview}{'...' if len(request.content) > 80 else ''}")
+    _safe_print(f"[Recall][Memory] 📥 添加请求: user={user_id}, char={character_id}, role={role}")
+    _safe_print(f"[Recall][Memory]    内容({len(request.content)}字): {content_preview}{'...' if len(request.content) > 80 else ''}")
     
     result = engine.add(
         content=request.content,
@@ -1067,9 +1053,9 @@ async def add_memory(request: AddMemoryRequest):
     
     # 记录结果（包括去重跳过的情况）
     if result.success:
-        safe_print(f"[Recall][Memory] ✅ 保存成功: id={result.id}, entities={result.entities}")
+        _safe_print(f"[Recall][Memory] ✅ 保存成功: id={result.id}, entities={result.entities}")
     else:
-        safe_print(f"[Recall][Memory] ⏭️ 跳过: {result.message}")
+        _safe_print(f"[Recall][Memory] ⏭️ 跳过: {result.message}")
     
     # 【注意】条件提取已移至 /v1/foreshadowing/analyze/turn 端点
     # 与伏笔分析使用相同的触发间隔机制（默认每5轮），避免重复分析相同对话历史
@@ -1094,8 +1080,8 @@ async def search_memories(request: SearchRequest):
     - config_preset: 配置预设（default/fast/accurate）
     """
     query_preview = request.query[:50].replace('\n', ' ') if len(request.query) > 50 else request.query.replace('\n', ' ')
-    safe_print(f"[Recall][Memory] 🔍 搜索请求: user={request.user_id}, top_k={request.top_k}")
-    safe_print(f"[Recall][Memory]    查询: {query_preview}{'...' if len(request.query) > 50 else ''}")
+    _safe_print(f"[Recall][Memory] 🔍 搜索请求: user={request.user_id}, top_k={request.top_k}")
+    _safe_print(f"[Recall][Memory]    查询: {query_preview}{'...' if len(request.query) > 50 else ''}")
     
     # Phase 3: 处理新参数
     temporal_context = None
@@ -1106,9 +1092,9 @@ async def search_memories(request: SearchRequest):
             end = datetime.fromisoformat(request.temporal_filter.end) if request.temporal_filter.end else None
             from recall.retrieval.config import TemporalContext
             temporal_context = TemporalContext(start=start, end=end)
-            safe_print(f"[Recall][Memory]    时态过滤: {start} ~ {end}")
+            _safe_print(f"[Recall][Memory]    时态过滤: {start} ~ {end}")
         except Exception as e:
-            safe_print(f"[Recall][Memory]    时态过滤解析失败: {e}")
+            _safe_print(f"[Recall][Memory]    时态过滤解析失败: {e}")
     
     # Phase 3: 处理图遍历扩展参数（添加到 filters）
     filters = request.filters or {}
@@ -1118,14 +1104,14 @@ async def search_memories(request: SearchRequest):
             'max_depth': request.graph_expand.max_depth,
             'direction': request.graph_expand.direction
         }
-        safe_print(f"[Recall][Memory]    图遍历: 实体={request.graph_expand.center_entities}, 深度={request.graph_expand.max_depth}")
+        _safe_print(f"[Recall][Memory]    图遍历: 实体={request.graph_expand.center_entities}, 深度={request.graph_expand.max_depth}")
     
     # Phase 3: 处理配置预设
     config_preset = None
     if request.config_preset:
         config_preset = request.config_preset
         filters['config_preset'] = request.config_preset
-        safe_print(f"[Recall][Memory]    配置预设: {request.config_preset}")
+        _safe_print(f"[Recall][Memory]    配置预设: {request.config_preset}")
     
     engine = get_engine()
     results = engine.search(
@@ -1137,10 +1123,10 @@ async def search_memories(request: SearchRequest):
         config_preset=config_preset
     )
     
-    safe_print(f"[Recall][Memory] 📊 搜索结果: 找到 {len(results)} 条记忆")
+    _safe_print(f"[Recall][Memory] 📊 搜索结果: 找到 {len(results)} 条记忆")
     for i, r in enumerate(results[:3]):  # 只打印前3条
         content_preview = r.content[:40].replace('\n', ' ')
-        safe_print(f"[Recall][Memory]    [{i+1}] score={r.score:.3f}: {content_preview}...")
+        _safe_print(f"[Recall][Memory]    [{i+1}] score={r.score:.3f}: {content_preview}...")
     
     return [
         SearchResultItem(
@@ -1179,8 +1165,8 @@ async def list_memories(
         limit=limit
     )
     
-    safe_print(f"[Recall][Memory] 📋 获取列表: user={user_id}, offset={offset}, limit={limit}")
-    safe_print(f"[Recall][Memory]    返回 {len(memories)}/{total_count} 条记忆")
+    _safe_print(f"[Recall][Memory] 📋 获取列表: user={user_id}, offset={offset}, limit={limit}")
+    _safe_print(f"[Recall][Memory]    返回 {len(memories)}/{total_count} 条记忆")
     
     return {
         "memories": memories, 
@@ -1247,14 +1233,14 @@ async def clear_memories(
     
     # 使用高效的计数方法获取数量
     count = engine.count_memories(user_id=user_id)
-    safe_print(f"[Recall][Memory] 🗑️ 清空请求: user={user_id}, 后端计数={count}")
+    _safe_print(f"[Recall][Memory] 🗑️ 清空请求: user={user_id}, 后端计数={count}")
     
     if count == 0:
         return {"success": True, "message": "该角色没有记忆数据", "deleted_count": 0}
     
     # 清空
     success = engine.clear(user_id=user_id)
-    safe_print(f"[Recall][Memory] {'✅' if success else '❌'} 清空完成: user={user_id}, success={success}")
+    _safe_print(f"[Recall][Memory] {'✅' if success else '❌'} 清空完成: user={user_id}, success={success}")
     
     if success:
         return {
@@ -1365,8 +1351,8 @@ async def build_context(request: ContextRequest):
     如果需要强制提取条件，请显式传入 auto_extract_context=True。
     """
     query_preview = request.query[:60].replace('\n', ' ') if len(request.query) > 60 else request.query.replace('\n', ' ')
-    safe_print(f"[Recall][Context] 📦 构建上下文: user={request.user_id}, auto_extract={request.auto_extract_context}")
-    safe_print(f"[Recall][Context]    查询: {query_preview}{'...' if len(request.query) > 60 else ''}")
+    _safe_print(f"[Recall][Context] 📦 构建上下文: user={request.user_id}, auto_extract={request.auto_extract_context}")
+    _safe_print(f"[Recall][Context]    查询: {query_preview}{'...' if len(request.query) > 60 else ''}")
     
     engine = get_engine()
     context = engine.build_context(
@@ -1379,7 +1365,7 @@ async def build_context(request: ContextRequest):
         auto_extract_context=request.auto_extract_context
     )
     
-    safe_print(f"[Recall][Context] ✅ 上下文构建完成: 总长度={len(context)}字符")
+    _safe_print(f"[Recall][Context] ✅ 上下文构建完成: 总长度={len(context)}字符")
     return {"context": context}
 
 
@@ -1437,14 +1423,14 @@ async def list_persistent_contexts(
     if context_type:
         contexts = [c for c in contexts if c['context_type'] == context_type]
     
-    safe_print(f"[Recall][Context] 📋 获取条件列表: user={user_id}, char={character_id}")
-    safe_print(f"[Recall][Context]    活跃条件: {len(contexts)} 条")
+    _safe_print(f"[Recall][Context] 📋 获取条件列表: user={user_id}, char={character_id}")
+    _safe_print(f"[Recall][Context]    活跃条件: {len(contexts)} 条")
     if contexts:
         types_summary = {}
         for c in contexts:
             t = c.get('context_type', 'unknown')
             types_summary[t] = types_summary.get(t, 0) + 1
-        safe_print(f"[Recall][Context]    类型分布: {types_summary}")
+        _safe_print(f"[Recall][Context]    类型分布: {types_summary}")
     
     return [
         PersistentContextItem(
@@ -1540,7 +1526,7 @@ async def clear_all_persistent_contexts(
     for ctx in contexts:
         engine.remove_persistent_context(ctx['id'], user_id, character_id)
     
-    safe_print(f"[Recall][Context] 🗑️ 清空条件: user={user_id}, char={character_id}, 删除={count}条")
+    _safe_print(f"[Recall][Context] 🗑️ 清空条件: user={user_id}, char={character_id}, 删除={count}条")
     return {"success": True, "message": f"已清空 {count} 个持久条件", "count": count}
 
 
@@ -1716,17 +1702,17 @@ async def list_foreshadowing(
     """获取活跃伏笔"""
     engine = get_engine()
     active = engine.get_active_foreshadowings(user_id, character_id)
-    safe_print(f"[Recall][Foreshadow] 📋 获取伏笔列表: user={user_id}, char={character_id}")
-    safe_print(f"[Recall][Foreshadow]    活跃伏笔: {len(active)} 条")
+    _safe_print(f"[Recall][Foreshadow] 📋 获取伏笔列表: user={user_id}, char={character_id}")
+    _safe_print(f"[Recall][Foreshadow]    活跃伏笔: {len(active)} 条")
     if active:
         status_summary = {}
         for f in active:
             s = f.status.value
             status_summary[s] = status_summary.get(s, 0) + 1
-        safe_print(f"[Recall][Foreshadow]    状态分布: {status_summary}")
+        _safe_print(f"[Recall][Foreshadow]    状态分布: {status_summary}")
         for i, f in enumerate(active[:3]):
             preview = f.content[:40].replace('\n', ' ')
-            safe_print(f"[Recall][Foreshadow]    [{i+1}] {f.status.value}: {preview}...")
+            _safe_print(f"[Recall][Foreshadow]    [{i+1}] {f.status.value}: {preview}...")
     return [
         ForeshadowingItem(
             id=f.id,
@@ -1812,7 +1798,7 @@ async def clear_all_foreshadowings(
     for f in foreshadowings:
         engine.abandon_foreshadowing(f['id'], user_id, character_id)
     
-    safe_print(f"[Recall][Foreshadow] 🗑️ 清空伏笔: user={user_id}, char={character_id}, 删除={count}条")
+    _safe_print(f"[Recall][Foreshadow] 🗑️ 清空伏笔: user={user_id}, char={character_id}, 删除={count}条")
     return {"success": True, "message": f"已清空 {count} 个伏笔", "count": count}
 
 
@@ -1968,8 +1954,8 @@ async def _background_foreshadowing_analysis(engine: RecallEngine, content: str,
     """
     try:
         content_preview = content[:60].replace('\n', ' ') if len(content) > 60 else content.replace('\n', ' ')
-        safe_print(f"[Recall][Analysis] 🔄 后台分析: user={user_id}, role={role}")
-        safe_print(f"[Recall][Analysis]    内容({len(content)}字): {content_preview}{'...' if len(content) > 60 else ''}")
+        _safe_print(f"[Recall][Analysis] 🔄 后台分析: user={user_id}, role={role}")
+        _safe_print(f"[Recall][Analysis]    内容({len(content)}字): {content_preview}{'...' if len(content) > 60 else ''}")
         
         loop = asyncio.get_event_loop()
         
@@ -1987,13 +1973,13 @@ async def _background_foreshadowing_analysis(engine: RecallEngine, content: str,
             timeout=60.0
         )
         if foreshadow_result.triggered:
-            safe_print(f"[Recall][Foreshadow] ✅ 分析完成: 新伏笔={len(foreshadow_result.new_foreshadowings)}, 可能解决={len(foreshadow_result.potentially_resolved)}")
+            _safe_print(f"[Recall][Foreshadow] ✅ 分析完成: 新伏笔={len(foreshadow_result.new_foreshadowings)}, 可能解决={len(foreshadow_result.potentially_resolved)}")
             for f in foreshadow_result.new_foreshadowings[:2]:
-                safe_print(f"[Recall][Foreshadow]    🌱 新伏笔: {f[:50]}..." if len(f) > 50 else f"[Recall][Foreshadow]    🌱 新伏笔: {f}")
+                _safe_print(f"[Recall][Foreshadow]    🌱 新伏笔: {f[:50]}..." if len(f) > 50 else f"[Recall][Foreshadow]    🌱 新伏笔: {f}")
         else:
-            safe_print(f"[Recall][Foreshadow] ⏭️ 未达触发条件")
+            _safe_print(f"[Recall][Foreshadow] ⏭️ 未达触发条件")
         if foreshadow_result.error:
-            safe_print(f"[Recall][Foreshadow] ⚠️ 警告: {foreshadow_result.error}")
+            _safe_print(f"[Recall][Foreshadow] ⚠️ 警告: {foreshadow_result.error}")
         
         # 2. 条件提取（使用同样的触发间隔机制）
         try:
@@ -2005,19 +1991,19 @@ async def _background_foreshadowing_analysis(engine: RecallEngine, content: str,
                 timeout=60.0
             )
             if context_result.get('triggered'):
-                safe_print(f"[Recall][Context] ✅ 提取完成: 新条件={context_result.get('extracted_count', 0)}")
+                _safe_print(f"[Recall][Context] ✅ 提取完成: 新条件={context_result.get('extracted_count', 0)}")
                 for ctx in context_result.get('extracted', [])[:3]:
-                    safe_print(f"[Recall][Context]    🌱 [{ctx['type']}] {ctx['content'][:40]}..." if len(ctx['content']) > 40 else f"[Recall][Context]    🌱 [{ctx['type']}] {ctx['content']}")
+                    _safe_print(f"[Recall][Context]    🌱 [{ctx['type']}] {ctx['content'][:40]}..." if len(ctx['content']) > 40 else f"[Recall][Context]    🌱 [{ctx['type']}] {ctx['content']}")
             else:
                 turns_left = context_result.get('turns_until_next', '?')
-                safe_print(f"[Recall][Context] ⏭️ 未达触发条件 (还需 {turns_left} 轮)")
+                _safe_print(f"[Recall][Context] ⏭️ 未达触发条件 (还需 {turns_left} 轮)")
         except Exception as e:
-            safe_print(f"[Recall][Context] ⚠️ 条件提取失败: {e}")
+            _safe_print(f"[Recall][Context] ⚠️ 条件提取失败: {e}")
             
     except asyncio.TimeoutError:
-        safe_print(f"[Recall][Analysis] ⏱️ 分析超时 (>60s)")
+        _safe_print(f"[Recall][Analysis] ⏱️ 分析超时 (>60s)")
     except Exception as e:
-        safe_print(f"[Recall][Analysis] ❌ 分析失败: {e}")
+        _safe_print(f"[Recall][Analysis] ❌ 分析失败: {e}")
 
 
 @app.post("/v1/foreshadowing/analyze/turn", response_model=ForeshadowingAnalysisResult, tags=["Foreshadowing Analysis"])
@@ -2390,6 +2376,7 @@ async def create_snapshot(
     try:
         # 创建快照
         import time
+        from datetime import datetime
         snapshot_id = f"snap_{int(time.time() * 1000)}"
         timestamp = datetime.now().isoformat()
         
@@ -2862,7 +2849,7 @@ async def update_search_config(request: RetrievalConfigRequest):
         if request.final_top_k is not None:
             config.final_top_k = request.final_top_k
     
-    safe_print(f"[Recall][Config] ⚙️ 检索配置已更新")
+    _safe_print(f"[Recall][Config] ⚙️ 检索配置已更新")
     
     # 返回更新后的配置
     return RetrievalConfigResponse(
@@ -3021,7 +3008,7 @@ async def rebuild_vector_index(user_id: Optional[str] = None):
     注意：重建过程会消耗较多时间和 API 调用（如果使用 API embedding）。
     """
     engine = get_engine()
-    safe_print(f"[Recall] 收到重建向量索引请求: user_id={user_id}")
+    _safe_print(f"[Recall] 收到重建向量索引请求: user_id={user_id}")
     result = engine.rebuild_vector_index(user_id)
     return result
 
@@ -3844,7 +3831,7 @@ async def update_config(request: ConfigUpdateRequest):
         # 如果文件不存在，先创建包含完整模板的文件
         if not config_file.exists():
             config_file.write_text(get_default_config_content(), encoding='utf-8')
-            print(f"[Config] 已创建配置文件: {config_file}")
+            _safe_print(f"[Config] 已创建配置文件: {config_file}")
         
         # 读取原文件保留注释
         lines = []

@@ -20,6 +20,26 @@ from threading import Lock
 from enum import Enum
 
 
+# Windows GBK 编码兼容的安全打印函数
+def _safe_print(msg: str) -> None:
+    """安全打印函数，替换 emoji 为 ASCII 等价物以避免 Windows GBK 编码错误"""
+    emoji_map = {
+        '📥': '[IN]', '📤': '[OUT]', '🔍': '[SEARCH]', '✅': '[OK]', '❌': '[FAIL]',
+        '⚠️': '[WARN]', '💾': '[SAVE]', '🗃️': '[DB]', '🧹': '[CLEAN]', '📊': '[STATS]',
+        '🔄': '[SYNC]', '📦': '[PKG]', '🚀': '[START]', '🎯': '[TARGET]', '💡': '[HINT]',
+        '🔧': '[FIX]', '📝': '[NOTE]', '🎉': '[DONE]', '⏱️': '[TIME]', '🌐': '[NET]',
+        '🧠': '[BRAIN]', '💬': '[CHAT]', '🏷️': '[TAG]', '📁': '[DIR]', '🔒': '[LOCK]',
+        '🌱': '[PLANT]', '🗑️': '[DEL]', '💫': '[MAGIC]', '🎭': '[MASK]', '📖': '[BOOK]',
+        '⚡': '[FAST]', '🔥': '[HOT]', '💎': '[GEM]', '🌟': '[STAR]', '🎨': '[ART]'
+    }
+    for emoji, ascii_equiv in emoji_map.items():
+        msg = msg.replace(emoji, ascii_equiv)
+    try:
+        print(msg)
+    except UnicodeEncodeError:
+        print(msg.encode('ascii', errors='replace').decode('ascii'))
+
+
 class BudgetPeriod(str, Enum):
     """预算周期"""
     HOURLY = "hourly"
@@ -151,7 +171,7 @@ class BudgetManager:
                 self._current_day = today
                 self._current_hour = current_hour
             except Exception as e:
-                print(f"[BudgetManager] 加载使用记录失败: {e}")
+                _safe_print(f"[BudgetManager] 加载使用记录失败: {e}")
     
     def _save(self):
         """保存使用数据"""
@@ -171,7 +191,7 @@ class BudgetManager:
             with open(self.usage_file, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            print(f"[BudgetManager] 保存使用记录失败: {e}")
+            _safe_print(f"[BudgetManager] 保存使用记录失败: {e}")
     
     def _refresh_period(self):
         """刷新周期（检查是否需要重置计数器）"""
