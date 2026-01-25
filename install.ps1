@@ -108,21 +108,25 @@ function Show-ModeSelection {
     Write-Host ""
     Write-Host "Select installation mode:" -ForegroundColor White
     Write-Host ""
-    Write-Host "  1) " -NoNewline; Write-Host "Lite Mode" -ForegroundColor Green -NoNewline; Write-Host "      ~100MB RAM, keyword search only"
+    Write-Host "  1) " -NoNewline; Write-Host "Lite Mode" -ForegroundColor Green -NoNewline; Write-Host "          ~100MB RAM, keyword search only"
     Write-Host "     For: Servers with < 1GB RAM" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "  2) " -NoNewline; Write-Host "Cloud Mode" -ForegroundColor Green -NoNewline; Write-Host "    ~150MB RAM, cloud API for vectors " -NoNewline; Write-Host "[Recommended]" -ForegroundColor Yellow
+    Write-Host "  2) " -NoNewline; Write-Host "Cloud Mode" -ForegroundColor Green -NoNewline; Write-Host "        ~150MB RAM, cloud API for vectors " -NoNewline; Write-Host "[Recommended]" -ForegroundColor Yellow
     Write-Host "     For: Any server, full features, needs API Key" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "  3) " -NoNewline; Write-Host "Local Mode" -ForegroundColor Green -NoNewline; Write-Host "      ~1.5GB RAM, local vector model"
+    Write-Host "  3) " -NoNewline; Write-Host "Local Mode" -ForegroundColor Green -NoNewline; Write-Host "          ~1.5GB RAM, local vector model"
     Write-Host "     For: High-spec servers, fully offline" -ForegroundColor Cyan
     Write-Host ""
+    Write-Host "  4) " -NoNewline; Write-Host "Enterprise Mode" -ForegroundColor Magenta -NoNewline; Write-Host "     ~2GB RAM, Phase 3.5 advanced features"
+    Write-Host "     For: Large-scale deployments (Kuzu + NetworkX + FAISS IVF)" -ForegroundColor Cyan
+    Write-Host ""
     
-    $modeChoice = Read-Host "请选择 [1-3，默认2]"
+    $modeChoice = Read-Host "请选择 [1-4，默认2]"
     
     switch ($modeChoice) {
         "1" { $script:InstallMode = "lite" }
         "3" { $script:InstallMode = "local" }
+        "4" { $script:InstallMode = "enterprise" }
         default { $script:InstallMode = "cloud" }
     }
     
@@ -140,20 +144,22 @@ function Show-Menu {
     Write-Host "  2) 全新安装 (使用国内镜像加速) " -NoNewline
     Write-Host "推荐" -ForegroundColor Green
     Write-Host "  3) 修复/重装依赖"
-    Write-Host "  4) 完全卸载"
-    Write-Host "  5) 查看状态"
-    Write-Host "  6) 退出"
+    Write-Host "  4) " -NoNewline; Write-Host "升级到企业版" -ForegroundColor Magenta -NoNewline; Write-Host " (添加 Kuzu + NetworkX)"
+    Write-Host "  5) 完全卸载"
+    Write-Host "  6) 查看状态"
+    Write-Host "  7) 退出"
     Write-Host ""
     
-    $choice = Read-Host "请输入选项 [1-6]"
+    $choice = Read-Host "请输入选项 [1-7]"
     
     switch ($choice) {
         "1" { Show-ModeSelection; Invoke-Install }
         "2" { Show-ModeSelection; $script:PipMirror = "-i https://pypi.tuna.tsinghua.edu.cn/simple"; Invoke-Install }
         "3" { Invoke-Repair }
-        "4" { Invoke-Uninstall }
-        "5" { Show-Status }
-        "6" { exit 0 }
+        "4" { Invoke-UpgradeEnterprise }
+        "5" { Invoke-Uninstall }
+        "6" { Show-Status }
+        "7" { exit 0 }
         default { 
             Write-Host "无效选项" -ForegroundColor Red
             Write-Host ""
@@ -287,11 +293,12 @@ function Install-Dependencies {
     }
     Write-Host ""
     
-    # 升级 pip
+    # 升级 pip（使用 python -m pip 避免 Windows 锁定问题）
     Write-Info "升级 pip..."
-    $pipArgs = @("install", "--upgrade", "pip", "-q")
-    if ($PipMirror) { $pipArgs += $PipMirror.Split(" ") }
-    & $pipPath @pipArgs 2>$null
+    $pythonPath = Join-Path $VenvPath "Scripts\python.exe"
+    $pipUpgradeArgs = @("-m", "pip", "install", "--upgrade", "pip", "-q")
+    if ($PipMirror) { $pipUpgradeArgs += $PipMirror.Split(" ") }
+    & $pythonPath @pipUpgradeArgs 2>$null
     Write-Success "pip 升级完成"
     
     # 安装项目依赖
@@ -312,6 +319,10 @@ function Install-Dependencies {
         { $_ -in "local", "full" } { 
             $extras = "[local]"
             Write-Info "安装 Local 依赖 (sentence-transformers + FAISS)..."
+        }
+        "enterprise" {
+            $extras = "[local,enterprise]"
+            Write-Info "安装 Enterprise 依赖 (sentence-transformers + FAISS + Kuzu + NetworkX)..."
         }
     }
     
@@ -407,21 +418,11 @@ function Install-Models {
 function Initialize-Recall {
     Write-Step 5 5 "初始化 Recall"
     
-    $recallPath = Join-Path $VenvPath "Scripts\recall.exe"
+    $pythonPath = Join-Path $VenvPath "Scripts\python.exe"
     
     Write-Info "运行初始化..."
     
-    # 根据模式初始化（兼容新旧名称）
-    switch ($InstallMode) {
-        { $_ -in "lite", "lightweight" } {
-            & $recallPath init --lightweight 2>&1 | Out-Null
-        }
-        default {
-            & $recallPath init 2>&1 | Out-Null
-        }
-    }
-    
-    # 创建数据目录
+    # 先创建数据目录（确保目录存在）
     $dirs = @("data", "logs", "cache", "models", "config", "temp")
     foreach ($dir in $dirs) {
         $path = Join-Path $DataPath $dir
@@ -429,6 +430,13 @@ function Initialize-Recall {
             New-Item -ItemType Directory -Path $path -Force | Out-Null
         }
     }
+    
+    # 根据模式初始化（兼容新旧名称）
+    # 使用 Start-Process 完全隔离执行，避免 rich 库的 stderr 输出触发 PowerShell 错误
+    $initArgs = if ($InstallMode -in "lite", "lightweight") { "-m recall init --lightweight" } else { "-m recall init" }
+    
+    Start-Process -FilePath $pythonPath -ArgumentList $initArgs -WorkingDirectory $ScriptDir -WindowStyle Hidden -Wait | Out-Null
+    # 不检查退出码，初始化失败不影响使用（目录已创建）
     
     # 保存安装模式
     $modePath = Join-Path $DataPath "config\install_mode"
@@ -485,6 +493,19 @@ function Invoke-Install {
                 Write-Host "  安装模式: " -NoNewline; Write-Host "Local 模式" -ForegroundColor Cyan
                 Write-Host "  " -NoNewline; Write-Host "✓ 本地模型，无需API Key，完全离线运行" -ForegroundColor Green
             }
+            "enterprise" {
+                Write-Host "  安装模式: " -NoNewline; Write-Host "Enterprise 模式" -ForegroundColor Magenta
+                Write-Host ""
+                Write-Host "  Phase 3.5 企业级性能引擎已启用:" -ForegroundColor Green
+                Write-Host "    ✓ Kuzu 嵌入式图数据库 (高性能图存储)"
+                Write-Host "    ✓ NetworkX 社区检测 (实体群组发现)"
+                Write-Host "    ✓ FAISS IVF 磁盘索引 (百万级向量)"
+                Write-Host "    ✓ QueryPlanner 查询优化器"
+                Write-Host ""
+                Write-Host "  配置 (可选):" -ForegroundColor Yellow
+                Write-Host "    KUZU_BUFFER_POOL_SIZE=256  # Kuzu 内存池大小 (MB)"
+                Write-Host "    AUTO_KUZU_THRESHOLD=100000 # 自动切换 Kuzu 的节点阈值"
+            }
         }
         
         Write-Host ""
@@ -505,6 +526,101 @@ function Invoke-Install {
         if (-not $InstallSuccess) {
             Invoke-Cleanup
         }
+    }
+    
+    Read-Host "按 Enter 退出"
+}
+
+# ==================== 升级到企业版 ====================
+
+function Invoke-UpgradeEnterprise {
+    Write-Header
+    Write-Host "🚀 升级到企业版" -ForegroundColor Magenta
+    Write-Host ""
+    
+    if (-not (Test-Path $VenvPath)) {
+        Write-Error2 "虚拟环境不存在，请先完整安装"
+        Write-Host ""
+        $confirm = Read-Host "是否现在安装? [Y/n]"
+        if ($confirm -notmatch "^[Nn]$") {
+            $script:InstallMode = "enterprise"
+            Invoke-Install
+        }
+        return
+    }
+    
+    # 检查当前安装模式
+    $modePath = Join-Path $DataPath "config\install_mode"
+    $currentMode = "unknown"
+    if (Test-Path $modePath) {
+        $currentMode = Get-Content $modePath -ErrorAction SilentlyContinue
+    }
+    
+    if ($currentMode -eq "enterprise") {
+        Write-Success "当前已是企业版！"
+        Write-Host ""
+        Write-Host "  已安装的企业级组件:" -ForegroundColor Green
+        
+        $pythonPath = Join-Path $VenvPath "Scripts\python.exe"
+        $kuzuVer = & $pythonPath -c "import kuzu; print(kuzu.__version__)" 2>&1
+        $nxVer = & $pythonPath -c "import networkx; print(networkx.__version__)" 2>&1
+        $faissOK = & $pythonPath -c "import faiss; print('OK')" 2>&1
+        
+        Write-Host "    Kuzu: v$kuzuVer"
+        Write-Host "    NetworkX: v$nxVer"
+        Write-Host "    FAISS: $faissOK"
+        Write-Host ""
+        Read-Host "按 Enter 退出"
+        return
+    }
+    
+    Write-Host "  当前模式: " -NoNewline
+    Write-Host "$currentMode" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  将添加以下企业级组件:" -ForegroundColor Yellow
+    Write-Host "    • Kuzu 嵌入式图数据库 (高性能图存储)"
+    Write-Host "    • NetworkX 图分析 (社区检测)"
+    Write-Host "    • FAISS IVF 磁盘索引 (如果尚未安装)"
+    Write-Host ""
+    Write-Host "  预计下载: ~50MB (如果已是 Local 模式则更少)" -ForegroundColor Cyan
+    Write-Host "  不会影响现有数据和配置" -ForegroundColor Green
+    Write-Host ""
+    
+    $confirm = Read-Host "确认升级? [Y/n]"
+    if ($confirm -match "^[Nn]$") {
+        Write-Info "已取消升级"
+        Read-Host "按 Enter 退出"
+        return
+    }
+    
+    Write-Host ""
+    Write-Info "正在安装企业版依赖..."
+    
+    $pythonPath = Join-Path $VenvPath "Scripts\python.exe"
+    $pipArgs = @("-m", "pip", "install", "networkx>=3.0", "kuzu>=0.3", "faiss-cpu>=1.7")
+    if ($PipMirror) { $pipArgs += $PipMirror.Split(" ") }
+    
+    & $pythonPath @pipArgs
+    
+    if ($LASTEXITCODE -eq 0) {
+        # 更新安装模式
+        $configDir = Join-Path $DataPath "config"
+        if (-not (Test-Path $configDir)) {
+            New-Item -ItemType Directory -Path $configDir -Force | Out-Null
+        }
+        Set-Content -Path $modePath -Value "enterprise"
+        
+        Write-Host ""
+        Write-Success "升级完成！"
+        Write-Host ""
+        Write-Host "  企业级功能已启用:" -ForegroundColor Green
+        Write-Host "    ✓ Kuzu 嵌入式图数据库"
+        Write-Host "    ✓ NetworkX 社区检测"
+        Write-Host "    ✓ FAISS IVF 磁盘索引"
+        Write-Host "    ✓ QueryPlanner 查询优化器"
+        Write-Host ""
+    } else {
+        Write-Error2 "升级失败，请检查网络连接"
     }
     
     Read-Host "按 Enter 退出"

@@ -16,6 +16,7 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+MAGENTA='\033[0;35m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 BOLD='\033[1m'
@@ -90,21 +91,25 @@ show_mode_selection() {
     echo ""
     echo -e "${BOLD}请选择安装模式：${NC}"
     echo ""
-    echo -e "  1) ${GREEN}Lite 模式${NC}    ~100MB 内存，仅关键词搜索"
+    echo -e "  1) ${GREEN}Lite 模式${NC}        ~100MB 内存，仅关键词搜索"
     echo -e "     ${CYAN}适合: 内存 < 1GB 的服务器${NC}"
     echo ""
-    echo -e "  2) ${GREEN}Cloud 模式${NC}   ~150MB 内存，使用云端API进行向量搜索 ${YELLOW}★推荐★${NC}"
+    echo -e "  2) ${GREEN}Cloud 模式${NC}       ~150MB 内存，使用云端API进行向量搜索 ${YELLOW}★推荐★${NC}"
     echo -e "     ${CYAN}适合: 任何服务器，全功能，需要API Key${NC}"
     echo ""
-    echo -e "  3) ${GREEN}Local 模式${NC}   ~1.5GB 内存，本地向量模型"
+    echo -e "  3) ${GREEN}Local 模式${NC}       ~1.5GB 内存，本地向量模型"
     echo -e "     ${CYAN}适合: 高配服务器，完全离线${NC}"
     echo ""
-    read -p "请选择 [1-3，默认2]: " mode_choice
+    echo -e "  4) ${MAGENTA}Enterprise 模式${NC}  ~2GB 内存，Phase 3.5 企业级功能"
+    echo -e "     ${CYAN}适合: 大规模部署 (Kuzu + NetworkX + FAISS IVF)${NC}"
+    echo ""
+    read -p "请选择 [1-4，默认2]: " mode_choice
     
     case "${mode_choice:-2}" in
         1) INSTALL_MODE="lite" ;;
         2) INSTALL_MODE="cloud" ;;
         3) INSTALL_MODE="local" ;;
+        4) INSTALL_MODE="enterprise" ;;
         *) echo -e "${YELLOW}使用默认 Cloud 模式${NC}"; INSTALL_MODE="cloud" ;;
     esac
     
@@ -119,19 +124,21 @@ show_menu() {
     echo -e "  1) 全新安装"
     echo -e "  2) 全新安装 (使用国内镜像加速) ${GREEN}推荐${NC}"
     echo -e "  3) 修复/重装依赖"
-    echo -e "  4) 完全卸载"
-    echo -e "  5) 查看状态"
-    echo -e "  6) 退出"
+    echo -e "  4) ${MAGENTA}升级到企业版${NC} (添加 Kuzu + NetworkX)"
+    echo -e "  5) 完全卸载"
+    echo -e "  6) 查看状态"
+    echo -e "  7) 退出"
     echo ""
-    read -p "请输入选项 [1-6]: " choice
+    read -p "请输入选项 [1-7]: " choice
     
     case $choice in
         1) show_mode_selection; CLEANUP_ON_FAIL=true; do_install ;;
         2) show_mode_selection; PIP_MIRROR="-i https://pypi.tuna.tsinghua.edu.cn/simple"; CLEANUP_ON_FAIL=true; do_install ;;
         3) do_repair ;;
-        4) do_uninstall ;;
-        5) show_install_status ;;
-        6) exit 0 ;;
+        4) do_upgrade_enterprise ;;
+        5) do_uninstall ;;
+        6) show_install_status ;;
+        7) exit 0 ;;
         *) echo -e "${RED}无效选项${NC}"; echo ""; show_menu ;;
     esac
 }
@@ -258,12 +265,16 @@ install_deps() {
             echo -e "    ${CYAN}ℹ Local 模式：下载约 1.5GB 依赖 (包含 PyTorch)${NC}"
             echo -e "    ${CYAN}ℹ 预计需要 10-20 分钟${NC}"
             ;;
+        enterprise)
+            echo -e "    ${CYAN}ℹ Enterprise 模式：下载约 2GB 依赖 (PyTorch + Kuzu + NetworkX)${NC}"
+            echo -e "    ${CYAN}ℹ 预计需要 15-30 分钟${NC}"
+            ;;
     esac
     echo ""
     
-    # 升级 pip
+    # 升级 pip（使用 python -m pip 避免锁定问题）
     print_info "升级 pip..."
-    pip install --upgrade pip $PIP_MIRROR -q 2>&1
+    python -m pip install --upgrade pip $PIP_MIRROR -q 2>&1
     print_success "pip 升级完成"
     
     # 根据模式安装不同依赖（兼容新旧名称）
@@ -280,6 +291,10 @@ install_deps() {
         local|full)
             EXTRAS="[local]"
             print_info "安装 Local 依赖 (sentence-transformers + FAISS)..."
+            ;;
+        enterprise)
+            EXTRAS="[local,enterprise]"
+            print_info "安装 Enterprise 依赖 (sentence-transformers + FAISS + Kuzu + NetworkX)..."
             ;;
     esac
     
@@ -435,6 +450,19 @@ do_install() {
             echo -e "  ${BOLD}安装模式:${NC} ${CYAN}Local 模式${NC}"
             echo -e "  ${GREEN}✓ 本地模型，无需API Key，完全离线运行${NC}"
             ;;
+        enterprise)
+            echo -e "  ${BOLD}安装模式:${NC} ${MAGENTA}Enterprise 模式${NC}"
+            echo ""
+            echo -e "  ${GREEN}Phase 3.5 企业级性能引擎已启用:${NC}"
+            echo -e "    ✓ Kuzu 嵌入式图数据库 (高性能图存储)"
+            echo -e "    ✓ NetworkX 社区检测 (实体群组发现)"
+            echo -e "    ✓ FAISS IVF 磁盘索引 (百万级向量)"
+            echo -e "    ✓ QueryPlanner 查询优化器"
+            echo ""
+            echo -e "  ${YELLOW}配置 (可选):${NC}"
+            echo -e "    KUZU_BUFFER_POOL_SIZE=256  # Kuzu 内存池大小 (MB)"
+            echo -e "    AUTO_KUZU_THRESHOLD=100000 # 自动切换 Kuzu 的节点阈值"
+            ;;
     esac
     
     echo ""
@@ -499,6 +527,101 @@ do_repair() {
     INSTALL_SUCCESS=true
     echo ""
     print_success "修复完成！"
+}
+
+# ==================== 升级到企业版 ====================
+
+do_upgrade_enterprise() {
+    print_header
+    echo -e "${MAGENTA}🚀 升级到企业版${NC}"
+    echo ""
+    
+    # 检查虚拟环境是否存在
+    if [ ! -d "$VENV_PATH" ]; then
+        print_error "虚拟环境不存在，请先完整安装"
+        echo ""
+        read -p "是否现在安装? [Y/n]: " confirm
+        if [[ ! $confirm =~ ^[Nn]$ ]]; then
+            show_mode_selection
+            CLEANUP_ON_FAIL=true
+            do_install
+        fi
+        return
+    fi
+    
+    source "$VENV_PATH/bin/activate"
+    
+    # 检查当前安装模式
+    local install_mode_file="$CONFIG_DIR/install_mode"
+    local current_mode="unknown"
+    if [ -f "$install_mode_file" ]; then
+        current_mode=$(cat "$install_mode_file")
+    fi
+    
+    if [ "$current_mode" = "enterprise" ]; then
+        print_warning "您已经是企业版！"
+        echo ""
+        echo -e "${CYAN}当前企业版组件状态：${NC}"
+        
+        # 检查各组件
+        python -c "import kuzu; print(f'  ✅ Kuzu: v{kuzu.__version__}')" 2>/dev/null || echo -e "  ${RED}❌ Kuzu: 未安装${NC}"
+        python -c "import networkx; print(f'  ✅ NetworkX: v{networkx.__version__}')" 2>/dev/null || echo -e "  ${RED}❌ NetworkX: 未安装${NC}"
+        python -c "import faiss; print('  ✅ FAISS: 已安装')" 2>/dev/null || echo -e "  ${RED}❌ FAISS: 未安装${NC}"
+        
+        echo ""
+        read -p "是否要重新安装企业版组件? [y/N]: " confirm
+        if [[ ! $confirm =~ ^[Yy]$ ]]; then
+            return
+        fi
+    fi
+    
+    # 显示将要安装的内容
+    echo -e "${CYAN}企业版将安装以下额外组件：${NC}"
+    echo ""
+    echo "  📊 NetworkX >= 3.0"
+    echo "     用于知识图谱构建和分析"
+    echo ""
+    echo "  🗄️  Kuzu >= 0.3"
+    echo "     高性能图数据库 (GraphDB)"
+    echo ""
+    echo "  🔍 FAISS-CPU >= 1.7"
+    echo "     高效向量相似度搜索"
+    echo ""
+    echo -e "${YELLOW}预计额外空间: ~500MB${NC}"
+    echo ""
+    
+    read -p "确认升级到企业版? [Y/n]: " confirm
+    if [[ $confirm =~ ^[Nn]$ ]]; then
+        print_warning "已取消升级"
+        return
+    fi
+    
+    echo ""
+    print_info "正在安装企业版组件..."
+    
+    # 安装企业版依赖
+    pip install $PIP_MIRROR "networkx>=3.0" "kuzu>=0.3" "faiss-cpu>=1.7"
+    
+    if [ $? -ne 0 ]; then
+        print_error "安装失败！"
+        echo ""
+        print_warning "您可以尝试使用国内镜像重试："
+        echo "  pip install -i https://pypi.tuna.tsinghua.edu.cn/simple networkx kuzu faiss-cpu"
+        return 1
+    fi
+    
+    # 更新安装模式
+    echo "enterprise" > "$install_mode_file"
+    
+    echo ""
+    print_success "🎉 升级到企业版成功！"
+    echo ""
+    echo -e "${CYAN}已安装组件：${NC}"
+    python -c "import kuzu; print(f'  ✅ Kuzu: v{kuzu.__version__}')" 2>/dev/null || echo -e "  ${RED}❌ Kuzu: 安装失败${NC}"
+    python -c "import networkx; print(f'  ✅ NetworkX: v{networkx.__version__}')" 2>/dev/null || echo -e "  ${RED}❌ NetworkX: 安装失败${NC}"
+    python -c "import faiss; print('  ✅ FAISS: 已安装')" 2>/dev/null || echo -e "  ${RED}❌ FAISS: 安装失败${NC}"
+    echo ""
+    echo -e "${GREEN}现在您可以使用完整的 Phase 3.5 企业级功能了！${NC}"
 }
 
 # ==================== 卸载 ====================

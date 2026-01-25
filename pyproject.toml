@@ -72,6 +72,13 @@ local = [
     "faiss-cpu>=1.7",              # 向量索引
 ]
 
+# Enterprise 模式：Phase 3.5 企业级性能引擎（可选）
+enterprise = [
+    "faiss-cpu>=1.7",              # 向量索引 (VectorIndexIVF)
+    "networkx>=3.0",               # 图分析与社区检测 (CommunityDetector)
+    "kuzu>=0.3",                   # 嵌入式图数据库 (KuzuGraphBackend)
+]
+
 # ====== 旧名称（向后兼容）======
 # 轻量模式（别名 -> lite）
 lightweight = []
