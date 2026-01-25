@@ -164,6 +164,8 @@ show_main_menu() {
     echo -e "  ${WHITE}│    [6] 📦 SillyTavern 插件管理  →                       │${NC}"
     echo -e "  ${WHITE}│    [7] ⚙️  配置管理              →                       │${NC}"
     echo -e "  ${WHITE}│                                                         │${NC}"
+    echo -e "  ${RED}│    [8] 🗑️  清空用户数据（保留配置）                     │${NC}"
+    echo -e "  ${WHITE}│                                                         │${NC}"
     echo -e "  ${WHITE}│    [0] 退出                                             │${NC}"
     echo -e "  ${WHITE}│                                                         │${NC}"
     echo -e "  ${WHITE}└─────────────────────────────────────────────────────────┘${NC}"
@@ -819,6 +821,109 @@ do_status() {
     read -p "  按 Enter 返回"
 }
 
+# ==================== 清空用户数据 ====================
+
+do_clear_data() {
+    print_title "清空用户数据"
+    
+    local data_path="$SCRIPT_DIR/recall_data"
+    
+    if [[ ! -d "$data_path" ]]; then
+        print_info "未找到数据目录，无需清空"
+        return
+    fi
+    
+    # 检查服务是否运行
+    if test_service_running; then
+        print_error "服务正在运行，请先停止服务"
+        echo ""
+        echo -e "  运行: ${CYAN}./manage.sh stop${NC}"
+        echo -e "  或在菜单中选择 [3] 停止服务"
+        return
+    fi
+    
+    # 显示将要删除的内容
+    echo ""
+    echo -e "  ${YELLOW}将删除以下数据:${NC}"
+    echo ""
+    
+    local data_dir="$data_path/data"
+    local cache_dir="$data_path/cache"
+    local logs_dir="$data_path/logs"
+    local temp_dir="$data_path/temp"
+    
+    local to_delete=()
+    
+    if [[ -d "$data_dir" ]]; then
+        local size=$(du -sh "$data_dir" 2>/dev/null | cut -f1 || echo "0")
+        echo -e "    ${RED}[x] data/      - 所有用户记忆和知识图谱 ($size)${NC}"
+        to_delete+=("$data_dir")
+    fi
+    
+    if [[ -d "$cache_dir" ]]; then
+        local size=$(du -sh "$cache_dir" 2>/dev/null | cut -f1 || echo "0")
+        echo -e "    ${RED}[x] cache/     - Embedding 缓存 ($size)${NC}"
+        to_delete+=("$cache_dir")
+    fi
+    
+    if [[ -d "$logs_dir" ]]; then
+        local size=$(du -sh "$logs_dir" 2>/dev/null | cut -f1 || echo "0")
+        echo -e "    ${RED}[x] logs/      - 日志文件 ($size)${NC}"
+        to_delete+=("$logs_dir")
+    fi
+    
+    if [[ -d "$temp_dir" ]]; then
+        local size=$(du -sh "$temp_dir" 2>/dev/null | cut -f1 || echo "0")
+        echo -e "    ${RED}[x] temp/      - 临时文件 ($size)${NC}"
+        to_delete+=("$temp_dir")
+    fi
+    
+    echo ""
+    echo -e "  ${GREEN}将保留以下内容:${NC}"
+    echo -e "    ${GREEN}[✓] config/    - API 密钥、安装模式、设置${NC}"
+    echo -e "    ${GREEN}[✓] models/    - 已下载的模型（如有）${NC}"
+    
+    if [[ ${#to_delete[@]} -eq 0 ]]; then
+        echo ""
+        print_info "没有需要清空的数据"
+        return
+    fi
+    
+    echo ""
+    echo -e "  ${YELLOW}⚠️  警告: 此操作不可撤销！${NC}"
+    echo ""
+    
+    read -p "  输入 'yes' 确认删除: " confirm
+    
+    if [[ "$confirm" != "yes" ]]; then
+        echo ""
+        print_info "操作已取消"
+        return
+    fi
+    
+    echo ""
+    print_info "正在清空用户数据..."
+    
+    for dir in "${to_delete[@]}"; do
+        if rm -rf "$dir" 2>/dev/null; then
+            local dir_name=$(basename "$dir")
+            print_success "已删除: $dir_name/"
+        else
+            print_error "删除失败: $dir"
+        fi
+    done
+    
+    # 重新创建空目录
+    for dir in "${to_delete[@]}"; do
+        mkdir -p "$dir"
+    done
+    
+    echo ""
+    print_success "用户数据已清空！"
+    echo ""
+    echo -e "  配置文件保留在: ${CYAN}recall_data/config/${NC}"
+}
+
 # ==================== SillyTavern 插件操作 ====================
 
 set_st_path() {
@@ -1287,6 +1392,7 @@ run_main_menu() {
             5) do_status ;;
             6) run_st_menu ;;
             7) run_config_menu ;;
+            8) do_clear_data; read -p "  按 Enter 继续" ;;
             0)
                 echo ""
                 echo -e "  ${CYAN}再见！👋${NC}"
@@ -1312,6 +1418,7 @@ run_command_line() {
         st-install) install_st_plugin ;;
         st-uninstall) uninstall_st_plugin ;;
         st-update) update_st_plugin ;;
+        clear-data) do_clear_data ;;
         *)
             echo ""
             echo -e "${CYAN}Recall-ai 管理工具${NC}"
@@ -1327,6 +1434,7 @@ run_command_line() {
             echo "  st-install   安装 SillyTavern 插件"
             echo "  st-uninstall 卸载 SillyTavern 插件"
             echo "  st-update    更新 SillyTavern 插件"
+            echo "  clear-data   清空所有用户数据（保留配置）"
             echo ""
             echo -e "${GRAY}不带参数运行将启动交互式菜单${NC}"
             echo ""

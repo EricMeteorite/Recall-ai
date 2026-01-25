@@ -149,6 +149,8 @@ function Show-MainMenu {
     Write-Host "  |    [6] SillyTavern Plugin Management  ->                  |" -ForegroundColor White
     Write-Host "  |    [7] Configuration Management       ->                  |" -ForegroundColor White
     Write-Host "  |                                                           |" -ForegroundColor White
+    Write-Host "  |    [8] Clear User Data (Keep Config)                      |" -ForegroundColor Red
+    Write-Host "  |                                                           |" -ForegroundColor White
     Write-Host "  |    [0] Exit                                               |" -ForegroundColor White
     Write-Host "  |                                                           |" -ForegroundColor White
     Write-Host "  +-----------------------------------------------------------+" -ForegroundColor White
@@ -819,6 +821,117 @@ function Do-Status {
     Read-Host "  Press Enter to continue"
 }
 
+# ==================== Clear User Data ====================
+
+function Do-ClearData {
+    Write-Title "Clear User Data"
+    
+    $dataPath = Join-Path $SCRIPT_DIR "recall_data"
+    
+    if (-not (Test-Path $dataPath)) {
+        Write-Info "No data directory found, nothing to clear"
+        return
+    }
+    
+    # Check if service is running
+    if (Test-ServiceRunning) {
+        Write-Error2 "Service is running. Please stop it first."
+        Write-Host ""
+        Write-Host "  Run: " -NoNewline
+        Write-Host ".\manage.ps1 stop" -ForegroundColor Cyan
+        Write-Host "  Or select option [3] Stop Service from menu" -ForegroundColor DarkGray
+        return
+    }
+    
+    # Show what will be deleted
+    Write-Host ""
+    Write-Host "  This will DELETE the following data:" -ForegroundColor Yellow
+    Write-Host ""
+    
+    # Check each directory
+    $dataDir = Join-Path $dataPath "data"
+    $cacheDir = Join-Path $dataPath "cache"
+    $logsDir = Join-Path $dataPath "logs"
+    $tempDir = Join-Path $dataPath "temp"
+    
+    $toDelete = @()
+    
+    if (Test-Path $dataDir) {
+        $size = (Get-ChildItem $dataDir -Recurse -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
+        $sizeStr = if ($size) { "{0:N2} MB" -f ($size / 1MB) } else { "0 MB" }
+        Write-Host "    [x] data/      - All user memories and knowledge graph ($sizeStr)" -ForegroundColor Red
+        $toDelete += $dataDir
+    }
+    
+    if (Test-Path $cacheDir) {
+        $size = (Get-ChildItem $cacheDir -Recurse -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
+        $sizeStr = if ($size) { "{0:N2} MB" -f ($size / 1MB) } else { "0 MB" }
+        Write-Host "    [x] cache/     - Embedding cache ($sizeStr)" -ForegroundColor Red
+        $toDelete += $cacheDir
+    }
+    
+    if (Test-Path $logsDir) {
+        $size = (Get-ChildItem $logsDir -Recurse -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
+        $sizeStr = if ($size) { "{0:N2} MB" -f ($size / 1MB) } else { "0 MB" }
+        Write-Host "    [x] logs/      - Log files ($sizeStr)" -ForegroundColor Red
+        $toDelete += $logsDir
+    }
+    
+    if (Test-Path $tempDir) {
+        $size = (Get-ChildItem $tempDir -Recurse -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
+        $sizeStr = if ($size) { "{0:N2} MB" -f ($size / 1MB) } else { "0 MB" }
+        Write-Host "    [x] temp/      - Temporary files ($sizeStr)" -ForegroundColor Red
+        $toDelete += $tempDir
+    }
+    
+    Write-Host ""
+    Write-Host "  The following will be KEPT:" -ForegroundColor Green
+    Write-Host "    [✓] config/    - API keys, install mode, settings" -ForegroundColor Green
+    Write-Host "    [✓] models/    - Downloaded models (if any)" -ForegroundColor Green
+    
+    if ($toDelete.Count -eq 0) {
+        Write-Host ""
+        Write-Info "No data to clear"
+        return
+    }
+    
+    Write-Host ""
+    Write-Host "  ⚠️  WARNING: This action cannot be undone!" -ForegroundColor Yellow
+    Write-Host ""
+    
+    $confirm = Read-Host "  Type 'yes' to confirm deletion"
+    
+    if ($confirm -ne "yes") {
+        Write-Host ""
+        Write-Info "Operation cancelled"
+        return
+    }
+    
+    Write-Host ""
+    Write-Info "Clearing user data..."
+    
+    foreach ($dir in $toDelete) {
+        try {
+            Remove-Item -Path $dir -Recurse -Force -ErrorAction Stop
+            $dirName = Split-Path $dir -Leaf
+            Write-Success "Deleted: $dirName/"
+        } catch {
+            Write-Error2 "Failed to delete: $dir"
+        }
+    }
+    
+    # Recreate empty directories
+    foreach ($dir in $toDelete) {
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    }
+    
+    Write-Host ""
+    Write-Success "User data cleared successfully!"
+    Write-Host ""
+    Write-Host "  Your config files are preserved in: " -NoNewline
+    Write-Host "recall_data\config\" -ForegroundColor Cyan
+}
+
 # ==================== SillyTavern Plugin Operations ====================
 
 function Set-STPath {
@@ -1245,6 +1358,7 @@ function Run-MainMenu {
             "5" { Do-Status }
             "6" { Run-STMenu }
             "7" { Run-ConfigMenu }
+            "8" { Do-ClearData; Read-Host "  Press Enter to continue" }
             "0" { 
                 Write-Host ""
                 Write-Color "  Goodbye!" "Cyan"
@@ -1270,6 +1384,7 @@ function Run-CommandLine {
         "st-install" { Install-STPlugin }
         "st-uninstall" { Uninstall-STPlugin }
         "st-update" { Update-STPlugin }
+        "clear-data" { Do-ClearData }
         default {
             Write-Host ""
             Write-Host "Recall-ai Manager" -ForegroundColor Cyan
@@ -1285,6 +1400,7 @@ function Run-CommandLine {
             Write-Host "  st-install   Install SillyTavern plugin"
             Write-Host "  st-uninstall Uninstall SillyTavern plugin"
             Write-Host "  st-update    Update SillyTavern plugin"
+            Write-Host "  clear-data   Clear all user data (keep config)"
             Write-Host ""
             Write-Host "Run without arguments for interactive menu" -ForegroundColor DarkGray
             Write-Host ""
