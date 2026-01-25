@@ -497,9 +497,10 @@ def test_9_stats_and_health():
     stats = get_stats()
     if stats:
         ok(f"获取统计信息成功")
-        info(f"  记忆总数: {stats.get('memory_count', 'N/A')}")
-        info(f"  实体数量: {stats.get('entity_count', 'N/A')}")
-        info(f"  Embedding模式: {stats.get('embedding_mode', 'N/A')}")
+        global_stats = stats.get('global', {})
+        info(f"  记忆总数: {global_stats.get('total_memories', 'N/A')}")
+        info(f"  实体数量: {global_stats.get('consolidated_entities', 'N/A')}")
+        info(f"  Embedding模式: {stats.get('mode', 'N/A')}")
         results.append(True)
     else:
         fail("获取统计信息失败")
@@ -984,10 +985,13 @@ def test_15_kuzu_backend():
             warn("Kuzu 后端模块报告不可用")
             return True, 1, 1
         
-        # 创建临时目录
-        temp_dir = tempfile.mkdtemp(prefix="recall_kuzu_test_")
+        # 创建临时目录（在项目 recall_data/temp 内，不污染系统）
+        import os
+        project_temp = os.path.join(os.path.dirname(os.path.dirname(__file__)), "recall_data", "temp")
+        os.makedirs(project_temp, exist_ok=True)
+        temp_dir = tempfile.mkdtemp(prefix="kuzu_test_", dir=project_temp)
         
-        # 创建 Kuzu 后端
+        # 创建 Kuzu 后端（传入目录，后端会自动处理）
         backend = KuzuGraphBackend(temp_dir, buffer_pool_size=64)
         ok(f"创建 Kuzu 后端成功: {backend.backend_name}")
         results.append(True)

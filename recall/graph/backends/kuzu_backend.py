@@ -53,7 +53,7 @@ class KuzuGraphBackend(GraphBackend):
         """初始化 Kuzu 后端
         
         Args:
-            data_path: 数据库存储路径
+            data_path: 数据库存储路径（目录或数据库文件路径）
             buffer_pool_size: 缓冲池大小（MB），默认 256MB
             
         Raises:
@@ -65,10 +65,27 @@ class KuzuGraphBackend(GraphBackend):
                 "Or use JSON backend instead: backend='json'"
             )
         
-        self.data_path = data_path
         self.buffer_pool_size = buffer_pool_size
         
-        os.makedirs(data_path, exist_ok=True)
+        # Kuzu 0.11+ 需要传入数据库路径，不能是已存在的空目录
+        # 如果传入的是目录路径，自动添加 kuzu.db 文件名
+        if os.path.isdir(data_path):
+            # 已存在的目录，检查是否是 Kuzu 数据库目录
+            if not os.path.exists(os.path.join(data_path, "wal")):
+                # 不是 Kuzu 数据库目录，使用子路径
+                data_path = os.path.join(data_path, "kuzu.db")
+        elif not data_path.endswith('.db'):
+            # 新路径，确保父目录存在
+            parent_dir = os.path.dirname(data_path)
+            if parent_dir:
+                os.makedirs(parent_dir, exist_ok=True)
+            # 如果不是 .db 结尾，添加 kuzu.db
+            data_path = os.path.join(data_path, "kuzu.db")
+            parent_dir = os.path.dirname(data_path)
+            if parent_dir:
+                os.makedirs(parent_dir, exist_ok=True)
+        
+        self.data_path = data_path
         
         # 创建数据库连接
         self.db = kuzu.Database(data_path, buffer_pool_size=buffer_pool_size * 1024 * 1024)
