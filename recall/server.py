@@ -3132,13 +3132,13 @@ async def rebuild_index():
                 "indexed_count": 0
             }
         
-        # 使用公开方法强制重建索引
-        indexed_count = engine.rebuild_vector_index(force=True)
+        # 使用公开方法重建索引（会返回 Dict）
+        result = engine.rebuild_vector_index()
         
         return {
-            "success": True,
-            "message": "索引重建完成",
-            "indexed_count": indexed_count
+            "success": result.get('success', False),
+            "message": result.get('message', '索引重建完成'),
+            "indexed_count": result.get('indexed_count', 0)
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"索引重建失败: {str(e)}")
