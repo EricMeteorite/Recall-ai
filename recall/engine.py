@@ -906,12 +906,12 @@ class RecallEngine:
                 for entity in entities:
                     consolidated_entity = ConsolidatedEntity(
                         id=f"entity_{entity.name.lower().replace(' ', '_')}",
-                    name=entity.name,
-                    entity_type=entity.entity_type if hasattr(entity, 'entity_type') else "UNKNOWN",
-                    source_turns=[memory_id],
-                    last_verified=time.strftime('%Y-%m-%dT%H:%M:%S')
-                )
-                self.consolidated_memory.add_or_update(consolidated_entity)
+                        name=entity.name,
+                        entity_type=entity.entity_type if hasattr(entity, 'entity_type') else "UNKNOWN",
+                        source_turns=[memory_id],
+                        last_verified=time.strftime('%Y-%m-%dT%H:%M:%S')
+                    )
+                    self.consolidated_memory.add_or_update(consolidated_entity)
             except Exception as e:
                 _safe_print(f"[Recall] 长期记忆更新失败（不影响主流程）: {e}")
             

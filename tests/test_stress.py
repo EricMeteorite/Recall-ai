@@ -31,19 +31,26 @@ def get_memory_usage():
 
 
 def generate_test_content(turn: int, idx: int) -> str:
-    """生成测试内容"""
+    """生成测试内容 - 确保唯一性避免语义去重"""
     names = ["Alice", "Bob", "Charlie", "David", "Eva", "Frank", "Grace", "Henry"]
     locations = ["北京", "上海", "纽约", "东京", "伦敦", "巴黎", "柏林", "悉尼"]
     actions = ["去了", "住在", "工作于", "旅行到", "搬到", "访问了"]
     topics = ["编程", "音乐", "电影", "美食", "运动", "读书", "旅行", "摄影"]
     
+    # 使用 turn 和 idx 创建确定性索引，避免随机重复
+    name1 = names[(turn + idx) % len(names)]
+    name2 = names[(turn + idx + 1) % len(names)]
+    location = locations[(turn + idx) % len(locations)]
+    action = actions[(turn + idx) % len(actions)]
+    topic = topics[(turn + idx) % len(topics)]
+    
+    # 根据 idx 选择不同模板，并包含唯一标识符
     templates = [
-        f"第{turn}轮对话: {random.choice(names)}{random.choice(actions)}{random.choice(locations)}",
-        f"Turn {turn}: {random.choice(names)}喜欢{random.choice(topics)}，经常和朋友讨论",
-        f"[{turn}-{idx}] {random.choice(names)}是{random.choice(names)}的朋友，他们在{random.choice(locations)}相识",
-        f"记忆#{turn}: 今天{random.choice(names)}提到了关于{random.choice(topics)}的话题",
+        f"[T{turn}I{idx}] {name1}{action}{location}，这是第{turn}轮第{idx}条记忆",
+        f"[T{turn}I{idx}] {name1}喜欢{topic}，经常和朋友讨论第{turn}轮话题",
+        f"[T{turn}I{idx}] {name1}是{name2}的朋友，他们在{location}相识于第{turn}天",
     ]
-    return random.choice(templates)
+    return templates[idx % len(templates)]
 
 
 def test_write_performance():
