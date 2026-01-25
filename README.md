@@ -1,169 +1,206 @@
-# Recall AI v3.0.0
+# Recall
 
-> 🧠 AI永久记忆系统 - 让AI永远不会忘记你说过的每一句话
+**通用 AI 知识记忆系统**
 
-## ⚡ 快速开始
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      设计原则                               │
+├─────────────────────────────────────────────────────────────┤
+│  零依赖优先 - 无需外部数据库，开箱即用                       │
+│  成本可控 - LLM 可选，本地优先                              │
+│  场景通用 - RP / 代码 / 企业 / Agent 全覆盖                 │
+└─────────────────────────────────────────────────────────────┘
+```
 
-### 方式一：本地安装（Windows/Mac/Linux）
+---
+
+## 快速开始
 
 ```bash
-# 克隆仓库
-git clone https://github.com/your-repo/recall-ai.git
-cd recall-ai
-
 # Windows
-.\install.ps1
-.\start.ps1
+.\manage.ps1
 
 # Linux / Mac  
-chmod +x install.sh && ./install.sh
-./start.sh
+./manage.sh
 ```
 
-### 方式二：服务器部署（Ubuntu/Debian）
+选择菜单 `[1] Install` 安装，`[2] Start` 启动。
 
-```bash
-# 部署到服务器
-git clone https://github.com/your-repo/recall-ai.git
-cd recall-ai
-chmod +x install.sh start.sh
-./install.sh            # 安装（自动修复权限）
-./start.sh --daemon     # 后台运行
-./start.sh --stop       # 停止服务
-```
-
-服务启动后访问: http://YOUR_IP:18888/docs
+服务地址: `http://localhost:18888`  
+API 文档: `http://localhost:18888/docs`
 
 ---
 
-## 🍺 SillyTavern 集成
+## 配置
 
-### 架构说明
+配置文件位置: `recall_data/config/api_keys.env`
 
-```
-┌─────────────────┐        HTTP        ┌──────────────────┐
-│  SillyTavern    │ ←───────────────→  │  Recall 服务器    │
-│  (UI 扩展)      │   localhost:18888  │  (Python后端)    │
-└─────────────────┘                    └──────────────────┘
-```
-
-**Recall 分两部分：**
-1. **Python 后端** - 处理记忆存储、搜索、NLP（必须先启动）
-2. **SillyTavern 插件** - 前端 UI，调用后端 API
-
-### 安装 SillyTavern 插件
-
-**方法 1：使用安装脚本（推荐）**
 ```bash
-cd plugins/sillytavern
-./install.sh  # 自动检测 ST 版本，按提示输入路径
+# Embedding（必填，支持 OpenAI 兼容接口）
+EMBEDDING_API_KEY=your-key
+EMBEDDING_API_BASE=https://api.openai.com/v1
+EMBEDDING_MODEL=text-embedding-3-small
+
+# LLM（可选，用于伏笔分析、矛盾检测等高级功能）
+LLM_API_KEY=your-key
+LLM_API_BASE=https://api.openai.com/v1
+LLM_MODEL=gpt-4o-mini
 ```
 
-**方法 2：手动复制**
-```bash
-# 新版 SillyTavern (1.12+) - 直接放在 extensions 下
-cp -r plugins/sillytavern /path/to/SillyTavern/data/default-user/extensions/recall-memory
-
-# 旧版 SillyTavern - 放在 third-party 下
-cp -r plugins/sillytavern /path/to/SillyTavern/public/scripts/extensions/third-party/recall-memory
-
-# 重启 SillyTavern
-```
-
-### 配置插件
-
-1. 启动 Recall 服务：`./start.sh --daemon`
-2. 重启 SillyTavern
-3. 打开 SillyTavern → 扩展 → 找到 **Recall Memory**
-4. 设置 API 地址（默认 `http://127.0.0.1:18888`）
-5. 开启记忆功能
+支持的 Embedding 服务: OpenAI / SiliconFlow / Ollama / 任何 OpenAI 兼容 API
 
 ---
 
-## 🖥️ API 使用
+## 核心功能
+
+### REST API（推荐）
+
+启动服务后通过 HTTP 调用：
+
+```bash
+# 添加记忆
+curl -X POST http://localhost:18888/api/v1/memories \
+  -H "Content-Type: application/json" \
+  -d '{"content": "Alice住在北京，是一名程序员"}'
+
+# 搜索记忆
+curl -X POST http://localhost:18888/api/v1/memories/search \
+  -d '{"query": "Alice的职业是什么？"}'
+
+# 构建上下文
+curl -X POST http://localhost:18888/api/v1/context/build \
+  -d '{"query": "介绍一下Alice"}'
+```
+
+### Python SDK
+
+```bash
+pip install recall-ai
+```
 
 ```python
-from recall.engine import RecallEngine
+from recall import RecallEngine
 
 engine = RecallEngine()
 
 # 添加记忆
 engine.add("Alice住在北京，是一名程序员")
-engine.add("Bob是Alice的朋友")
 
-# 搜索
-results = engine.search("Alice的朋友")
+# 搜索记忆（语义搜索 + 全文检索）
+results = engine.search("Alice的职业是什么？")
 
-# 构建上下文（给 LLM 用）
-context = engine.build_context("告诉我关于Alice的信息")
+# 构建上下文（自动整合记忆、伏笔、持久条件）
+context = engine.build_context("介绍一下Alice")
+```
+
+### 伏笔系统
+
+追踪未解决的线索、承诺、TODO，在相关时机自动提醒。
+
+```python
+# 埋下伏笔
+engine.plant_foreshadowing(
+    content="Alice说下周要去上海出差",
+    keywords=["Alice", "上海", "出差"]
+)
+
+# 获取活跃伏笔
+foreshadowings = engine.get_active_foreshadowings()
+
+# 解决伏笔
+engine.resolve_foreshadowing(foreshadowing_id, "Alice已完成上海出差")
+```
+
+### 持久条件
+
+贯穿对话的背景信息：用户身份、环境、目标、偏好等。
+
+```python
+# 添加持久条件
+engine.add_persistent_context(
+    content="用户是一名资深Python开发者",
+    context_type="user_identity"
+)
+
+# 获取持久条件（自动包含在 build_context 结果中）
+contexts = engine.get_persistent_contexts()
+```
+
+### 核心设定 (L0)
+
+角色、世界观、规则等永久设定，100% 不遗忘。
+
+```python
+# 添加核心设定
+engine.add_core_setting("Alice的人设", "性格开朗，喜欢编程和旅行")
+
+# 获取核心设定（自动包含在 build_context 结果中）
+settings = engine.get_core_settings()
+```
+
+### 一致性检查
+
+自动检测记忆中的矛盾。
+
+```python
+# 检测矛盾
+contradictions = engine.detect_contradictions("Alice住在上海")
+```
+
+### 多租户隔离
+
+用户/角色级别数据隔离。
+
+```python
+engine = RecallEngine(user_id="user1", character_id="alice")
 ```
 
 ---
 
-## ✨ 特性
+## REST API
 
-- ✅ **100% 不遗忘** - 8层检索防御 + 原文永久存档
-- ✅ **伏笔追踪** - 自动检测叙事伏笔，主动提醒
-- ✅ **知识图谱** - 轻量级本地图结构，无需Neo4j
-- ✅ **多用户/多角色** - RP场景专门优化
-- ✅ **规范遵守** - 确保设定不会自相矛盾
-- ✅ **零配置** - pip install + API key 即可使用
-- ✅ **纯本地** - 所有数据存储在项目目录
+80+ 个 API 端点，主要类别：
 
-## 🗑️ 完整卸载
-
-删除项目文件夹即可完全卸载，不会在系统留下任何痕迹。
-
----
-
-## ⚙️ 配置说明
-
-### 配置文件
-
-启动后自动生成配置文件: `recall_data/config/api_keys.env`
-
-```bash
-# 方式一：硅基流动（推荐国内用户）
-SILICONFLOW_API_KEY=sf-xxxxxx
-SILICONFLOW_MODEL=BAAI/bge-large-zh-v1.5
-
-# 方式二：OpenAI（支持中转站）
-OPENAI_API_KEY=sk-xxxxxx
-OPENAI_API_BASE=              # 留空用官方，或填中转站地址
-OPENAI_MODEL=text-embedding-3-small
-
-# 方式三：自定义 API（Azure/Ollama/其他）
-EMBEDDING_API_KEY=your-key
-EMBEDDING_API_BASE=https://your-api.com/v1
-EMBEDDING_MODEL=your-model
-EMBEDDING_DIMENSION=1536
-```
-
-### 热更新配置
-
-修改配置文件后，无需重启服务：
-
-```bash
-# 热更新
-curl -X POST http://localhost:18888/v1/config/reload
-
-# 测试连接
-curl http://localhost:18888/v1/config/test
-
-# 查看当前配置
-curl http://localhost:18888/v1/config
-```
-
-### 三种运行模式
-
-| 模式 | 内存占用 | 特点 |
+| 类别 | 端点示例 | 说明 |
 |------|---------|------|
-| Lite 模式 | ~100MB | 仅关键词搜索，无需配置 |
-| Cloud 模式 | ~150MB | 语义搜索，需要 API Key |
-| Local 模式 | ~1.5GB | 本地模型，完全离线 |
+| 记忆 | `POST /api/v1/memories` | 添加/搜索/删除记忆 |
+| 伏笔 | `POST /api/v1/foreshadowings` | 伏笔管理 |
+| 条件 | `POST /api/v1/persistent-contexts` | 持久条件管理 |
+| 设定 | `POST /api/v1/core-settings` | 核心设定管理 |
+| 上下文 | `POST /api/v1/context/build` | 构建完整上下文 |
+| 实体 | `GET /api/v1/entities` | 实体管理 |
+
+完整 API 文档: `http://localhost:18888/docs`
 
 ---
 
-## 📄 许可证
+## SillyTavern 插件
 
-MIT License
+通过管理脚本安装：
+
+```bash
+.\manage.ps1  # 选择 [6] SillyTavern Plugin Management
+```
+
+---
+
+## 项目结构
+
+```
+recall/
+├── engine.py          # 核心引擎
+├── server.py          # REST API 服务
+├── embedding/         # Embedding 后端（本地/API）
+├── graph/             # 知识图谱
+├── index/             # 索引系统（向量/倒排/N-gram）
+├── processor/         # 处理器（实体抽取/伏笔分析/摘要）
+├── retrieval/         # 检索系统（多层检索/上下文构建）
+├── storage/           # 存储层（L0核心/L1整合/L2工作/多租户）
+└── utils/             # 工具（LLM客户端/性能监控）
+```
+
+---
+
+## 许可证
+
+[MIT License](LICENSE)
