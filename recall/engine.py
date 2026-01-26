@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from .version import __version__
 # 注意：RecallInit 和 LightweightConfig 保留用于未来扩展
 from .init import RecallInit  # noqa: F401 - 保留用于 CLI 等场景
-from .config import LightweightConfig  # noqa: F401 - 保留用于配置迁移
+from .config import LightweightConfig, TripleRecallConfig  # noqa: F401 - 保留用于配置迁移
 from .models import Entity, EntityType
 from .storage import (
     VolumeManager, ConsolidatedMemory, ConsolidatedEntity,
@@ -188,17 +188,38 @@ class RecallEngine:
     def _get_mode_name(self) -> str:
         """获取当前模式名称"""
         backend = self.embedding_config.backend
+        
+        # 检测是否安装了企业级依赖
+        enterprise_features = []
+        try:
+            import kuzu
+            enterprise_features.append("Kuzu")
+        except ImportError:
+            pass
+        try:
+            import networkx
+            enterprise_features.append("NetworkX")
+        except ImportError:
+            pass
+        
+        # 基础模式名称
         if backend == EmbeddingBackendType.NONE:
-            return "Lite 模式"
+            base_mode = "Lite 模式"
         elif backend == EmbeddingBackendType.LOCAL:
-            return "Local 模式"
+            base_mode = "Local 模式"
         elif backend == EmbeddingBackendType.OPENAI:
-            return "Cloud 模式-OpenAI"
+            base_mode = "Cloud 模式-OpenAI"
         elif backend == EmbeddingBackendType.SILICONFLOW:
-            return "Cloud 模式-硅基流动"
+            base_mode = "Cloud 模式-硅基流动"
         elif backend == EmbeddingBackendType.CUSTOM:
-            return "Cloud 模式-自定义API"
-        return "未知模式"
+            base_mode = "Cloud 模式-自定义API"
+        else:
+            base_mode = "未知模式"
+        
+        # 如果有企业级功能，添加标识
+        if enterprise_features:
+            return f"{base_mode} + Enterprise ({', '.join(enterprise_features)})"
+        return base_mode
     
     def _init_components(
         self,
@@ -300,6 +321,9 @@ class RecallEngine:
         )
         
         # 检索层 - 提供内容回调
+        # Phase 3.6: 加载三路召回配置
+        self.triple_recall_config = TripleRecallConfig.from_env()
+        
         self.retriever = EightLayerRetriever(
             bloom_filter=self._ngram_index.bloom_filter if self._ngram_index else None,
             inverted_index=self._inverted_index,
@@ -307,8 +331,24 @@ class RecallEngine:
             ngram_index=self._ngram_index,
             vector_index=self._vector_index,
             llm_client=self.llm_client,
-            content_store=self._get_memory_content_by_id
+            content_store=self._get_memory_content_by_id,
+            # Phase 3.6: 传入 embedding_backend（用于 VectorIndexIVF）
+            embedding_backend=self.embedding_backend if hasattr(self, 'embedding_backend') else None,
         )
+        
+        # Phase 3.6: 注入并行召回配置
+        if self.triple_recall_config.enabled:
+            self.retriever.config.update({
+                'parallel_recall_enabled': True,
+                'rrf_k': self.triple_recall_config.rrf_k,
+                'vector_weight': self.triple_recall_config.vector_weight,
+                'keyword_weight': self.triple_recall_config.keyword_weight,
+                'entity_weight': self.triple_recall_config.entity_weight,
+                'fallback_enabled': self.triple_recall_config.fallback_enabled,
+                'fallback_parallel': self.triple_recall_config.fallback_parallel,
+                'fallback_workers': self.triple_recall_config.fallback_workers,
+            })
+        
         self.context_builder = ContextBuilder()
         
         # 监控
@@ -352,10 +392,18 @@ class RecallEngine:
                 from .graph import TemporalKnowledgeGraph
                 # 读取图谱后端配置
                 graph_backend = os.environ.get('TEMPORAL_GRAPH_BACKEND', 'file').lower()
+                # 读取衰减率和历史记录限制配置
+                decay_rate = float(os.environ.get('TEMPORAL_DECAY_RATE', '0.1'))
+                max_history = int(os.environ.get('TEMPORAL_MAX_HISTORY', '1000'))
                 self.temporal_graph = TemporalKnowledgeGraph(
                     data_path=os.path.join(self.data_root, 'data'),
                     backend=graph_backend
                 )
+                # 设置额外配置（如果类支持）
+                if hasattr(self.temporal_graph, 'decay_rate'):
+                    self.temporal_graph.decay_rate = decay_rate
+                if hasattr(self.temporal_graph, 'max_history'):
+                    self.temporal_graph.max_history = max_history
                 _safe_print(f"[Recall v4.0] 时态知识图谱已启用 (backend={graph_backend})")
             except Exception as e:
                 _safe_print(f"[Recall v4.0] 时态知识图谱初始化失败（不影响核心功能）: {e}")
@@ -380,12 +428,20 @@ class RecallEngine:
                 }
                 strategy = strategy_map.get(strategy_str, DetectionStrategy.MIXED)
                 
+                # 读取额外配置
+                auto_resolve = os.environ.get('CONTRADICTION_AUTO_RESOLVE', 'false').lower() == 'true'
+                similarity_threshold = float(os.environ.get('CONTRADICTION_SIMILARITY_THRESHOLD', '0.8'))
+                
                 self.contradiction_manager = ContradictionManager(
                     data_path=os.path.join(self.data_root, 'data'),
                     strategy=strategy,
-                    llm_client=self.llm_client
+                    llm_client=self.llm_client,
+                    auto_resolve=auto_resolve
                 )
-                _safe_print(f"[Recall v4.0] 矛盾检测已启用 (策略: {strategy.value})")
+                # 设置相似度阈值（如果类支持）
+                if hasattr(self.contradiction_manager, 'similarity_threshold'):
+                    self.contradiction_manager.similarity_threshold = similarity_threshold
+                _safe_print(f"[Recall v4.0] 矛盾检测已启用 (策略: {strategy.value}, 自动解决: {auto_resolve})")
             except Exception as e:
                 _safe_print(f"[Recall v4.0] 矛盾检测初始化失败（不影响核心功能）: {e}")
         
@@ -395,12 +451,15 @@ class RecallEngine:
                 from .index import FullTextIndex, BM25Config
                 k1 = float(os.environ.get('FULLTEXT_K1', '1.5'))
                 b = float(os.environ.get('FULLTEXT_B', '0.75'))
+                weight = float(os.environ.get('FULLTEXT_WEIGHT', '0.3'))
                 
                 self.fulltext_index = FullTextIndex(
                     data_path=os.path.join(self.data_root, 'index', 'fulltext'),
                     config=BM25Config(k1=k1, b=b)
                 )
-                _safe_print(f"[Recall v4.0] 全文检索已启用 (BM25 k1={k1}, b={b})")
+                # 保存权重供检索时使用
+                self._fulltext_weight = weight
+                _safe_print(f"[Recall v4.0] 全文检索已启用 (BM25 k1={k1}, b={b}, weight={weight})")
             except Exception as e:
                 _safe_print(f"[Recall v4.0] 全文检索初始化失败（不影响核心功能）: {e}")
         
@@ -408,6 +467,200 @@ class RecallEngine:
         eleven_layer_enabled = os.environ.get('ELEVEN_LAYER_RETRIEVER_ENABLED', 'false').lower() == 'true'
         if eleven_layer_enabled:
             self._init_eleven_layer_retriever()
+        
+        # 5. Phase 2: 预算管理器（用于控制 LLM 成本）
+        self._init_budget_manager()
+        
+        # 6. Phase 2: 智能抽取器（替换默认的 EntityExtractor）
+        self._init_smart_extractor()
+        
+        # 7. Phase 2: 三阶段去重器（用于实体/记忆去重）
+        self._init_three_stage_deduplicator()
+        
+        # 8. Phase 3.5: 图查询规划器（用于优化多跳查询）
+        self._init_query_planner()
+        
+        # 9. Phase 3.5: 社区检测器（用于发现实体群组）
+        self._init_community_detector()
+    
+    def _init_query_planner(self):
+        """初始化图查询规划器 (Phase 3.5)
+        
+        用于优化多跳图查询：
+        - 索引优先 - 有索引的字段优先使用索引
+        - 早期过滤 - 尽早减少候选集
+        - 路径缓存 - 缓存常见路径模式
+        """
+        self.query_planner = None
+        
+        # 只有当时态图启用时才初始化
+        if not self.temporal_graph:
+            return
+        
+        query_planner_enabled = os.environ.get('QUERY_PLANNER_ENABLED', 'false').lower() == 'true'
+        if query_planner_enabled:
+            try:
+                from .graph import QueryPlanner
+                self.query_planner = QueryPlanner(self.temporal_graph)
+                _safe_print("[Recall v4.0 Phase 3.5] 图查询规划器已启用")
+            except Exception as e:
+                _safe_print(f"[Recall v4.0] 图查询规划器初始化失败（不影响核心功能）: {e}")
+    
+    def _init_community_detector(self):
+        """初始化社区检测器 (Phase 3.5)
+        
+        用于发现图中的实体群组：
+        - Louvain: 最常用，适合大规模图
+        - Label Propagation: 快速，适合动态图
+        - Connected Components: 基础连通分量
+        """
+        self.community_detector = None
+        
+        community_enabled = os.environ.get('COMMUNITY_DETECTION_ENABLED', 'false').lower() == 'true'
+        if community_enabled:
+            try:
+                from .graph import CommunityDetector
+                from .graph.backends import create_graph_backend
+                
+                # 使用 legacy 适配器包装现有 KnowledgeGraph
+                backend = create_graph_backend(
+                    data_path=os.path.join(self.data_root, 'data'),
+                    backend='legacy',
+                    existing_knowledge_graph=self.knowledge_graph
+                )
+                
+                algorithm = os.environ.get('COMMUNITY_DETECTION_ALGORITHM', 'louvain')
+                min_size = int(os.environ.get('COMMUNITY_MIN_SIZE', '2'))
+                
+                self.community_detector = CommunityDetector(
+                    graph_backend=backend,
+                    algorithm=algorithm,
+                    min_community_size=min_size
+                )
+                _safe_print(f"[Recall v4.0 Phase 3.5] 社区检测器已启用 (算法: {algorithm})")
+            except Exception as e:
+                _safe_print(f"[Recall v4.0] 社区检测器初始化失败（不影响核心功能）: {e}")
+    
+    def _init_budget_manager(self):
+        """初始化预算管理器 (Phase 2)
+        
+        用于控制 LLM API 调用成本，支持：
+        - 每日/每小时预算限制
+        - 预算预警
+        - 超支时自动降级
+        """
+        self.budget_manager = None
+        
+        # 检查是否配置了预算限制
+        daily_limit = float(os.environ.get('BUDGET_DAILY_LIMIT', '0'))
+        hourly_limit = float(os.environ.get('BUDGET_HOURLY_LIMIT', '0'))
+        
+        # 只有配置了预算才启用
+        if daily_limit > 0 or hourly_limit > 0:
+            try:
+                from .utils.budget_manager import BudgetManager, BudgetConfig
+                
+                reserve = float(os.environ.get('BUDGET_RESERVE', '0.1'))
+                alert_threshold = float(os.environ.get('BUDGET_ALERT_THRESHOLD', '0.8'))
+                
+                config = BudgetConfig(
+                    daily_budget=daily_limit,
+                    hourly_budget=hourly_limit,
+                    warning_threshold=alert_threshold,
+                    auto_degrade=True  # 超支时自动降级到本地模式
+                )
+                
+                self.budget_manager = BudgetManager(
+                    data_path=os.path.join(self.data_root, 'data'),
+                    config=config
+                )
+                _safe_print(f"[Recall v4.0] 预算管理器已启用 (每日=${daily_limit}, 每小时=${hourly_limit})")
+            except Exception as e:
+                _safe_print(f"[Recall v4.0] 预算管理器初始化失败（不影响核心功能）: {e}")
+    
+    def _init_smart_extractor(self):
+        """初始化智能抽取器 (Phase 2)
+        
+        替换默认的 EntityExtractor，支持：
+        - RULES 模式：纯规则抽取（零 LLM 成本）
+        - ADAPTIVE 模式：简单文本用规则，复杂文本用 LLM
+        - LLM 模式：全部使用 LLM（最高质量）
+        """
+        self.smart_extractor = None
+        
+        # 读取配置
+        mode_str = os.environ.get('SMART_EXTRACTOR_MODE', 'RULES').upper()
+        
+        try:
+            from .processor.smart_extractor import SmartExtractor, SmartExtractorConfig, ExtractionMode
+            
+            # 模式映射
+            mode_map = {
+                'RULES': ExtractionMode.RULES,
+                'ADAPTIVE': ExtractionMode.ADAPTIVE,
+                'LLM': ExtractionMode.LLM,
+                # 向后兼容
+                'LOCAL': ExtractionMode.RULES,
+                'HYBRID': ExtractionMode.ADAPTIVE,
+                'LLM_FULL': ExtractionMode.LLM,
+            }
+            mode = mode_map.get(mode_str, ExtractionMode.RULES)
+            
+            complexity_threshold = float(os.environ.get('SMART_EXTRACTOR_COMPLEXITY_THRESHOLD', '0.6'))
+            enable_temporal = os.environ.get('SMART_EXTRACTOR_ENABLE_TEMPORAL', 'true').lower() == 'true'
+            
+            # 构建配置对象
+            config = SmartExtractorConfig(
+                mode=mode,
+                complexity_threshold=complexity_threshold,
+                enable_temporal_detection=enable_temporal
+            )
+            
+            self.smart_extractor = SmartExtractor(
+                config=config,
+                llm_client=self.llm_client if mode != ExtractionMode.RULES else None,
+                budget_manager=self.budget_manager
+            )
+            _safe_print(f"[Recall v4.0] 智能抽取器已启用 (模式: {mode.value})")
+        except Exception as e:
+            _safe_print(f"[Recall v4.0] 智能抽取器初始化失败（使用默认抽取器）: {e}")
+    
+    def _init_three_stage_deduplicator(self):
+        """初始化三阶段去重器 (Phase 2)
+        
+        用于实体和记忆的智能去重：
+        - 阶段1: MinHash + LSH（快速粗筛）
+        - 阶段2: Embedding 语义相似度
+        - 阶段3: LLM 确认（可选，用于边界情况）
+        """
+        self.deduplicator = None
+        
+        try:
+            from .processor.three_stage_deduplicator import ThreeStageDeduplicator, DedupConfig
+            
+            # 读取配置（默认阈值较高以避免误判）
+            jaccard_threshold = float(os.environ.get('DEDUP_JACCARD_THRESHOLD', '0.85'))
+            semantic_high = float(os.environ.get('DEDUP_SEMANTIC_THRESHOLD', '0.90'))
+            semantic_low = float(os.environ.get('DEDUP_SEMANTIC_LOW_THRESHOLD', '0.80'))
+            llm_enabled = os.environ.get('DEDUP_LLM_ENABLED', 'false').lower() == 'true'
+            
+            # 构建配置对象
+            config = DedupConfig(
+                jaccard_threshold=jaccard_threshold,
+                semantic_threshold=semantic_high,
+                semantic_low_threshold=semantic_low,
+                llm_enabled=llm_enabled
+            )
+            
+            self.deduplicator = ThreeStageDeduplicator(
+                config=config,
+                embedding_backend=self.embedding_backend if hasattr(self, 'embedding_backend') else None,
+                llm_client=self.llm_client if llm_enabled else None,
+                budget_manager=self.budget_manager
+            )
+            _safe_print(f"[Recall v4.0] 三阶段去重器已启用 (Jaccard={jaccard_threshold}, Semantic={semantic_low}-{semantic_high}, LLM={llm_enabled})")
+        except Exception as e:
+            _safe_print(f"[Recall v4.0] 三阶段去重器初始化失败（使用默认去重）: {e}")
     
     def _init_eleven_layer_retriever(self):
         """初始化 Phase 3 十一层检索器
@@ -451,12 +704,17 @@ class RecallEngine:
                 temporal_index=temporal_index,
                 knowledge_graph=self.temporal_graph,
                 cross_encoder=cross_encoder,
+                # Phase 3.6: 传入 embedding_backend（用于 VectorIndexIVF）
+                embedding_backend=self.embedding_backend if hasattr(self, 'embedding_backend') else None,
                 # 配置
                 config=config
             )
             
             # 记录启用状态
             layers_status = []
+            # Phase 3.6 状态
+            if config.parallel_recall_enabled:
+                layers_status.append("Phase3.6:并行三路召回")
             if config.l2_enabled and temporal_index:
                 layers_status.append("L2:时态过滤")
             if config.l5_enabled and self.temporal_graph:
@@ -738,8 +996,15 @@ class RecallEngine:
                             for mem in memories:
                                 mem_id = mem.get('metadata', {}).get('id')
                                 content = mem.get('content', '')
+                                metadata = mem.get('metadata', {})
+                                entities = mem.get('entities', [])
                                 if mem_id and content:
                                     self.retriever.cache_content(mem_id, content)
+                                    # 同时缓存 metadata 和 entities
+                                    if hasattr(self.retriever, 'cache_metadata'):
+                                        self.retriever.cache_metadata(mem_id, metadata)
+                                    if hasattr(self.retriever, 'cache_entities'):
+                                        self.retriever.cache_entities(mem_id, entities)
                                     count += 1
                     except Exception as e:
                         _safe_print(f"[Recall] 加载 {memories_file} 失败: {e}")
@@ -794,10 +1059,55 @@ class RecallEngine:
         consistency_warnings = []  # 收集一致性警告
         
         try:
-            # 【新增】去重检查：检查是否已存在完全相同内容的记忆
+            # 【升级】去重检查：优先使用三阶段去重器（Phase 2），回退到简单字符串匹配
             scope = self.storage.get_scope(user_id)
             existing_memories = scope.get_all(limit=100)  # 检查最近100条
             content_normalized = content.strip()
+            
+            # 尝试使用三阶段去重器
+            if self.deduplicator is not None and existing_memories:
+                try:
+                    from .processor.three_stage_deduplicator import DedupItem
+                    import uuid as uuid_module
+                    
+                    # 创建新记忆的 DedupItem
+                    new_item = DedupItem(
+                        id=str(uuid_module.uuid4()),
+                        name=content_normalized[:100],  # 前100字符作为标题
+                        content=content_normalized,
+                        item_type="memory"
+                    )
+                    
+                    # 将现有记忆转换为 DedupItem 列表
+                    existing_items = []
+                    for mem in existing_memories:
+                        mem_content = mem.get('content', '').strip()
+                        if mem_content:
+                            existing_items.append(DedupItem(
+                                id=mem.get('metadata', {}).get('id', str(uuid_module.uuid4())),
+                                name=mem_content[:100],
+                                content=mem_content,
+                                item_type="memory"
+                            ))
+                    
+                    if existing_items:
+                        # 执行三阶段去重
+                        dedup_result = self.deduplicator.deduplicate([new_item], existing_items)
+                        
+                        # 检查是否有匹配（重复）
+                        if dedup_result.matches:
+                            match = dedup_result.matches[0]
+                            _safe_print(f"[Recall] 三阶段去重发现重复: type={match.match_type.value}, conf={match.confidence:.2f}, reason={match.reason}")
+                            return AddResult(
+                                id=match.matched_item.id if match.matched_item else 'unknown',
+                                success=False,
+                                entities=[],
+                                message=f"记忆内容已存在（{match.match_type.value}匹配，置信度{match.confidence:.0%}）"
+                            )
+                except Exception as e:
+                    _safe_print(f"[Recall] 三阶段去重失败，回退到简单匹配: {e}")
+            
+            # 回退：简单字符串精确匹配
             for mem in existing_memories:
                 existing_content = mem.get('content', '').strip()
                 if existing_content == content_normalized:
@@ -809,26 +1119,149 @@ class RecallEngine:
                         message="记忆内容已存在，跳过重复保存"
                     )
             
-            # 1. 提取实体
-            entities = self.entity_extractor.extract(content)
-            entity_names = [e.name for e in entities]
+            # 1. 提取实体（优先使用 SmartExtractor，回退到 EntityExtractor）
+            extraction_result = None
+            if self.smart_extractor is not None:
+                try:
+                    extraction_result = self.smart_extractor.extract(content)
+                    entities = extraction_result.entities
+                    entity_names = [e.name for e in entities]
+                    keywords = extraction_result.keywords
+                    _safe_print(f"[Recall] SmartExtractor: mode={extraction_result.mode_used.value}, entities={len(entities)}, complexity={extraction_result.complexity_score:.2f}")
+                except Exception as e:
+                    _safe_print(f"[Recall] SmartExtractor 失败，回退到默认抽取器: {e}")
+                    extraction_result = None
             
-            # 2. 提取关键词
-            keywords = self.entity_extractor.extract_keywords(content)
+            if extraction_result is None:
+                # 回退到默认的 EntityExtractor
+                entities = self.entity_extractor.extract(content)
+                entity_names = [e.name for e in entities]
+                keywords = self.entity_extractor.extract_keywords(content)
             
-            # 3. 一致性检查
+            # 2. 提取关键词（如果 SmartExtractor 未处理）
+            if extraction_result is None:
+                keywords = self.entity_extractor.extract_keywords(content)
+            
+            # 3. 一致性检查（分两阶段：正则规则 + 可选LLM深度检测）
             if check_consistency:
                 existing_memories = self.search(content, user_id=user_id, top_k=5)
+                _safe_print(f"[Recall] 一致性检查: 找到 {len(existing_memories)} 条相关记忆")
+                for i, m in enumerate(existing_memories):
+                    _safe_print(f"[Recall]   [{i+1}] {m.content[:30]}...")
+                
+                # 阶段1：正则规则检测（快速）
                 consistency = self.consistency_checker.check(
                     content,
                     [{'content': m.content} for m in existing_memories]
                 )
+                _safe_print(f"[Recall] 一致性检查结果: is_consistent={consistency.is_consistent}, violations={len(consistency.violations)}")
                 if not consistency.is_consistent:
                     # 收集警告并记录
                     for v in consistency.violations:
                         warning_msg = v.description
                         consistency_warnings.append(warning_msg)
                         _safe_print(f"[Recall] 一致性警告: {warning_msg}")
+                    
+                    # 将一致性违规存储到矛盾管理器
+                    if self.contradiction_manager is not None:
+                        try:
+                            from .models.temporal import TemporalFact, Contradiction, ContradictionType
+                            from datetime import datetime
+                            import uuid as uuid_module
+                            
+                            for v in consistency.violations:
+                                # 将 ViolationType 映射到 ContradictionType
+                                contradiction_type = ContradictionType.DIRECT
+                                if hasattr(v, 'type'):
+                                    type_str = v.type.value if hasattr(v.type, 'value') else str(v.type)
+                                    if 'timeline' in type_str.lower() or 'temporal' in type_str.lower():
+                                        contradiction_type = ContradictionType.TEMPORAL
+                                    elif 'logic' in type_str.lower():
+                                        contradiction_type = ContradictionType.LOGICAL
+                                
+                                # 获取证据文本
+                                evidence = v.evidence if hasattr(v, 'evidence') and v.evidence else [content]
+                                new_text = evidence[0] if len(evidence) > 0 else content
+                                old_text = evidence[1] if len(evidence) > 1 else ""
+                                
+                                # 创建 TemporalFact 对象
+                                new_fact = TemporalFact(
+                                    uuid=str(uuid_module.uuid4()),
+                                    fact=new_text[:200],
+                                    source_text=new_text[:200],
+                                    user_id=user_id
+                                )
+                                old_fact = TemporalFact(
+                                    uuid=str(uuid_module.uuid4()),
+                                    fact=old_text[:200],
+                                    source_text=old_text[:200],
+                                    user_id=user_id
+                                )
+                                
+                                # 创建矛盾记录
+                                contradiction = Contradiction(
+                                    uuid=str(uuid_module.uuid4()),
+                                    old_fact=old_fact,
+                                    new_fact=new_fact,
+                                    contradiction_type=contradiction_type,
+                                    confidence=v.severity if hasattr(v, 'severity') else 0.8,
+                                    detected_at=datetime.now(),
+                                    notes=v.description[:200] if hasattr(v, 'description') else ""
+                                )
+                                self.contradiction_manager.add_pending(contradiction)
+                                _safe_print(f"[Recall] 矛盾已记录: {v.description[:50]}...")
+                        except Exception as e:
+                            _safe_print(f"[Recall] 矛盾记录失败（不影响主流程）: {e}")
+                
+                # 阶段2：LLM深度矛盾检测（可选，当策略不是RULE时启用）
+                # 这可以检测正则无法捕获的复杂语义矛盾
+                if self.contradiction_manager is not None and existing_memories:
+                    try:
+                        from .models.temporal import TemporalFact, Contradiction
+                        from .graph import DetectionStrategy
+                        from datetime import datetime
+                        import uuid as uuid_module
+                        
+                        # 只有当策略是 LLM/MIXED/AUTO 时才进行深度检测
+                        if self.contradiction_manager.strategy != DetectionStrategy.RULE:
+                            _safe_print(f"[Recall] 启用LLM深度矛盾检测 (策略: {self.contradiction_manager.strategy.value})")
+                            
+                            # 创建新事实的 TemporalFact
+                            new_fact = TemporalFact(
+                                uuid=str(uuid_module.uuid4()),
+                                fact=content[:500],
+                                source_text=content,
+                                user_id=user_id
+                            )
+                            
+                            # 将现有记忆转换为 TemporalFact 列表
+                            existing_facts = []
+                            for m in existing_memories:
+                                existing_facts.append(TemporalFact(
+                                    uuid=m.id if hasattr(m, 'id') else str(uuid_module.uuid4()),
+                                    fact=m.content[:500] if hasattr(m, 'content') else str(m)[:500],
+                                    source_text=m.content if hasattr(m, 'content') else str(m),
+                                    user_id=user_id
+                                ))
+                            
+                            # 调用 ContradictionManager.detect() 进行深度检测
+                            llm_contradictions = self.contradiction_manager.detect(
+                                new_fact=new_fact,
+                                existing_facts=existing_facts,
+                                context=content  # 传递完整上下文给 LLM
+                            )
+                            
+                            # 记录 LLM 检测到的矛盾
+                            for c in llm_contradictions:
+                                self.contradiction_manager.add_pending(c)
+                                warning_msg = f"[LLM检测] {c.old_fact.fact[:50]} vs {c.new_fact.fact[:50]}"
+                                consistency_warnings.append(warning_msg)
+                                _safe_print(f"[Recall] LLM检测到矛盾: {warning_msg}")
+                            
+                            if llm_contradictions:
+                                _safe_print(f"[Recall] LLM深度检测发现 {len(llm_contradictions)} 个额外矛盾")
+                    except Exception as e:
+                        _safe_print(f"[Recall] LLM矛盾检测失败（不影响主流程）: {e}")
             
             # 4. 生成ID并存储
             memory_id = f"mem_{uuid.uuid4().hex[:12]}"
@@ -897,6 +1330,12 @@ class RecallEngine:
             # 5.5 缓存内容到检索器（确保检索时能获取内容）
             try:
                 self.retriever.cache_content(memory_id, content)
+                # 同时缓存 metadata 和 entities
+                if hasattr(self.retriever, 'cache_metadata'):
+                    self.retriever.cache_metadata(memory_id, metadata or {})
+                if hasattr(self.retriever, 'cache_entities'):
+                    entity_names = [e.name for e in entities] if entities else []
+                    self.retriever.cache_entities(memory_id, entity_names)
             except Exception as e:
                 _safe_print(f"[Recall] 缓存更新失败（不影响主流程）: {type(e).__name__}: {e}")
             
@@ -928,6 +1367,31 @@ class RecallEngine:
                     )
             except Exception as e:
                 _safe_print(f"[Recall] 知识图谱更新失败（不影响主流程）: {e}")
+            
+            # 6.5 更新全文索引 BM25（Phase 1 功能）
+            if self.fulltext_index is not None:
+                try:
+                    self.fulltext_index.add(memory_id, content)
+                except Exception as e:
+                    _safe_print(f"[Recall] 全文索引更新失败（不影响主流程）: {e}")
+            
+            # 6.6 更新时态知识图谱（Phase 1 功能）
+            if self.temporal_graph is not None:
+                try:
+                    from .models.temporal import TemporalFact
+                    # 为每个实体关系创建时态事实
+                    for rel in relations if 'relations' in dir() else []:
+                        source_id, relation_type, target_id, source_text = rel
+                        fact = TemporalFact(
+                            uuid=f"fact_{memory_id}_{source_id}_{target_id}",
+                            fact=f"{source_id} {relation_type} {target_id}",
+                            source_text=source_text[:200] if source_text else "",
+                            user_id=user_id,
+                            entity_name=source_id
+                        )
+                        self.temporal_graph.add_fact(fact)
+                except Exception as e:
+                    _safe_print(f"[Recall] 时态图谱更新失败（不影响主流程）: {e}")
             
             # 7. 自动提取持久条件（已移至 server.py 中处理，避免 character_id 传递问题）
             # 注意：之前这里调用 extract_from_text 时没有传递 character_id，
@@ -1148,6 +1612,79 @@ class RecallEngine:
     def stats(self) -> Dict[str, Any]:
         """获取统计信息（get_stats 的别名）"""
         return self.get_stats()
+    
+    # ==================== Phase 3.5 高级 API ====================
+    
+    def detect_communities(
+        self,
+        user_id: str = "default",
+        min_size: int = 2
+    ) -> List[Dict[str, Any]]:
+        """检测实体社区/群组 (Phase 3.5)
+        
+        使用 Louvain 或标签传播算法发现图中的实体群组。
+        需要启用 COMMUNITY_DETECTION_ENABLED=true。
+        
+        Args:
+            user_id: 用户ID（用于过滤社区）
+            min_size: 最小社区大小
+        
+        Returns:
+            List[Dict]: 社区列表，每个包含：
+                - id: 社区ID
+                - name: 社区名称
+                - member_ids: 成员实体ID列表
+                - size: 社区大小
+        """
+        if self.community_detector is None:
+            _safe_print("[Recall] 社区检测器未启用，请设置 COMMUNITY_DETECTION_ENABLED=true")
+            return []
+        
+        try:
+            communities = self.community_detector.detect_communities()
+            # 过滤最小大小
+            result = []
+            for comm in communities:
+                if comm.size >= min_size:
+                    result.append({
+                        'id': comm.id,
+                        'name': comm.name,
+                        'member_ids': comm.member_ids,
+                        'size': comm.size,
+                        'summary': comm.summary
+                    })
+            return result
+        except Exception as e:
+            _safe_print(f"[Recall] 社区检测失败: {e}")
+            return []
+    
+    def get_query_stats(self) -> Dict[str, Any]:
+        """获取图查询统计信息 (Phase 3.5)
+        
+        需要启用 QUERY_PLANNER_ENABLED=true。
+        
+        Returns:
+            Dict: 查询统计，包含：
+                - total_queries: 总查询数
+                - cache_hits: 缓存命中数
+                - cache_hit_rate: 缓存命中率
+                - avg_execution_time_ms: 平均执行时间
+        """
+        if self.query_planner is None:
+            return {'enabled': False, 'message': '图查询规划器未启用'}
+        
+        try:
+            stats = self.query_planner.stats
+            return {
+                'enabled': True,
+                'total_queries': stats.total_queries,
+                'cache_hits': stats.cache_hits,
+                'cache_hit_rate': stats.cache_hit_rate,
+                'avg_execution_time_ms': stats.avg_execution_time_ms,
+                'total_nodes_visited': stats.total_nodes_visited
+            }
+        except Exception as e:
+            return {'enabled': True, 'error': str(e)}
     
     def delete(
         self,

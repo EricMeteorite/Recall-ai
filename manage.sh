@@ -551,15 +551,16 @@ BUDGET_ALERT_THRESHOLD=0.8
 # ----------------------------------------------------------------------------
 # Jaccard 相似度阈值（阶段1 MinHash+LSH，0.0-1.0）
 # Jaccard similarity threshold (Stage 1)
-DEDUP_JACCARD_THRESHOLD=0.7
+# 注意：0.85较保守，避免误判不同内容为重复
+DEDUP_JACCARD_THRESHOLD=0.85
 
 # 语义相似度高阈值（阶段2，超过此值直接合并）
 # Semantic similarity high threshold (Stage 2, auto-merge when exceeded)
-DEDUP_SEMANTIC_THRESHOLD=0.85
+DEDUP_SEMANTIC_THRESHOLD=0.90
 
 # 语义相似度低阈值（阶段2，低于此值视为不同）
 # Semantic similarity low threshold (Stage 2, considered different when below)
-DEDUP_SEMANTIC_LOW_THRESHOLD=0.70
+DEDUP_SEMANTIC_LOW_THRESHOLD=0.80
 
 # 是否启用 LLM 确认（阶段3，用于边界情况）
 # Enable LLM confirmation (Stage 3, for borderline cases)
@@ -675,6 +676,112 @@ RETRIEVAL_WEIGHT_GRAPH=1.0
 RETRIEVAL_WEIGHT_NGRAM=0.8
 RETRIEVAL_WEIGHT_VECTOR=1.0
 RETRIEVAL_WEIGHT_TEMPORAL=0.5
+
+# ============================================================================
+# v4.0 Phase 3.5 企业级性能配置
+# v4.0 Phase 3.5 Enterprise Performance Configuration
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# 图查询规划器配置 (QueryPlanner)
+# Query Planner Configuration
+# ----------------------------------------------------------------------------
+# 是否启用图查询规划器（优化多跳图查询）
+# Enable query planner (optimizes multi-hop graph queries)
+QUERY_PLANNER_ENABLED=false
+
+# 路径缓存大小（条）
+# Path cache size (entries)
+QUERY_PLANNER_CACHE_SIZE=1000
+
+# 缓存过期时间（秒）
+# Cache TTL (seconds)
+QUERY_PLANNER_CACHE_TTL=300
+
+# ----------------------------------------------------------------------------
+# 社区检测配置 (CommunityDetector)
+# Community Detection Configuration
+# ----------------------------------------------------------------------------
+# 是否启用社区检测（发现实体群组）
+# Enable community detection (discover entity clusters)
+COMMUNITY_DETECTION_ENABLED=false
+
+# 检测算法: louvain | label_propagation | connected
+# Detection algorithm
+COMMUNITY_DETECTION_ALGORITHM=louvain
+
+# 最小社区大小
+# Minimum community size
+COMMUNITY_MIN_SIZE=2
+
+# ============================================================================
+# v4.0 Phase 3.6 三路并行召回配置 (100% 不遗忘保证)
+# v4.0 Phase 3.6 Triple Recall Configuration (100% Memory Guarantee)
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# 主开关
+# Master Switch
+# ----------------------------------------------------------------------------
+# 是否启用三路并行召回（IVF-HNSW + 倒排 + 实体，RRF融合）
+# Enable triple parallel recall (IVF-HNSW + Inverted + Entity, RRF fusion)
+TRIPLE_RECALL_ENABLED=true
+
+# ----------------------------------------------------------------------------
+# RRF 融合配置
+# RRF (Reciprocal Rank Fusion) Configuration
+# ----------------------------------------------------------------------------
+# RRF 常数 k（推荐 60，越大排名差异越平滑）
+# RRF constant k (recommend 60, higher = smoother rank differences)
+TRIPLE_RECALL_RRF_K=60
+
+# 语义召回权重（路径1: IVF-HNSW）
+# Semantic recall weight (Path 1: IVF-HNSW)
+TRIPLE_RECALL_VECTOR_WEIGHT=1.0
+
+# 关键词召回权重（路径2: 倒排索引，100%召回）
+# Keyword recall weight (Path 2: Inverted index, 100% recall)
+TRIPLE_RECALL_KEYWORD_WEIGHT=1.2
+
+# 实体召回权重（路径3: 实体索引，100%召回）
+# Entity recall weight (Path 3: Entity index, 100% recall)
+TRIPLE_RECALL_ENTITY_WEIGHT=1.0
+
+# ----------------------------------------------------------------------------
+# IVF-HNSW 参数 (提升召回率至 95-99%)
+# IVF-HNSW Parameters (Improve recall to 95-99%)
+# ----------------------------------------------------------------------------
+# HNSW 图连接数（越大召回越高，内存越大，推荐 32）
+# HNSW M parameter (higher = better recall, more memory, recommend 32)
+VECTOR_IVF_HNSW_M=32
+
+# HNSW 构建精度（越大索引质量越高，构建越慢，推荐 200）
+# HNSW efConstruction (higher = better index quality, slower build, recommend 200)
+VECTOR_IVF_HNSW_EF_CONSTRUCTION=200
+
+# HNSW 搜索精度（越大召回越高，搜索越慢，推荐 64）
+# HNSW efSearch (higher = better recall, slower search, recommend 64)
+VECTOR_IVF_HNSW_EF_SEARCH=64
+
+# ----------------------------------------------------------------------------
+# 原文兜底配置 (100% 保证)
+# Raw Text Fallback Configuration (100% Guarantee)
+# ----------------------------------------------------------------------------
+# 是否启用原文兜底（仅在融合结果为空时触发）
+# Enable raw text fallback (only when fusion results are empty)
+FALLBACK_ENABLED=true
+
+# 是否启用并行兜底扫描（提升大规模数据的兜底速度）
+# Enable parallel fallback scan (improve speed for large data)
+FALLBACK_PARALLEL=true
+
+# 并行扫描线程数（推荐 4）
+# Parallel scan workers (recommend 4)
+FALLBACK_WORKERS=4
+
+# 兜底最大结果数
+# Max fallback results
+FALLBACK_MAX_RESULTS=50
 EOF
                 print_info "已创建配置文件: $config_file"
             fi

@@ -187,6 +187,16 @@ class ContextTracker:
     def MIN_CONFIDENCE(self) -> float:
         return self._get_limits_config()['min_confidence']
     
+    @property
+    def trigger_interval(self) -> int:
+        """触发间隔（支持热更新）"""
+        return int(os.environ.get('CONTEXT_TRIGGER_INTERVAL', '5'))
+    
+    @property
+    def max_context_turns(self) -> int:
+        """最大上下文轮数（支持热更新）"""
+        return int(os.environ.get('CONTEXT_MAX_CONTEXT_TURNS', '20'))
+    
     SIMILARITY_THRESHOLD = 0.6  # 词重叠相似度阈值（后备方案）
     FLOAT_EPSILON = 1e-9  # 浮点数比较容差
     
@@ -241,9 +251,7 @@ class ContextTracker:
         
         # 触发机制（类似 ForeshadowingAnalyzer）
         # 每 N 轮对话触发一次条件提取，避免重复分析相同内容
-        self._trigger_interval = int(os.environ.get('CONTEXT_TRIGGER_INTERVAL', '5'))  # 默认每5轮
-        # 对话获取范围：用于分析时获取的历史轮数（与伏笔分析器统一）
-        self._max_context_turns = int(os.environ.get('CONTEXT_MAX_CONTEXT_TURNS', '20'))  # 默认20轮
+        # 配置项通过 @property 支持热更新，不再在 __init__ 中缓存
         self._turn_counters: Dict[str, int] = {}  # cache_key -> 当前轮次计数
         self._last_analyzed_turn: Dict[str, int] = {}  # cache_key -> 上次分析时的总轮次
         
@@ -414,9 +422,9 @@ class ContextTracker:
         current_count = self._turn_counters[cache_key]
         
         # 检查是否应该触发分析
-        if current_count >= self._trigger_interval:
-            _safe_print(f"[ContextTracker] 🔄 触发条件提取: user={user_id}, char={character_id}")
-            _safe_print(f"[ContextTracker]    轮次={current_count}, 间隔={self._trigger_interval}")
+        if current_count >= self.trigger_interval:
+            _safe_print(f"[ContextTracker] [SYNC] 触发条件提取: user={user_id}, char={character_id}")
+            _safe_print(f"[ContextTracker]    轮次={current_count}, 间隔={self.trigger_interval}")
             
             # 重置计数
             self._turn_counters[cache_key] = 0
@@ -430,12 +438,12 @@ class ContextTracker:
                     'extracted': [{'id': ctx.id, 'content': ctx.content, 'type': ctx.context_type.value} for ctx in extracted]
                 }
             else:
-                _safe_print(f"[ContextTracker]    ⏭️ LLM 或 memory_provider 未配置，跳过")
+                _safe_print(f"[ContextTracker]    [SKIP] LLM 或 memory_provider 未配置，跳过")
                 return {'triggered': False, 'reason': 'LLM or memory_provider not configured'}
         
         return {
             'triggered': False,
-            'turns_until_next': self._trigger_interval - current_count
+            'turns_until_next': self.trigger_interval - current_count
         }
     
     def _extract_from_conversation(self, user_id: str, character_id: str = "default") -> List['PersistentContext']:
@@ -454,13 +462,13 @@ class ContextTracker:
             List[PersistentContext]: 提取的条件列表
         """
         # 使用 max_context_turns * 2 作为获取范围（与伏笔分析器保持一致）
-        conversation_context = self._get_conversation_context(user_id, character_id, max_turns=self._max_context_turns * 2)
+        conversation_context = self._get_conversation_context(user_id, character_id, max_turns=self.max_context_turns * 2)
         
         if not conversation_context:
-            _safe_print(f"[ContextTracker] ⏭️ 无对话上下文，跳过提取")
+            _safe_print(f"[ContextTracker] [SKIP] 无对话上下文，跳过提取")
             return []
         
-        _safe_print(f"[ContextTracker] 🔍 从对话历史提取条件")
+        _safe_print(f"[ContextTracker] [SEARCH] 从对话历史提取条件")
         _safe_print(f"[ContextTracker]    对话长度: {len(conversation_context)} 字符")
         
         # 使用 LLM 提取

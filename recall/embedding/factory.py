@@ -95,6 +95,8 @@ def get_available_backends() -> List[str]:
     Returns:
         可用后端名称列表
     """
+    import os
+    
     available = ["none"]  # Lite 模式总是可用
     
     # 检查本地后端
@@ -104,26 +106,16 @@ def get_available_backends() -> List[str]:
     except ImportError:
         pass
     
-    # 检查 API 后端（只要有 openai 包即可）
+    # 检查 API 后端（使用统一的 EMBEDDING_* 配置）
     try:
         import openai
-        import os
         
-        if os.environ.get('OPENAI_API_KEY'):
-            available.append("openai")
-        
-        if os.environ.get('SILICONFLOW_API_KEY'):
-            available.append("siliconflow")
-        
-        # 检查自定义配置
+        # 只检查统一的 EMBEDDING_API_KEY 和 EMBEDDING_API_BASE
         if os.environ.get('EMBEDDING_API_KEY') and os.environ.get('EMBEDDING_API_BASE'):
-            available.append("custom")
-        
-        # 如果有 openai 包，就可以配置使用
-        if "openai" not in available and "siliconflow" not in available:
-            available.append("openai")  # 可配置
-            available.append("siliconflow")  # 可配置
-            available.append("custom")  # 可配置
+            available.append("api")  # 统一的 API 后端
+        else:
+            # 如果有 openai 包但未配置，标记为可配置
+            available.append("api (未配置)")
     except ImportError:
         pass
     
@@ -134,55 +126,36 @@ def auto_select_backend() -> EmbeddingConfig:
     """自动选择最佳可用后端
     
     优先级：
-    1. 环境变量 RECALL_EMBEDDING_MODE 指定
-    2. 自定义 API（用户明确配置）
-    3. 硅基流动（国内快）
-    4. OpenAI
-    5. 本地模型
-    6. Lite 模式
+    1. 环境变量 RECALL_EMBEDDING_MODE 指定模式
+    2. EMBEDDING_API_KEY + EMBEDDING_API_BASE 配置（Cloud API）
+    3. 本地模型（sentence-transformers）
+    4. Lite 模式（仅关键词搜索）
+    
+    配置变量说明（全部使用 server.py 定义的标准配置名）：
+    - RECALL_EMBEDDING_MODE: 模式选择 (auto/api/local/none)
+    - EMBEDDING_API_KEY: API 密钥
+    - EMBEDDING_API_BASE: API 地址（如 https://api.siliconflow.cn/v1）
+    - EMBEDDING_MODEL: 模型名称
+    - EMBEDDING_DIMENSION: 向量维度
     """
     import os
     
-    # 检查是否通过环境变量指定模式
+    # 获取统一的配置项
     mode = os.environ.get('RECALL_EMBEDDING_MODE', '').lower()
+    api_key = os.environ.get('EMBEDDING_API_KEY', '')
+    api_base = os.environ.get('EMBEDDING_API_BASE', '')
+    api_model = os.environ.get('EMBEDDING_MODEL', 'text-embedding-3-small')
+    dimension_str = os.environ.get('EMBEDDING_DIMENSION', '1024')
     
+    try:
+        dimension = int(dimension_str)
+    except ValueError:
+        dimension = 1024
+    
+    # 根据模式选择后端
     if mode == 'none':
         _safe_print("[Embedding] 使用: Lite 模式（仅关键词搜索）")
         return EmbeddingConfig.lite()
-    
-    if mode == 'custom':
-        api_key = os.environ.get('EMBEDDING_API_KEY', '')
-        api_base = os.environ.get('EMBEDDING_API_BASE', '')
-        api_model = os.environ.get('EMBEDDING_MODEL', 'text-embedding-3-small')
-        dimension = int(os.environ.get('EMBEDDING_DIMENSION', '1536'))
-        
-        if api_key and api_base:
-            _safe_print(f"[Embedding] 使用: 自定义 Cloud API ({api_base})")
-            return EmbeddingConfig.cloud_custom(api_key, api_base, api_model, dimension)
-        else:
-            _safe_print("[Embedding] 警告: 自定义 API 配置不完整，回退到 Lite 模式")
-            return EmbeddingConfig.lite()
-    
-    if mode == 'siliconflow':
-        api_key = os.environ.get('SILICONFLOW_API_KEY', '')
-        model = os.environ.get('SILICONFLOW_MODEL', 'BAAI/bge-large-zh-v1.5')
-        if api_key:
-            _safe_print(f"[Embedding] 使用: 硅基流动 Cloud API (模型: {model})")
-            return EmbeddingConfig.cloud_siliconflow(api_key, model=model)
-        else:
-            _safe_print("[Embedding] 警告: SILICONFLOW_API_KEY 未设置，回退到 Lite 模式")
-            return EmbeddingConfig.lite()
-    
-    if mode == 'openai':
-        api_key = os.environ.get('OPENAI_API_KEY', '')
-        api_base = os.environ.get('OPENAI_API_BASE', '')  # 支持自定义 base
-        model = os.environ.get('OPENAI_MODEL', 'text-embedding-3-small')
-        if api_key:
-            _safe_print(f"[Embedding] 使用: OpenAI Cloud API (模型: {model})" + (f" ({api_base})" if api_base else ""))
-            return EmbeddingConfig.cloud_openai(api_key, api_base if api_base else None, model=model)
-        else:
-            _safe_print("[Embedding] 警告: OPENAI_API_KEY 未设置，回退到 Lite 模式")
-            return EmbeddingConfig.lite()
     
     if mode == 'local':
         try:
@@ -193,36 +166,22 @@ def auto_select_backend() -> EmbeddingConfig:
             _safe_print("[Embedding] 警告: sentence-transformers 未安装，回退到 Lite 模式")
             return EmbeddingConfig.lite()
     
-    # 未指定模式，自动检测
-    # 优先检查自定义配置
-    if os.environ.get('EMBEDDING_API_KEY') and os.environ.get('EMBEDDING_API_BASE'):
-        api_key = os.environ['EMBEDDING_API_KEY']
-        api_base = os.environ['EMBEDDING_API_BASE']
-        api_model = os.environ.get('EMBEDDING_MODEL', 'text-embedding-3-small')
-        dimension = int(os.environ.get('EMBEDDING_DIMENSION', '1536'))
-        _safe_print(f"[Embedding] 自动选择: 自定义 Cloud API ({api_base})")
+    if mode == 'api':
+        if api_key and api_base:
+            _safe_print(f"[Embedding] 使用: Cloud API ({api_base}, 模型: {api_model})")
+            return EmbeddingConfig.cloud_custom(api_key, api_base, api_model, dimension)
+        else:
+            _safe_print("[Embedding] 警告: EMBEDDING_API_KEY 或 EMBEDDING_API_BASE 未设置，回退到 Lite 模式")
+            return EmbeddingConfig.lite()
+    
+    # mode == 'auto' 或未指定：自动检测最佳后端
+    
+    # 优先检查 Cloud API 配置（低内存占用）
+    if api_key and api_base:
+        _safe_print(f"[Embedding] 自动选择: Cloud API ({api_base}, 模型: {api_model})")
         return EmbeddingConfig.cloud_custom(api_key, api_base, api_model, dimension)
     
-    # 然后 Cloud API（内存低）
-    if os.environ.get('SILICONFLOW_API_KEY'):
-        model = os.environ.get('SILICONFLOW_MODEL', 'BAAI/bge-large-zh-v1.5')
-        _safe_print(f"[Embedding] 自动选择: 硅基流动 Cloud API (模型: {model})")
-        return EmbeddingConfig.cloud_siliconflow(
-            os.environ['SILICONFLOW_API_KEY'],
-            model=model
-        )
-    
-    if os.environ.get('OPENAI_API_KEY'):
-        api_base = os.environ.get('OPENAI_API_BASE', '')
-        model = os.environ.get('OPENAI_MODEL', 'text-embedding-3-small')
-        _safe_print(f"[Embedding] 自动选择: OpenAI Cloud API (模型: {model})" + (f" ({api_base})" if api_base else ""))
-        return EmbeddingConfig.cloud_openai(
-            os.environ['OPENAI_API_KEY'],
-            api_base if api_base else None,
-            model=model
-        )
-    
-    # 其次本地
+    # 其次检查本地模型
     try:
         import sentence_transformers
         _safe_print("[Embedding] 自动选择: Local 模式（本地模型）")
@@ -230,6 +189,6 @@ def auto_select_backend() -> EmbeddingConfig:
     except ImportError:
         pass
     
-    # 最后 Lite
+    # 最后回退到 Lite 模式
     _safe_print("[Embedding] 自动选择: Lite 模式（无语义搜索）")
     return EmbeddingConfig.lite()

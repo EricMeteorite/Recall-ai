@@ -6,6 +6,7 @@
 - config: 检索配置类
 - context_builder: 上下文构建器
 - parallel_retrieval: 并行检索器
+- rrf_fusion: RRF 融合算法（Phase 3.6）
 """
 
 # 原有模块（向后兼容）
@@ -22,6 +23,9 @@ from .eleven_layer import (
     ElevenLayerRetriever, EightLayerRetrieverCompat,
     RetrievalLayer as ElevenLayerRetrievalLayer
 )
+
+# Phase 3.6 新模块：RRF 融合
+from .rrf_fusion import reciprocal_rank_fusion, weighted_score_fusion
 
 __all__ = [
     # 原有导出（向后兼容）
@@ -41,4 +45,7 @@ __all__ = [
     'ElevenLayerRetriever',
     'EightLayerRetrieverCompat',
     'ElevenLayerRetrievalLayer',
+    # Phase 3.6 新导出：RRF 融合
+    'reciprocal_rank_fusion',
+    'weighted_score_fusion',
 ]

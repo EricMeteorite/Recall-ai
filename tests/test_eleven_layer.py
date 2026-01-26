@@ -366,7 +366,7 @@ class TestElevenLayerRetriever:
         assert summary['total_time_ms'] >= 0
     
     def test_fallback_ngram_search(self, content_store):
-        """测试兜底搜索"""
+        """测试兜底搜索 - 传统模式 (parallel_recall_enabled=False)"""
         # 创建一个只有 ngram_index 的检索器
         mock_ngram = Mock()
         mock_ngram.search = Mock(return_value=[])  # 常规搜索无结果
@@ -376,6 +376,7 @@ class TestElevenLayerRetriever:
             ngram_index=mock_ngram,
             content_store=content_store,
             config=RetrievalConfig(
+                parallel_recall_enabled=False,  # 使用传统模式测试 L6 层
                 l1_enabled=False,
                 l3_enabled=False,
                 l4_enabled=False,
@@ -390,6 +391,31 @@ class TestElevenLayerRetriever:
         results = retriever.retrieve(query="fallback test", top_k=5)
         
         # 应该使用兜底搜索
+        mock_ngram.raw_search.assert_called()
+        assert len(results) > 0
+
+    def test_fallback_ngram_search_parallel_mode(self, content_store):
+        """测试兜底搜索 - Phase 3.6 并行模式 (parallel_recall_enabled=True)"""
+        # 创建一个只有 ngram_index 的检索器
+        mock_ngram = Mock()
+        mock_ngram.search = Mock(return_value=[])
+        mock_ngram.raw_search = Mock(return_value=['doc7', 'doc8'])
+        # 禁用 raw_search_parallel，避免 Mock 自动创建属性
+        mock_ngram.raw_search_parallel = None
+        
+        retriever = ElevenLayerRetriever(
+            ngram_index=mock_ngram,
+            content_store=content_store,
+            config=RetrievalConfig(
+                parallel_recall_enabled=True,  # Phase 3.6 并行召回模式
+                fallback_enabled=True,
+            )
+        )
+        
+        # 并行召回模式下，三路召回都为空时应启用兜底
+        results = retriever.retrieve(query="fallback test", top_k=5)
+        
+        # 应该调用 raw_search 作为兜底
         mock_ngram.raw_search.assert_called()
         assert len(results) > 0
 

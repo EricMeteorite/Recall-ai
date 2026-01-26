@@ -203,7 +203,6 @@ def test_full_pipeline():
     print(f"  violations count: {len(result.violations)}")
     
     print(f"\n✅ 端到端测试完成")
-    return True
 
 
 def test_api_integration():
@@ -232,7 +231,6 @@ def test_api_integration():
         "consistency_warnings": [v.description for v in result.violations]
     }
     print(f"✅ API 响应构造成功: {len(api_response['consistency_warnings'])} 条警告")
-    return True
 
 
 def test_llm_client_injection():
@@ -259,7 +257,6 @@ def test_llm_client_injection():
     checker2 = ConsistencyChecker(absolute_rules=["测试"], llm_client=MockLLM())
     assert checker2._llm_client is not None, "构造函数传入 LLM 失败"
     print("✅ 构造函数传入 LLM 成功")
-    return True
 
 
 # ============================================================

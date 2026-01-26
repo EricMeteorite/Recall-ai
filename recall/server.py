@@ -35,7 +35,59 @@ def _safe_print(msg: str) -> None:
         print(msg.encode('ascii', errors='replace').decode('ascii'))
 
 
+# ==================== 配置文件自动监控 ====================
 
+class ConfigFileWatcher:
+    """配置文件监控器 - 保存即生效"""
+    
+    def __init__(self, config_path: Path, check_interval: float = 2.0):
+        self.config_path = config_path
+        self.check_interval = check_interval
+        self._last_mtime: Optional[float] = None
+        self._running = False
+        self._thread = None
+        self._reload_callback = None
+    
+    def start(self, reload_callback):
+        """启动监控"""
+        import threading
+        self._reload_callback = reload_callback
+        if self.config_path.exists():
+            self._last_mtime = self.config_path.stat().st_mtime
+        self._running = True
+        self._thread = threading.Thread(target=self._watch_loop, daemon=True)
+        self._thread.start()
+        _safe_print(f"[Config] 自动热重载已启用 (监控: {self.config_path.name})")
+    
+    def stop(self):
+        """停止监控"""
+        self._running = False
+        if self._thread:
+            self._thread.join(timeout=1.0)
+    
+    def _watch_loop(self):
+        """监控循环"""
+        while self._running:
+            try:
+                if self.config_path.exists():
+                    current_mtime = self.config_path.stat().st_mtime
+                    if self._last_mtime is not None and current_mtime > self._last_mtime:
+                        _safe_print("[Config] [SYNC] 检测到配置文件变化，自动重载...")
+                        self._last_mtime = current_mtime
+                        if self._reload_callback:
+                            try:
+                                self._reload_callback()
+                                _safe_print("[Config] [OK] 配置已自动重载生效")
+                            except Exception as e:
+                                _safe_print(f"[Config] [FAIL] 自动重载失败: {e}")
+                    elif self._last_mtime is None:
+                        self._last_mtime = current_mtime
+            except Exception:
+                pass  # 忽略监控错误
+            time.sleep(self.check_interval)
+
+# 全局配置监控器
+_config_watcher: Optional[ConfigFileWatcher] = None
 
 
 # ==================== 配置文件管理 ====================
@@ -152,6 +204,34 @@ SUPPORTED_CONFIG_KEYS = {
     'RETRIEVAL_WEIGHT_NGRAM',
     'RETRIEVAL_WEIGHT_VECTOR',
     'RETRIEVAL_WEIGHT_TEMPORAL',
+    
+    # ====== v4.0 Phase 3.5 企业级性能配置 ======
+    # 图查询规划器配置
+    'QUERY_PLANNER_ENABLED',          # 是否启用图查询规划器
+    'QUERY_PLANNER_CACHE_SIZE',       # 路径缓存大小
+    'QUERY_PLANNER_CACHE_TTL',        # 缓存过期时间（秒）
+    # 社区检测配置
+    'COMMUNITY_DETECTION_ENABLED',    # 是否启用社区检测
+    'COMMUNITY_DETECTION_ALGORITHM',  # 检测算法 (louvain/label_propagation/connected)
+    'COMMUNITY_MIN_SIZE',             # 最小社区大小
+    
+    # ====== v4.0 Phase 3.6 三路并行召回配置（100%不遗忘保证）======
+    # Triple Recall 主开关
+    'TRIPLE_RECALL_ENABLED',          # 是否启用三路并行召回
+    # RRF 融合配置
+    'TRIPLE_RECALL_RRF_K',            # RRF 常数 k（推荐 60）
+    'TRIPLE_RECALL_VECTOR_WEIGHT',    # 语义召回权重（路径1）
+    'TRIPLE_RECALL_KEYWORD_WEIGHT',   # 关键词召回权重（路径2）
+    'TRIPLE_RECALL_ENTITY_WEIGHT',    # 实体召回权重（路径3）
+    # IVF-HNSW 向量索引参数
+    'VECTOR_IVF_HNSW_M',              # HNSW 图连接数（推荐 32）
+    'VECTOR_IVF_HNSW_EF_CONSTRUCTION',  # 构建精度（推荐 200）
+    'VECTOR_IVF_HNSW_EF_SEARCH',      # 搜索精度（推荐 64）
+    # 原文兜底配置
+    'FALLBACK_ENABLED',               # 是否启用原文兜底
+    'FALLBACK_PARALLEL',              # 是否启用并行兜底扫描
+    'FALLBACK_WORKERS',               # 并行扫描线程数（推荐 4）
+    'FALLBACK_MAX_RESULTS',           # 兜底最大结果数
 }
 
 
@@ -422,15 +502,16 @@ BUDGET_ALERT_THRESHOLD=0.8
 # ----------------------------------------------------------------------------
 # Jaccard 相似度阈值（阶段1 MinHash+LSH，0.0-1.0）
 # Jaccard similarity threshold (Stage 1)
-DEDUP_JACCARD_THRESHOLD=0.7
+# 注意：0.85较保守，避免误判不同内容为重复
+DEDUP_JACCARD_THRESHOLD=0.85
 
 # 语义相似度高阈值（阶段2，超过此值直接合并）
 # Semantic similarity high threshold (Stage 2, auto-merge when exceeded)
-DEDUP_SEMANTIC_THRESHOLD=0.85
+DEDUP_SEMANTIC_THRESHOLD=0.90
 
 # 语义相似度低阈值（阶段2，低于此值视为不同）
 # Semantic similarity low threshold (Stage 2, considered different when below)
-DEDUP_SEMANTIC_LOW_THRESHOLD=0.70
+DEDUP_SEMANTIC_LOW_THRESHOLD=0.80
 
 # 是否启用 LLM 确认（阶段3，用于边界情况）
 # Enable LLM confirmation (Stage 3, for borderline cases)
@@ -546,6 +627,112 @@ RETRIEVAL_WEIGHT_GRAPH=1.0
 RETRIEVAL_WEIGHT_NGRAM=0.8
 RETRIEVAL_WEIGHT_VECTOR=1.0
 RETRIEVAL_WEIGHT_TEMPORAL=0.5
+
+# ============================================================================
+# v4.0 Phase 3.5 企业级性能配置
+# v4.0 Phase 3.5 Enterprise Performance Configuration
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# 图查询规划器配置 (QueryPlanner)
+# Query Planner Configuration
+# ----------------------------------------------------------------------------
+# 是否启用图查询规划器（优化多跳图查询）
+# Enable query planner (optimizes multi-hop graph queries)
+QUERY_PLANNER_ENABLED=false
+
+# 路径缓存大小（条）
+# Path cache size (entries)
+QUERY_PLANNER_CACHE_SIZE=1000
+
+# 缓存过期时间（秒）
+# Cache TTL (seconds)
+QUERY_PLANNER_CACHE_TTL=300
+
+# ----------------------------------------------------------------------------
+# 社区检测配置 (CommunityDetector)
+# Community Detection Configuration
+# ----------------------------------------------------------------------------
+# 是否启用社区检测（发现实体群组）
+# Enable community detection (discover entity clusters)
+COMMUNITY_DETECTION_ENABLED=false
+
+# 检测算法: louvain | label_propagation | connected
+# Detection algorithm
+COMMUNITY_DETECTION_ALGORITHM=louvain
+
+# 最小社区大小
+# Minimum community size
+COMMUNITY_MIN_SIZE=2
+
+# ============================================================================
+# v4.0 Phase 3.6 三路并行召回配置 (100% 不遗忘保证)
+# v4.0 Phase 3.6 Triple Recall Configuration (100% Memory Guarantee)
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# 主开关
+# Master Switch
+# ----------------------------------------------------------------------------
+# 是否启用三路并行召回（IVF-HNSW + 倒排 + 实体，RRF融合）
+# Enable triple parallel recall (IVF-HNSW + Inverted + Entity, RRF fusion)
+TRIPLE_RECALL_ENABLED=true
+
+# ----------------------------------------------------------------------------
+# RRF 融合配置
+# RRF (Reciprocal Rank Fusion) Configuration
+# ----------------------------------------------------------------------------
+# RRF 常数 k（推荐 60，越大排名差异越平滑）
+# RRF constant k (recommend 60, higher = smoother rank differences)
+TRIPLE_RECALL_RRF_K=60
+
+# 语义召回权重（路径1: IVF-HNSW）
+# Semantic recall weight (Path 1: IVF-HNSW)
+TRIPLE_RECALL_VECTOR_WEIGHT=1.0
+
+# 关键词召回权重（路径2: 倒排索引，100%召回）
+# Keyword recall weight (Path 2: Inverted index, 100% recall)
+TRIPLE_RECALL_KEYWORD_WEIGHT=1.2
+
+# 实体召回权重（路径3: 实体索引，100%召回）
+# Entity recall weight (Path 3: Entity index, 100% recall)
+TRIPLE_RECALL_ENTITY_WEIGHT=1.0
+
+# ----------------------------------------------------------------------------
+# IVF-HNSW 参数 (提升召回率至 95-99%)
+# IVF-HNSW Parameters (Improve recall to 95-99%)
+# ----------------------------------------------------------------------------
+# HNSW 图连接数（越大召回越高，内存越大，推荐 32）
+# HNSW M parameter (higher = better recall, more memory, recommend 32)
+VECTOR_IVF_HNSW_M=32
+
+# HNSW 构建精度（越大索引质量越高，构建越慢，推荐 200）
+# HNSW efConstruction (higher = better index quality, slower build, recommend 200)
+VECTOR_IVF_HNSW_EF_CONSTRUCTION=200
+
+# HNSW 搜索精度（越大召回越高，搜索越慢，推荐 64）
+# HNSW efSearch (higher = better recall, slower search, recommend 64)
+VECTOR_IVF_HNSW_EF_SEARCH=64
+
+# ----------------------------------------------------------------------------
+# 原文兜底配置 (100% 保证)
+# Raw Text Fallback Configuration (100% Guarantee)
+# ----------------------------------------------------------------------------
+# 是否启用原文兜底（仅在融合结果为空时触发）
+# Enable raw text fallback (only when fusion results are empty)
+FALLBACK_ENABLED=true
+
+# 是否启用并行兜底扫描（提升大规模数据的兜底速度）
+# Enable parallel fallback scan (improve speed for large data)
+FALLBACK_PARALLEL=true
+
+# 并行扫描线程数（推荐 4）
+# Parallel scan workers (recommend 4)
+FALLBACK_WORKERS=4
+
+# 兜底最大结果数
+# Max fallback results
+FALLBACK_MAX_RESULTS=50
 '''
 
 
@@ -973,13 +1160,22 @@ def reload_engine():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
+    global _config_watcher
+    
     # 启动时
     _safe_print(f"[Recall API] 服务启动 v{__version__}")
     get_engine()  # 预初始化
     
+    # 启动配置文件监控（保存即生效）
+    config_path = get_config_file_path()
+    _config_watcher = ConfigFileWatcher(config_path, check_interval=2.0)
+    _config_watcher.start(reload_callback=reload_engine)
+    
     yield
     
     # 关闭时
+    if _config_watcher:
+        _config_watcher.stop()
     if _engine:
         _engine.close()
     _safe_print("[Recall API] 服务关闭")
@@ -1113,15 +1309,22 @@ async def search_memories(request: SearchRequest):
         filters['config_preset'] = request.config_preset
         _safe_print(f"[Recall][Memory]    配置预设: {request.config_preset}")
     
-    engine = get_engine()
-    results = engine.search(
-        query=request.query,
-        user_id=request.user_id,
-        top_k=request.top_k,
-        filters=filters,
-        temporal_context=temporal_context,
-        config_preset=config_preset
-    )
+    try:
+        engine = get_engine()
+        results = engine.search(
+            query=request.query,
+            user_id=request.user_id,
+            top_k=request.top_k,
+            filters=filters,
+            temporal_context=temporal_context,
+            config_preset=config_preset
+        )
+    except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        _safe_print(f"[Recall][Memory] ❌ 搜索错误: {e}")
+        _safe_print(f"[Recall][Memory] 堆栈跟踪:\n{error_detail}")
+        raise HTTPException(status_code=500, detail=f"搜索失败: {str(e)}")
     
     _safe_print(f"[Recall][Memory] 📊 搜索结果: 找到 {len(results)} 条记忆")
     for i, r in enumerate(results[:3]):  # 只打印前3条
@@ -1790,13 +1993,13 @@ async def clear_all_foreshadowings(
     """清空当前角色的所有伏笔"""
     engine = get_engine()
     
-    # 获取所有活跃伏笔
-    foreshadowings = engine.get_foreshadowings(user_id, character_id)
+    # 获取所有活跃伏笔（正确方法名）
+    foreshadowings = engine.get_active_foreshadowings(user_id, character_id)
     count = len(foreshadowings)
     
     # 逐个放弃
     for f in foreshadowings:
-        engine.abandon_foreshadowing(f['id'], user_id, character_id)
+        engine.abandon_foreshadowing(f.id, user_id, character_id)
     
     _safe_print(f"[Recall][Foreshadow] 🗑️ 清空伏笔: user={user_id}, char={character_id}, 删除={count}条")
     return {"success": True, "message": f"已清空 {count} 个伏笔", "count": count}
@@ -2501,13 +2704,15 @@ async def list_contradictions(
             "success": True,
             "contradictions": [
                 {
-                    "id": c.id,
-                    "fact1": c.fact1,
-                    "fact2": c.fact2,
+                    "id": c.uuid,
+                    "old_fact": c.old_fact.fact if hasattr(c.old_fact, 'fact') else str(c.old_fact),
+                    "new_fact": c.new_fact.fact if hasattr(c.new_fact, 'fact') else str(c.new_fact),
                     "contradiction_type": c.contradiction_type.value if hasattr(c.contradiction_type, 'value') else str(c.contradiction_type),
+                    "confidence": c.confidence,
                     "detected_at": c.detected_at.isoformat() if hasattr(c.detected_at, 'isoformat') else str(c.detected_at),
-                    "status": c.status,
-                    "resolution": c.resolution
+                    "status": "resolved" if c.is_resolved() else "pending",
+                    "resolution": c.resolution.value if c.resolution and hasattr(c.resolution, 'value') else str(c.resolution) if c.resolution else None,
+                    "notes": c.notes
                 }
                 for c in contradictions
             ],
@@ -2961,6 +3166,62 @@ async def get_entity_neighbors(
             "success": False,
             "error": str(e),
             "neighbors": []
+        }
+
+
+@app.get("/v1/graph/communities", tags=["Graph"])
+async def detect_communities(
+    user_id: str = Query(default="default", description="用户ID"),
+    min_size: int = Query(default=2, ge=1, le=100, description="最小社区大小")
+):
+    """检测实体社区/群组 (Phase 3.5)
+    
+    使用 Louvain 或标签传播算法发现图中的实体群组。
+    需要启用 COMMUNITY_DETECTION_ENABLED=true。
+    
+    Returns:
+        社区列表，每个包含 id、name、member_ids、size、summary
+    """
+    engine = get_engine()
+    
+    try:
+        communities = engine.detect_communities(user_id=user_id, min_size=min_size)
+        return {
+            "success": True,
+            "user_id": user_id,
+            "min_size": min_size,
+            "communities": communities,
+            "count": len(communities)
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "communities": []
+        }
+
+
+@app.get("/v1/graph/query-stats", tags=["Graph"])
+async def get_query_stats():
+    """获取图查询统计信息 (Phase 3.5)
+    
+    需要启用 QUERY_PLANNER_ENABLED=true。
+    
+    Returns:
+        查询统计，包含 total_queries、cache_hits、cache_hit_rate、avg_execution_time_ms
+    """
+    engine = get_engine()
+    
+    try:
+        stats = engine.get_query_stats()
+        return {
+            "success": True,
+            **stats
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
         }
 
 

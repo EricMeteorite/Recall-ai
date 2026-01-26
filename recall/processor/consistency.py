@@ -1006,13 +1006,16 @@ class ConsistencyChecker:
         violations = []
         
         # 提取新内容中的年龄声明
-        current_age_pattern = r'(\w{1,10})(?:今年|现在)?(\d+)岁'
-        past_age_pattern = r'(\d+)年前.*?(\w{1,10}).*?(\d+)岁'
+        # 修复：使用非贪婪匹配和中文字符范围，避免"今年"被包含在名字中
+        current_age_pattern = r'([\u4e00-\u9fa5\w]{1,10}?)(?:今年|现在|已经)?(\d+)岁'
+        past_age_pattern = r'(\d+)年前.*?([\u4e00-\u9fa5\w]{1,10}?).*?(\d+)岁'
         
         new_ages = {}
         for match in re.findall(current_age_pattern, new_content):
             entity, age = match[0].strip(), int(match[1])
-            new_ages[entity] = age
+            # 过滤掉空名字或纯数字
+            if entity and not entity.isdigit():
+                new_ages[entity] = age
         
         # 检查与历史记录的一致性
         for memory in existing_memories:
@@ -1021,6 +1024,9 @@ class ConsistencyChecker:
             # 检查历史年龄声明
             for match in re.findall(current_age_pattern, memory_content):
                 entity, old_age = match[0].strip(), int(match[1])
+                # 过滤掉空名字或纯数字
+                if not entity or entity.isdigit():
+                    continue
                 if entity in new_ages and new_ages[entity] != old_age:
                     # 允许1岁的差异（可能是生日经过）
                     age_diff = abs(new_ages[entity] - old_age)

@@ -69,6 +69,7 @@ class RetrievalResultItem:
     score: float                # 综合得分
     content: str = ""           # 文档内容（可选填充）
     metadata: Dict[str, Any] = field(default_factory=dict)  # 元数据
+    entities: List[str] = field(default_factory=list)  # 相关实体列表
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
@@ -76,7 +77,8 @@ class RetrievalResultItem:
             'id': self.id,
             'score': self.score,
             'content': self.content,
-            'metadata': self.metadata
+            'metadata': self.metadata,
+            'entities': self.entities
         }
 
 
@@ -124,6 +126,17 @@ class RetrievalConfig:
     
     # === L11 LLM 配置 ===
     l11_llm_timeout: float = 10.0      # 超时时间（秒）
+    
+    # === Phase 3.6: 并行三路召回配置（100%不遗忘保证）===
+    parallel_recall_enabled: bool = True   # 启用并行三路召回
+    rrf_k: int = 60                        # RRF 常数
+    vector_weight: float = 1.0             # 语义召回权重
+    keyword_weight: float = 1.2            # 关键词召回权重（100%召回，权重更高）
+    entity_weight: float = 1.0             # 实体召回权重
+    fallback_enabled: bool = True          # 启用原文兜底
+    fallback_parallel: bool = True         # 并行兜底扫描
+    fallback_workers: int = 4              # 兜底扫描线程数
+    fallback_max_results: int = 50         # 兜底最大结果数
     
     # === 权重 ===
     weights: LayerWeights = field(default_factory=LayerWeights)
@@ -208,6 +221,16 @@ class RetrievalConfig:
             l5_graph_direction=os.getenv('RETRIEVAL_L5_GRAPH_DIRECTION', 'both'),
             # L11 LLM 配置
             l11_llm_timeout=get_float('RETRIEVAL_L11_LLM_TIMEOUT', 10.0),
+            # Phase 3.6: 并行三路召回配置
+            parallel_recall_enabled=get_bool('TRIPLE_RECALL_ENABLED', True),
+            rrf_k=get_int('TRIPLE_RECALL_RRF_K', 60),
+            vector_weight=get_float('TRIPLE_RECALL_VECTOR_WEIGHT', 1.0),
+            keyword_weight=get_float('TRIPLE_RECALL_KEYWORD_WEIGHT', 1.2),
+            entity_weight=get_float('TRIPLE_RECALL_ENTITY_WEIGHT', 1.0),
+            fallback_enabled=get_bool('FALLBACK_ENABLED', True),
+            fallback_parallel=get_bool('FALLBACK_PARALLEL', True),
+            fallback_workers=get_int('FALLBACK_WORKERS', 4),
+            fallback_max_results=get_int('FALLBACK_MAX_RESULTS', 50),
             # 权重配置
             weights=LayerWeights(
                 inverted=get_float('RETRIEVAL_WEIGHT_INVERTED', 1.0),
@@ -245,6 +268,15 @@ class RetrievalConfig:
             'l6_top_k': self.fine_rank_threshold,
             'l7_top_k': self.final_top_k,
             'l8_top_k': self.l11_llm_top_k,
+            # Phase 3.6 配置
+            'parallel_recall_enabled': self.parallel_recall_enabled,
+            'rrf_k': self.rrf_k,
+            'vector_weight': self.vector_weight,
+            'keyword_weight': self.keyword_weight,
+            'entity_weight': self.entity_weight,
+            'fallback_enabled': self.fallback_enabled,
+            'fallback_parallel': self.fallback_parallel,
+            'fallback_workers': self.fallback_workers,
         }
     
     def with_temporal_context(self, temporal_context: TemporalContext) -> "RetrievalConfig":

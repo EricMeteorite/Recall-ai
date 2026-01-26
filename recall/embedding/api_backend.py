@@ -149,18 +149,10 @@ class APIEmbeddingBackend(EmbeddingBackend):
         self._rate_limiter = RateLimiter(max_requests=rate_limit, window_seconds=rate_window)
     
     def _get_api_key_from_env(self) -> Optional[str]:
-        """从环境变量获取 API key"""
-        # 按优先级检查
-        if self.config.backend == EmbeddingBackendType.OPENAI:
-            return os.environ.get('OPENAI_API_KEY')
-        elif self.config.backend == EmbeddingBackendType.SILICONFLOW:
-            return os.environ.get('SILICONFLOW_API_KEY')
-        elif self.config.backend == EmbeddingBackendType.CUSTOM:
-            # 自定义模式：检查通用环境变量
-            return (
-                os.environ.get('EMBEDDING_API_KEY') or
-                os.environ.get('OPENAI_API_KEY')  # 兼容
-            )
+        """从环境变量获取 API key
+        
+        统一使用 EMBEDDING_API_KEY，与 server.py 配置一致
+        """
         return os.environ.get('EMBEDDING_API_KEY')
     
     @property
@@ -174,14 +166,14 @@ class APIEmbeddingBackend(EmbeddingBackend):
     
     @property
     def client(self):
-        """获取 OpenAI 客户端（兼容硅基流动）"""
+        """获取 OpenAI 客户端（兼容硅基流动等 OpenAI 兼容 API）"""
         if self._client is None:
             if not self.is_available:
                 raise ValueError(
                     f"未配置 API key。\n"
-                    f"请设置环境变量或在配置中提供 api_key。\n"
-                    f"OpenAI: OPENAI_API_KEY\n"
-                    f"硅基流动: SILICONFLOW_API_KEY"
+                    f"请在配置文件 recall_data/config/api_keys.env 中设置:\n"
+                    f"  EMBEDDING_API_KEY=your-api-key\n"
+                    f"  EMBEDDING_API_BASE=https://api.openai.com/v1"
                 )
             
             from openai import OpenAI

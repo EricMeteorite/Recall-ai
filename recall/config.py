@@ -1,5 +1,6 @@
-"""配置管理 - 包含 Lite 模式配置"""
+"""配置管理 - 包含 Lite 模式配置 + Phase 3.6 三路召回配置"""
 
+import os
 import re
 from typing import List
 from dataclasses import dataclass
@@ -147,3 +148,82 @@ class LightweightEntityExtractor:
 # 向后兼容别名
 # ============================================================================
 LightweightConfig = LiteConfig  # 兼容旧代码
+
+
+# ============================================================================
+# Phase 3.6: 三路召回配置
+# ============================================================================
+@dataclass
+class TripleRecallConfig:
+    """Phase 3.6: 三路召回配置
+    
+    支持三种预设模式:
+    - default(): 平衡模式
+    - max_recall(): 最大召回模式（100% 不遗忘优先）
+    - fast(): 快速模式（速度优先）
+    """
+    
+    # 并行召回开关
+    enabled: bool = True
+    
+    # 路径权重（用于 RRF 融合）
+    vector_weight: float = 1.0       # 语义召回权重
+    keyword_weight: float = 1.2      # 关键词召回权重（100%召回，权重更高）
+    entity_weight: float = 1.0       # 实体召回权重
+    
+    # RRF 参数
+    rrf_k: int = 60                  # RRF 常数
+    
+    # 原文兜底配置
+    fallback_enabled: bool = True    # 启用原文兜底
+    fallback_parallel: bool = True   # 并行扫描
+    fallback_workers: int = 4        # 并行线程数
+    fallback_max_results: int = 50   # 兜底最大结果数
+    
+    # IVF-HNSW 参数
+    hnsw_m: int = 32                 # HNSW 图连接数
+    hnsw_ef_construction: int = 200  # 构建精度
+    hnsw_ef_search: int = 64         # 搜索精度
+    
+    @classmethod
+    def default(cls) -> 'TripleRecallConfig':
+        """默认配置（平衡模式）"""
+        return cls()
+    
+    @classmethod
+    def max_recall(cls) -> 'TripleRecallConfig':
+        """最大召回模式（100% 不遗忘优先）"""
+        return cls(
+            hnsw_m=48,
+            hnsw_ef_construction=300,
+            hnsw_ef_search=128,
+            keyword_weight=1.5,
+        )
+    
+    @classmethod
+    def fast(cls) -> 'TripleRecallConfig':
+        """快速模式（速度优先）"""
+        return cls(
+            hnsw_m=16,
+            hnsw_ef_construction=100,
+            hnsw_ef_search=32,
+            fallback_workers=2,
+        )
+    
+    @classmethod
+    def from_env(cls) -> 'TripleRecallConfig':
+        """从环境变量加载配置"""
+        return cls(
+            enabled=os.getenv('TRIPLE_RECALL_ENABLED', 'true').lower() == 'true',
+            vector_weight=float(os.getenv('TRIPLE_RECALL_VECTOR_WEIGHT', '1.0')),
+            keyword_weight=float(os.getenv('TRIPLE_RECALL_KEYWORD_WEIGHT', '1.2')),
+            entity_weight=float(os.getenv('TRIPLE_RECALL_ENTITY_WEIGHT', '1.0')),
+            rrf_k=int(os.getenv('TRIPLE_RECALL_RRF_K', '60')),
+            hnsw_m=int(os.getenv('VECTOR_IVF_HNSW_M', '32')),
+            hnsw_ef_construction=int(os.getenv('VECTOR_IVF_HNSW_EF_CONSTRUCTION', '200')),
+            hnsw_ef_search=int(os.getenv('VECTOR_IVF_HNSW_EF_SEARCH', '64')),
+            fallback_enabled=os.getenv('FALLBACK_ENABLED', 'true').lower() == 'true',
+            fallback_parallel=os.getenv('FALLBACK_PARALLEL', 'true').lower() == 'true',
+            fallback_workers=int(os.getenv('FALLBACK_WORKERS', '4')),
+            fallback_max_results=int(os.getenv('FALLBACK_MAX_RESULTS', '50')),
+        )

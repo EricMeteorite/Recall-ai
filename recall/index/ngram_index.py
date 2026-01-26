@@ -1,9 +1,13 @@
-"""优化的N-gram索引 - 支持名词短语索引 + 原文全文兜底搜索"""
+"""优化的N-gram索引 - 支持名词短语索引 + 原文全文兜底搜索
+
+Phase 3.6 更新：添加并行分片扫描支持，提升大规模数据的兜底速度
+"""
 
 import os
 import re
 import json
-from typing import List, Dict, Set, Optional
+from typing import List, Dict, Set, Optional, Tuple
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 # Windows GBK 编码兼容的安全打印函数
@@ -209,6 +213,85 @@ class OptimizedNgramIndex:
         用于需要精确原文匹配的场景
         """
         return self._raw_text_fallback_search(query, max_results)
+    
+    def raw_search_parallel(
+        self,
+        query: str,
+        max_results: int = 50,
+        num_workers: int = 4
+    ) -> List[str]:
+        """Phase 3.6: 并行分片扫描原文
+        
+        将原文数据分成多个分片，并行扫描，显著提升大规模数据的兜底速度。
+        
+        Args:
+            query: 搜索查询
+            max_results: 最大结果数
+            num_workers: 并行线程数
+            
+        Returns:
+            匹配的 memory_id 列表
+        """
+        items = list(self._raw_content.items())
+        if not items:
+            return []
+        
+        # 数据量小于 1000 时，直接单线程搜索更快
+        if len(items) < 1000:
+            return self._raw_text_fallback_search(query, max_results)
+        
+        # 分片
+        chunk_size = max(1, len(items) // num_workers)
+        chunks = [items[i:i+chunk_size] for i in range(0, len(items), chunk_size)]
+        
+        # 预提取搜索词（避免在每个线程中重复计算）
+        search_terms = self._extract_search_terms(query)
+        query_lower = query.lower()
+        
+        # 并行扫描
+        all_results: List[str] = []
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            futures = [
+                executor.submit(self._scan_chunk, query_lower, search_terms, chunk)
+                for chunk in chunks
+            ]
+            
+            for future in as_completed(futures):
+                try:
+                    chunk_results = future.result()
+                    all_results.extend(chunk_results)
+                    if len(all_results) >= max_results:
+                        break
+                except Exception as e:
+                    _safe_print(f"[NgramIndex] 并行扫描失败: {e}")
+                    continue
+        
+        return all_results[:max_results]
+    
+    def _scan_chunk(
+        self,
+        query_lower: str,
+        search_terms: List[str],
+        chunk: List[Tuple[str, str]]
+    ) -> List[str]:
+        """扫描单个分片（用于并行搜索）"""
+        results = []
+        
+        for memory_id, content in chunk:
+            content_lower = content.lower()
+            
+            # 直接子串匹配
+            if query_lower in content_lower:
+                results.append(memory_id)
+                continue
+            
+            # 检查关键子串
+            for term in search_terms:
+                if term in content_lower:
+                    results.append(memory_id)
+                    break
+        
+        return results
     
     def get_raw_content(self, memory_id: str) -> Optional[str]:
         """获取原文内容"""

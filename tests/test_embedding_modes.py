@@ -57,18 +57,17 @@ def test_cloud_mode():
     assert config.api_model == "BAAI/bge-large-zh-v1.5"
     print("[OK] SiliconFlow config correct")
     
-    # 如果有真实 API key，测试实际调用
-    if os.environ.get('OPENAI_API_KEY'):
-        config = EmbeddingConfig.cloud_openai(os.environ['OPENAI_API_KEY'])
+    # 如果有真实 API key，测试实际调用（使用统一的 EMBEDDING_API_KEY）
+    if os.environ.get('EMBEDDING_API_KEY') and os.environ.get('EMBEDDING_API_BASE'):
+        config = EmbeddingConfig.cloud_custom(
+            os.environ['EMBEDDING_API_KEY'],
+            os.environ['EMBEDDING_API_BASE'],
+            os.environ.get('EMBEDDING_MODEL', 'text-embedding-3-small'),
+            int(os.environ.get('EMBEDDING_DIMENSION', '1024'))
+        )
         backend = create_embedding_backend(config)
         vec = backend.encode("你好世界")
-        print(f"[OK] OpenAI actual call succeeded, vector dim: {vec.shape}")
-    
-    if os.environ.get('SILICONFLOW_API_KEY'):
-        config = EmbeddingConfig.cloud_siliconflow(os.environ['SILICONFLOW_API_KEY'])
-        backend = create_embedding_backend(config)
-        vec = backend.encode("你好世界")
-        print(f"[OK] SiliconFlow actual call succeeded, vector dim: {vec.shape}")
+        print(f"[OK] Cloud API actual call succeeded, vector dim: {vec.shape}")
     
     print()
 
