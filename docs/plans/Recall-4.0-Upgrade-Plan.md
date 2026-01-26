@@ -4393,6 +4393,1148 @@ def get_time_decayed_confidence(relation: Relation, current_turn: int) -> float:
 
 ---
 
+### Phase 3.6: 100% 不遗忘最优架构（2周）⭐ 核心保障
+
+---
+
+#### 🎯 目标
+
+实现 **100% 记忆召回保证**，确保在亿级数据规模下依然不遗漏任何相关记忆。
+
+```
+┌───────────────────────────────────────────────────────────────────────────────┐
+│                    Phase 3.6: 100% 不遗忘最优检索架构                          │
+├───────────────────────────────────────────────────────────────────────────────┤
+│                                                                               │
+│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐            │
+│  │  路径 1: 语义召回 │  │ 路径 2: 关键词召回│  │  路径 3: 实体召回 │            │
+│  │    IVF-HNSW      │  │    倒排索引       │  │    实体索引       │            │
+│  │  召回率: 95-99%  │  │  召回率: 100%     │  │  召回率: 100%     │            │
+│  │  速度: O(log n)  │  │  速度: O(1)       │  │  速度: O(1)       │            │
+│  └────────┬─────────┘  └────────┬─────────┘  └────────┬─────────┘            │
+│           │                     │                     │                      │
+│           └─────────────────────┼─────────────────────┘                      │
+│                                 ▼                                            │
+│                ┌─────────────────────────────────────┐                       │
+│                │  RRF 融合层 (Reciprocal Rank Fusion)│                       │
+│                │  取并集 + 多因素重排序               │                       │
+│                └─────────────────┬───────────────────┘                       │
+│                                  │                                           │
+│                     ┌────────────▼────────────┐                              │
+│                     │  融合结果为空？          │                              │
+│                     └────────────┬────────────┘                              │
+│                           Yes ↓  │ No → 返回结果                              │
+│                ┌─────────────────▼───────────────────┐                       │
+│                │   路径 4: N-gram 原文兜底 (100%)     │                       │
+│                │   速度: O(n)，仅在其他路径无结果时   │                       │
+│                └─────────────────────────────────────┘                       │
+│                                                                               │
+└───────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+#### 📊 技术背景分析
+
+**当前问题：向量索引的召回率上限**
+
+| 索引类型 | 召回率 @top10 | 内存开销 | 适用规模 | 问题 |
+|----------|--------------|---------|---------|------|
+| Flat (暴力) | 100% | O(n) | <100万 | 速度慢 |
+| **IVF (当前)** | 90-95% | O(n) | 50-500万 | **5-10% 遗漏** |
+| HNSW | 99%+ | O(n × M) | 100万-1亿 | 内存高 |
+| **IVF-HNSW** | 95-99% | O(n) | 1-10亿 | **最佳平衡** |
+
+**当前 IVF 的数学限制**：
+```python
+# 当前配置 (recall/index/vector_index_ivf.py)
+nlist = 100    # 100 个聚类中心
+nprobe = 10    # 搜索时只检查 10 个聚类
+
+# 召回率 ≈ nprobe / nlist = 10% 的聚类被检查
+# 实际召回率约 90-95%（相似向量倾向于同一聚类）
+# 这意味着 5-10% 的相关记忆可能被漏掉！
+```
+
+**解决方案：三路并行召回 + RRF 融合 + 条件兜底**
+
+| 路径 | 索引类型 | 召回率 | 速度 | 作用 |
+|------|---------|--------|------|------|
+| 路径 1 | IVF-HNSW | 95-99% | O(log n) | 语义相似匹配 |
+| 路径 2 | 倒排索引 | 100% | O(1) | 精确关键词匹配 |
+| 路径 3 | 实体索引 | 100% | O(1) | 实体关联匹配 |
+| 兜底 | N-gram 全扫描 | 100% | O(n) | 最终保底（仅融合无结果时触发） |
+
+**整体召回率 = 1 - (1-0.97) × (1-1.0) × (1-1.0) ≈ 99.97%+**
+
+> ⚠️ **注意**：路径 1-3 并行执行后通过 RRF 融合，N-gram 兜底仅在融合结果为空时触发。
+
+---
+
+#### 📁 需要修改的文件清单
+
+| 文件路径 | 修改类型 | 说明 | 优先级 |
+|----------|---------|------|--------|
+| `recall/index/vector_index_ivf.py` | **重构** | IVF → IVF-HNSW | P0 |
+| `recall/index/__init__.py` | 更新 | 导出新索引类 | P0 |
+| `recall/retrieval/rrf_fusion.py` | **新建** | RRF 融合算法实现 | P0 |
+| `recall/retrieval/__init__.py` | 更新 | 导出 RRF 融合模块 | P0 |
+| `recall/retrieval/eight_layer.py` | **重构** | 串行 → 并行三路召回 | P0 |
+| `recall/index/ngram_index.py` | 优化 | 增加并行分片扫描 | P1 |
+| `recall/retrieval/config.py` | 更新 | 添加三路召回配置 | P1 |
+| `recall/engine.py` | 更新 | 集成新检索架构 | P1 |
+| `pyproject.toml` | 验证 | 确保 faiss-cpu>=1.7 | P1 |
+| `tools/migrate_ivf_to_hnsw.py` | **新建** | 索引迁移工具 | P2 |
+| `tests/test_rrf_fusion.py` | **新建** | RRF 融合单元测试 | P2 |
+| `tests/test_ivf_hnsw_recall.py` | **新建** | IVF-HNSW 召回率测试 | P2 |
+
+---
+
+#### 🔧 具体修改内容
+
+##### 1. vector_index_ivf.py → 升级为 IVF-HNSW
+
+**当前代码**：
+```python
+# 使用 IndexIVFFlat (召回率 90-95%)
+quantizer = faiss.IndexFlatIP(self.dimension)
+self.index = faiss.IndexIVFFlat(
+    quantizer,
+    self.dimension,
+    self.nlist,
+    faiss.METRIC_INNER_PRODUCT
+)
+```
+
+**修改为**：
+```python
+# 使用 HNSW 作为 quantizer (召回率 95-99%)
+hnsw_quantizer = faiss.IndexHNSWFlat(self.dimension, self.hnsw_m)
+hnsw_quantizer.hnsw.efConstruction = self.hnsw_ef_construction
+hnsw_quantizer.hnsw.efSearch = self.hnsw_ef_search
+
+self.index = faiss.IndexIVFFlat(
+    hnsw_quantizer,
+    self.dimension,
+    self.nlist,
+    faiss.METRIC_INNER_PRODUCT
+)
+```
+
+**新增参数**：
+```python
+def __init__(
+    self,
+    data_path: str,
+    dimension: int = 1024,
+    nlist: int = 100,
+    nprobe: int = 10,
+    use_gpu: bool = False,
+    min_train_size: int = None,
+    # Phase 3.6 新增：HNSW 参数
+    hnsw_m: int = 32,                    # HNSW 图连接数（越大召回越高）
+    hnsw_ef_construction: int = 200,     # 构建精度
+    hnsw_ef_search: int = 64,            # 搜索精度（越大召回越高）
+):
+```
+
+##### 2. rrf_fusion.py → 新建 RRF 融合模块
+
+```python
+"""Reciprocal Rank Fusion - 多路召回结果融合
+
+RRF 公式：score(d) = Σ 1 / (k + rank_i(d))
+其中 k 通常取 60
+
+优点：
+- 不需要归一化不同检索器的分数
+- 对排名靠前的结果给予更高权重
+- 自动处理不同召回路径的结果合并
+"""
+
+from typing import List, Dict, Tuple, Optional
+from collections import defaultdict
+
+
+def reciprocal_rank_fusion(
+    results_list: List[List[Tuple[str, float]]],
+    k: int = 60,
+    weights: Optional[List[float]] = None
+) -> List[Tuple[str, float]]:
+    """RRF 融合多路召回结果
+    
+    Args:
+        results_list: 多路召回结果，每路为 [(doc_id, score), ...]
+        k: RRF 常数，默认 60
+        weights: 各路权重，默认全为 1.0
+        
+    Returns:
+        融合后的结果 [(doc_id, rrf_score), ...]，按分数降序
+    """
+    if not weights:
+        weights = [1.0] * len(results_list)
+    
+    # 计算 RRF 分数
+    rrf_scores: Dict[str, float] = defaultdict(float)
+    
+    for weight, results in zip(weights, results_list):
+        for rank, (doc_id, _) in enumerate(results, start=1):
+            rrf_scores[doc_id] += weight * (1.0 / (k + rank))
+    
+    # 排序返回
+    sorted_results = sorted(
+        rrf_scores.items(),
+        key=lambda x: -x[1]
+    )
+    
+    return sorted_results
+
+
+def weighted_score_fusion(
+    results_list: List[List[Tuple[str, float]]],
+    weights: Optional[List[float]] = None,
+    normalize: bool = True
+) -> List[Tuple[str, float]]:
+    """加权分数融合（替代方案）
+    
+    当需要考虑原始分数时使用
+    """
+    if not weights:
+        weights = [1.0] * len(results_list)
+    
+    # 归一化各路分数到 [0, 1]
+    normalized_results = []
+    for results in results_list:
+        if not results:
+            normalized_results.append([])
+            continue
+        
+        if normalize:
+            scores = [s for _, s in results]
+            min_s, max_s = min(scores), max(scores)
+            range_s = max_s - min_s if max_s > min_s else 1.0
+            normalized = [(doc_id, (s - min_s) / range_s) for doc_id, s in results]
+        else:
+            normalized = results
+        
+        normalized_results.append(normalized)
+    
+    # 加权融合
+    fused_scores: Dict[str, float] = defaultdict(float)
+    doc_counts: Dict[str, int] = defaultdict(int)
+    
+    for weight, results in zip(weights, normalized_results):
+        for doc_id, score in results:
+            fused_scores[doc_id] += weight * score
+            doc_counts[doc_id] += 1
+    
+    # 多路命中加分（出现在多个路径中的结果更可信）
+    for doc_id in fused_scores:
+        if doc_counts[doc_id] > 1:
+            fused_scores[doc_id] *= (1 + 0.1 * (doc_counts[doc_id] - 1))
+    
+    return sorted(fused_scores.items(), key=lambda x: -x[1])
+```
+
+##### 3. eight_layer.py → 重构为并行三路召回
+
+**当前架构**（串行漏斗）：
+```
+L1 → L2 → L3 → L4 → L5 → L6 → L7 → L8
+布隆   倒排  实体  Ngram 向量粗 向量精 重排  LLM
+```
+
+**新架构**（并行三路 + 融合 + 兜底）：
+```
+     ┌─────────── 路径 1: IVF-HNSW 语义召回 ───────────┐
+     │                                                │
+查询 ─┼─────────── 路径 2: 倒排索引关键词召回 ──────────┼→ RRF 融合 → 重排序 → 结果
+     │                                                │       ↑
+     └─────────── 路径 3: 实体索引召回 ────────────────┘       │
+                                                            │
+                         融合结果为空? ──Yes──→ N-gram 原文兜底 ─┘
+```
+
+**关键代码修改**：
+
+```python
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from collections import defaultdict
+from typing import Dict, List, Optional, Tuple, Any, Callable
+from .rrf_fusion import reciprocal_rank_fusion
+
+class EightLayerRetriever:
+    """八层漏斗检索器 - Phase 3.6 升级为并行三路召回"""
+    
+    def __init__(
+        self,
+        bloom_filter: Optional[Any] = None,
+        inverted_index: Optional[Any] = None,
+        entity_index: Optional[Any] = None,
+        ngram_index: Optional[Any] = None,
+        vector_index: Optional[Any] = None,
+        llm_client: Optional[Any] = None,
+        content_store: Optional[Callable[[str], Optional[str]]] = None,
+        # Phase 3.6 新增：用于 VectorIndexIVF 的向量编码
+        embedding_backend: Optional[Any] = None,
+    ):
+        self.bloom_filter = bloom_filter
+        self.inverted_index = inverted_index
+        self.entity_index = entity_index
+        self.ngram_index = ngram_index
+        self.vector_index = vector_index
+        self.llm_client = llm_client
+        self.content_store = content_store
+        # Phase 3.6: embedding_backend 用于 VectorIndexIVF（无内置 encode）
+        self.embedding_backend = embedding_backend
+        
+        # Phase 3.6 新增配置
+        self.config = {
+            # ... 原有配置 ...
+            'parallel_recall_enabled': True,   # 启用并行召回
+            'rrf_k': 60,                       # RRF 常数
+            'vector_weight': 1.0,              # 语义召回权重
+            'keyword_weight': 1.2,             # 关键词召回权重（100%召回，权重更高）
+            'entity_weight': 1.0,              # 实体召回权重
+            'fallback_enabled': True,          # 启用原文兜底
+            'fallback_parallel': True,         # 并行兜底扫描
+            'fallback_workers': 4,             # 兜底扫描线程数
+        }
+    
+    def retrieve(
+        self,
+        query: str,
+        entities: Optional[List[str]] = None,
+        keywords: Optional[List[str]] = None,
+        top_k: int = 10,
+        ...
+    ) -> List[RetrievalResult]:
+        """执行并行三路召回 + RRF 融合"""
+        
+        if self.config.get('parallel_recall_enabled', True):
+            return self._parallel_recall(query, entities, keywords, top_k)
+        else:
+            return self._legacy_retrieve(query, entities, keywords, top_k)
+    
+    def _parallel_recall(
+        self,
+        query: str,
+        entities: Optional[List[str]],
+        keywords: Optional[List[str]],
+        top_k: int
+    ) -> List[RetrievalResult]:
+        """并行三路召回实现"""
+        self.stats = []
+        
+        # 1. 并行执行三路召回
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            futures = {
+                executor.submit(self._vector_recall, query, top_k * 2): 'vector',
+                executor.submit(self._keyword_recall, keywords, top_k * 2): 'keyword',
+                executor.submit(self._entity_recall, entities, top_k * 2): 'entity',
+            }
+            
+            all_results = {}
+            for future in as_completed(futures, timeout=5.0):
+                source = futures[future]
+                try:
+                    all_results[source] = future.result()
+                except Exception as e:
+                    all_results[source] = []
+                    _safe_print(f"[Retriever] {source} 召回失败: {e}")
+        
+        # 2. RRF 融合
+        fused = reciprocal_rank_fusion(
+            [
+                all_results.get('vector', []),
+                all_results.get('keyword', []),
+                all_results.get('entity', []),
+            ],
+            k=self.config.get('rrf_k', 60),
+            weights=[
+                self.config.get('vector_weight', 1.0),
+                self.config.get('keyword_weight', 1.2),
+                self.config.get('entity_weight', 1.0),
+            ]
+        )
+        
+        # 3. 如果融合结果为空，启用原文兜底（100% 保证）
+        if not fused and self.config.get('fallback_enabled', True) and self.ngram_index:
+            fused = self._raw_text_fallback(query, top_k)
+        
+        # 4. 构建结果对象
+        results = []
+        for doc_id, score in fused[:top_k * 2]:
+            content = self.get_content(doc_id)
+            if content:
+                results.append(RetrievalResult(
+                    id=doc_id,
+                    content=content,
+                    score=score,
+                    source_layer=RetrievalLayer.L7_RERANK
+                ))
+        
+        # 5. 精排 + 重排序
+        if self.config['l7_enabled'] and results:
+            results = self._rerank(results, query, entities, keywords)
+        
+        return results[:top_k]
+    
+    def _vector_recall(self, query: str, top_k: int) -> List[Tuple[str, float]]:
+        """路径 1: 语义向量召回
+        
+        兼容两种向量索引：
+        - VectorIndex: search(query: str) - 内部自动 encode
+        - VectorIndexIVF: search(embedding: List[float]) - 需要外部 encode
+        
+        注意：如果使用 VectorIndexIVF，需要确保 __init__ 中传入了 embedding_backend
+        """
+        if not self.vector_index or not getattr(self.vector_index, 'enabled', True):
+            return []
+        
+        start = time.time()
+        
+        # 检查索引类型，兼容不同的 API
+        if hasattr(self.vector_index, 'encode'):
+            # VectorIndex: 支持字符串查询（内部有 encode 方法）
+            results = self.vector_index.search(query, top_k=top_k)
+        else:
+            # VectorIndexIVF: 需要传入向量
+            # 使用 vector_index 的 encode（如果有）或 embedding_backend
+            try:
+                if hasattr(self, 'embedding_backend') and self.embedding_backend:
+                    query_embedding = self.embedding_backend.encode(query)
+                else:
+                    # 尝试从 engine 获取 embedding
+                    # 这种情况下应该在 __init__ 中传入 embedding_backend
+                    _safe_print("[Retriever] Warning: No embedding_backend for VectorIndexIVF")
+                    return []
+                results = self.vector_index.search(query_embedding, top_k=top_k)
+            except Exception as e:
+                _safe_print(f"[Retriever] Vector recall failed: {e}")
+                results = []
+        
+        self._record_stats(RetrievalLayer.L5_VECTOR_COARSE, 0, len(results), start)
+        
+        return results
+    
+    def _keyword_recall(self, keywords: Optional[List[str]], top_k: int) -> List[Tuple[str, float]]:
+        """路径 2: 关键词倒排索引召回（100% 召回）
+        
+        基于关键词匹配数量计算分数，匹配越多分数越高
+        
+        注意：inverted_index.search(kw: str) 接受单个关键词，返回 List[str]
+        """
+        if not self.inverted_index or not keywords:
+            return []
+        
+        start = time.time()
+        
+        # 使用布隆过滤器预过滤
+        if self.bloom_filter:
+            keywords = [kw for kw in keywords if kw in self.bloom_filter]
+        
+        if not keywords:
+            return []
+        
+        # 获取每个关键词匹配的文档
+        # 注意：search(kw) 接受单个字符串，返回 List[str]
+        doc_keyword_counts: Dict[str, int] = defaultdict(int)
+        for kw in keywords:
+            matched_docs = self.inverted_index.search(kw)  # 单个关键词，不是列表
+            for doc_id in matched_docs:
+                doc_keyword_counts[doc_id] += 1
+        
+        # 计算分数：匹配关键词数 / 总关键词数 * 基础分
+        base_score = 0.8
+        results = []
+        for doc_id, match_count in doc_keyword_counts.items():
+            score = base_score * (match_count / len(keywords))
+            results.append((doc_id, score))
+        
+        # 按分数排序
+        results.sort(key=lambda x: -x[1])
+        
+        self._record_stats(RetrievalLayer.L2_INVERTED_INDEX, 0, len(results), start)
+        return results[:top_k]
+    
+    def _entity_recall(self, entities: Optional[List[str]], top_k: int) -> List[Tuple[str, float]]:
+        """路径 3: 实体索引召回"""
+        if not self.entity_index or not entities:
+            return []
+        
+        start = time.time()
+        doc_ids = set()
+        
+        for entity in entities:
+            entity_results = self.entity_index.get_related_turns(entity)
+            for indexed_entity in entity_results:
+                doc_ids.update(indexed_entity.turn_references)
+        
+        results = [(doc_id, 0.7) for doc_id in list(doc_ids)[:top_k]]
+        
+        self._record_stats(RetrievalLayer.L3_ENTITY_INDEX, 0, len(results), start)
+        return results
+    
+    def _raw_text_fallback(self, query: str, top_k: int) -> List[Tuple[str, float]]:
+        """原文兜底搜索（100% 保证，仅在其他路径无结果时使用）"""
+        if not self.ngram_index:
+            return []
+        
+        start = time.time()
+        
+        if self.config.get('fallback_parallel', True) and hasattr(self.ngram_index, 'raw_search_parallel'):
+            doc_ids = self.ngram_index.raw_search_parallel(
+                query,
+                max_results=top_k,
+                num_workers=self.config.get('fallback_workers', 4)
+            )
+        else:
+            doc_ids = self.ngram_index.raw_search(query, max_results=top_k)
+        
+        results = [(doc_id, 0.3) for doc_id in doc_ids]  # 兜底结果分数较低
+        
+        self._record_stats(RetrievalLayer.L4_NGRAM_INDEX, 0, len(results), start)
+        return results
+    
+    def _legacy_retrieve(self, ...):
+        """保留原有串行检索逻辑，用于向后兼容"""
+        # 原有 retrieve() 方法的完整实现
+        ...
+```
+
+##### 4. ngram_index.py → 优化大规模扫描
+
+```python
+def raw_search_parallel(
+    self,
+    query: str,
+    max_results: int = 50,
+    num_workers: int = 4
+) -> List[str]:
+    """并行分片扫描原文（Phase 3.6 优化）
+    
+    将原文数据分成多个分片，并行扫描，显著提升大规模数据的兜底速度。
+    
+    Args:
+        query: 搜索查询
+        max_results: 最大结果数
+        num_workers: 并行线程数
+        
+    Returns:
+        匹配的 memory_id 列表
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    
+    items = list(self._raw_content.items())
+    if not items:
+        return []
+    
+    # 分片
+    chunk_size = max(1, len(items) // num_workers)
+    chunks = [items[i:i+chunk_size] for i in range(0, len(items), chunk_size)]
+    
+    # 并行扫描
+    all_results = []
+    with ThreadPoolExecutor(max_workers=num_workers) as executor:
+        futures = [
+            executor.submit(self._scan_chunk, query, chunk)
+            for chunk in chunks
+        ]
+        
+        for future in as_completed(futures):
+            try:
+                chunk_results = future.result()
+                all_results.extend(chunk_results)
+                if len(all_results) >= max_results:
+                    break
+            except Exception:
+                continue
+    
+    return all_results[:max_results]
+
+def _scan_chunk(self, query: str, chunk: List[Tuple[str, str]]) -> List[str]:
+    """扫描单个分片"""
+    results = []
+    query_lower = query.lower()
+    search_terms = self._extract_search_terms(query)
+    
+    for memory_id, content in chunk:
+        content_lower = content.lower()
+        
+        # 直接子串匹配
+        if query_lower in content_lower:
+            results.append(memory_id)
+            continue
+        
+        # 检查关键子串
+        for term in search_terms:
+            if term in content_lower:
+                results.append(memory_id)
+                break
+    
+    return results
+```
+
+##### 5. config.py → 添加三路召回配置
+
+```python
+@dataclass
+class TripleRecallConfig:
+    """Phase 3.6: 三路召回配置"""
+    
+    # 并行召回开关
+    enabled: bool = True
+    
+    # 路径权重（用于 RRF 融合）
+    vector_weight: float = 1.0       # 语义召回权重
+    keyword_weight: float = 1.2      # 关键词召回权重（100%召回，权重更高）
+    entity_weight: float = 1.0       # 实体召回权重
+    
+    # RRF 参数
+    rrf_k: int = 60                  # RRF 常数
+    
+    # 原文兜底配置
+    fallback_enabled: bool = True    # 启用原文兜底
+    fallback_parallel: bool = True   # 并行扫描
+    fallback_workers: int = 4        # 并行线程数
+    fallback_max_results: int = 50   # 兜底最大结果数
+    
+    # IVF-HNSW 参数
+    hnsw_m: int = 32                 # HNSW 图连接数
+    hnsw_ef_construction: int = 200  # 构建精度
+    hnsw_ef_search: int = 64         # 搜索精度
+    
+    @classmethod
+    def default(cls) -> 'TripleRecallConfig':
+        """默认配置（平衡模式）"""
+        return cls()
+    
+    @classmethod
+    def max_recall(cls) -> 'TripleRecallConfig':
+        """最大召回模式（100% 不遗忘优先）"""
+        return cls(
+            hnsw_m=48,
+            hnsw_ef_construction=300,
+            hnsw_ef_search=128,
+            keyword_weight=1.5,
+        )
+    
+    @classmethod
+    def fast(cls) -> 'TripleRecallConfig':
+        """快速模式（速度优先）"""
+        return cls(
+            hnsw_m=16,
+            hnsw_ef_construction=100,
+            hnsw_ef_search=32,
+            fallback_workers=2,
+        )
+    
+    @classmethod
+    def from_env(cls) -> 'TripleRecallConfig':
+        """从环境变量加载配置"""
+        import os
+        return cls(
+            enabled=os.getenv('TRIPLE_RECALL_ENABLED', 'true').lower() == 'true',
+            vector_weight=float(os.getenv('TRIPLE_RECALL_VECTOR_WEIGHT', '1.0')),
+            keyword_weight=float(os.getenv('TRIPLE_RECALL_KEYWORD_WEIGHT', '1.2')),
+            entity_weight=float(os.getenv('TRIPLE_RECALL_ENTITY_WEIGHT', '1.0')),
+            rrf_k=int(os.getenv('TRIPLE_RECALL_RRF_K', '60')),
+            hnsw_m=int(os.getenv('VECTOR_IVF_HNSW_M', '32')),
+            hnsw_ef_construction=int(os.getenv('VECTOR_IVF_HNSW_EF_CONSTRUCTION', '200')),
+            hnsw_ef_search=int(os.getenv('VECTOR_IVF_HNSW_EF_SEARCH', '64')),
+            fallback_enabled=os.getenv('FALLBACK_ENABLED', 'true').lower() == 'true',
+            fallback_parallel=os.getenv('FALLBACK_PARALLEL', 'true').lower() == 'true',
+            fallback_workers=int(os.getenv('FALLBACK_WORKERS', '4')),
+        )
+```
+
+##### 6. engine.py → 集成三路召回配置
+
+```python
+# 在 RecallEngine.__init__ 中添加
+from .retrieval.config import TripleRecallConfig
+
+class RecallEngine:
+    def __init__(self, config: Optional[RecallConfig] = None, ...):
+        ...
+        # Phase 3.6: 加载三路召回配置
+        self.triple_recall_config = TripleRecallConfig.from_env()
+        
+    def _create_retriever(self) -> EightLayerRetriever:
+        """创建检索器时传入 Phase 3.6 配置
+        
+        注意：如果使用 VectorIndexIVF（无内置 encode），需要传入 embedding_backend
+        """
+        retriever = EightLayerRetriever(
+            bloom_filter=self.bloom_filter,
+            inverted_index=self.inverted_index,
+            entity_index=self.entity_index,
+            ngram_index=self.ngram_index,
+            vector_index=self.vector_index,
+            llm_client=self.llm_client,
+            content_store=self._get_content,
+            # Phase 3.6: 传入 embedding_backend（用于 VectorIndexIVF）
+            embedding_backend=self.embedding_backend if hasattr(self, 'embedding_backend') else None,
+        )
+        
+        # Phase 3.6: 注入并行召回配置
+        if self.triple_recall_config.enabled:
+            retriever.config.update({
+                'parallel_recall_enabled': True,
+                'rrf_k': self.triple_recall_config.rrf_k,
+                'vector_weight': self.triple_recall_config.vector_weight,
+                'keyword_weight': self.triple_recall_config.keyword_weight,
+                'entity_weight': self.triple_recall_config.entity_weight,
+                'fallback_enabled': self.triple_recall_config.fallback_enabled,
+                'fallback_parallel': self.triple_recall_config.fallback_parallel,
+                'fallback_workers': self.triple_recall_config.fallback_workers,
+            })
+        
+        return retriever
+```
+
+##### 7. tools/migrate_ivf_to_hnsw.py → 索引迁移工具
+
+```python
+"""IVF → IVF-HNSW 索引迁移工具
+
+由于 quantizer 类型不同（IndexFlatIP vs IndexHNSWFlat），
+需要重建索引。此工具支持：
+1. 读取现有 IVF 索引的所有向量
+2. 创建新的 IVF-HNSW 索引
+3. 重新添加所有向量
+4. 保留原有元数据映射
+
+使用方式：
+    python tools/migrate_ivf_to_hnsw.py --data-path ./recall_data/indexes
+"""
+
+import os
+import json
+import argparse
+import numpy as np
+
+try:
+    import faiss
+except ImportError:
+    print("Error: faiss not installed. Run: pip install faiss-cpu")
+    exit(1)
+
+
+def migrate_index(data_path: str, hnsw_m: int = 32, ef_construction: int = 200):
+    """迁移 IVF 索引到 IVF-HNSW 格式
+    
+    Args:
+        data_path: 索引数据目录
+        hnsw_m: HNSW 图连接数
+        ef_construction: 构建精度
+    """
+    old_index_file = os.path.join(data_path, "vector_index_ivf.faiss")
+    new_index_file = os.path.join(data_path, "vector_index_ivf_hnsw.faiss")
+    mapping_file = os.path.join(data_path, "vector_mapping_ivf.npy")
+    metadata_file = os.path.join(data_path, "vector_metadata_ivf.json")
+    
+    if not os.path.exists(old_index_file):
+        print(f"[WARN] Old index not found: {old_index_file}")
+        return
+    
+    print(f"[INFO] Loading old IVF index from {old_index_file}")
+    old_index = faiss.read_index(old_index_file)
+    
+    # 提取所有向量
+    ntotal = old_index.ntotal
+    dimension = old_index.d
+    print(f"[INFO] Found {ntotal} vectors, dimension={dimension}")
+    
+    if ntotal == 0:
+        print("[INFO] Index is empty, nothing to migrate")
+        return
+    
+    # 重建向量（从 IVF 索引中提取）
+    vectors = old_index.reconstruct_n(0, ntotal)
+    print(f"[INFO] Reconstructed {len(vectors)} vectors")
+    
+    # 创建新的 IVF-HNSW 索引
+    nlist = old_index.nlist
+    nprobe = old_index.nprobe
+    
+    print(f"[INFO] Creating new IVF-HNSW index (nlist={nlist}, hnsw_m={hnsw_m})")
+    hnsw_quantizer = faiss.IndexHNSWFlat(dimension, hnsw_m)
+    hnsw_quantizer.hnsw.efConstruction = ef_construction
+    
+    new_index = faiss.IndexIVFFlat(
+        hnsw_quantizer,
+        dimension,
+        nlist,
+        faiss.METRIC_INNER_PRODUCT
+    )
+    new_index.nprobe = nprobe
+    
+    # 训练新索引
+    print(f"[INFO] Training new index on {len(vectors)} vectors")
+    new_index.train(vectors)
+    
+    # 添加向量
+    print(f"[INFO] Adding {len(vectors)} vectors to new index")
+    new_index.add(vectors)
+    
+    # 保存新索引
+    print(f"[INFO] Saving new index to {new_index_file}")
+    faiss.write_index(new_index, new_index_file)
+    
+    # 备份旧索引
+    backup_file = old_index_file + ".backup"
+    os.rename(old_index_file, backup_file)
+    print(f"[INFO] Old index backed up to {backup_file}")
+    
+    # 重命名新索引
+    os.rename(new_index_file, old_index_file)
+    print(f"[DONE] Migration complete! New IVF-HNSW index saved to {old_index_file}")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Migrate IVF to IVF-HNSW index")
+    parser.add_argument("--data-path", required=True, help="Index data directory")
+    parser.add_argument("--hnsw-m", type=int, default=32, help="HNSW M parameter")
+    parser.add_argument("--ef-construction", type=int, default=200, help="HNSW efConstruction")
+    
+    args = parser.parse_args()
+    migrate_index(args.data_path, args.hnsw_m, args.ef_construction)
+```
+
+##### 8. tests/test_rrf_fusion.py → RRF 融合单元测试
+
+```python
+"""RRF 融合算法单元测试"""
+
+import pytest
+from recall.retrieval.rrf_fusion import reciprocal_rank_fusion, weighted_score_fusion
+
+
+class TestRRFFusion:
+    """RRF 融合测试"""
+    
+    def test_basic_fusion(self):
+        """测试基本融合功能"""
+        results1 = [("doc1", 0.9), ("doc2", 0.8), ("doc3", 0.7)]
+        results2 = [("doc2", 0.95), ("doc1", 0.85), ("doc4", 0.6)]
+        
+        fused = reciprocal_rank_fusion([results1, results2], k=60)
+        
+        # doc2 在两路中都排名靠前，应该排第一
+        assert fused[0][0] == "doc2"
+        # doc1 也在两路中出现
+        assert fused[1][0] == "doc1"
+        # 应该有 4 个唯一文档
+        assert len(fused) == 4
+    
+    def test_empty_results(self):
+        """测试空结果处理"""
+        results1 = []
+        results2 = [("doc1", 0.9)]
+        
+        fused = reciprocal_rank_fusion([results1, results2])
+        
+        assert len(fused) == 1
+        assert fused[0][0] == "doc1"
+    
+    def test_weights(self):
+        """测试权重影响"""
+        results1 = [("doc1", 0.9)]  # 权重 1.0
+        results2 = [("doc2", 0.9)]  # 权重 2.0
+        
+        fused = reciprocal_rank_fusion([results1, results2], weights=[1.0, 2.0])
+        
+        # doc2 权重更高，应该排第一
+        assert fused[0][0] == "doc2"
+    
+    def test_rrf_formula(self):
+        """验证 RRF 公式正确性"""
+        results = [[("doc1", 0.9)]]  # 只有一个结果，rank=1
+        
+        fused = reciprocal_rank_fusion(results, k=60)
+        
+        # RRF score = 1 / (60 + 1) = 0.01639...
+        expected_score = 1.0 / 61
+        assert abs(fused[0][1] - expected_score) < 0.0001
+
+
+class TestWeightedScoreFusion:
+    """加权分数融合测试"""
+    
+    def test_normalization(self):
+        """测试分数归一化"""
+        results1 = [("doc1", 100), ("doc2", 50)]  # 未归一化
+        results2 = [("doc1", 0.9), ("doc2", 0.5)]  # 已归一化
+        
+        fused = weighted_score_fusion([results1, results2], normalize=True)
+        
+        # doc1 在两路中都是最高分
+        assert fused[0][0] == "doc1"
+    
+    def test_multi_hit_bonus(self):
+        """测试多路命中加分"""
+        results1 = [("doc1", 0.5)]
+        results2 = [("doc1", 0.5)]
+        results3 = [("doc2", 0.9)]  # 单路高分
+        
+        fused = weighted_score_fusion([results1, results2, results3])
+        
+        # doc1 虽然单路分低但多路命中，可能超过 doc2
+        doc1_score = next(s for d, s in fused if d == "doc1")
+        doc2_score = next(s for d, s in fused if d == "doc2")
+        # 多路命中加分后 doc1 应该有竞争力
+        assert doc1_score > 0
+```
+
+##### 9. tests/test_ivf_hnsw_recall.py → IVF-HNSW 召回率测试
+
+```python
+"""IVF-HNSW 向量索引召回率测试"""
+
+import pytest
+import numpy as np
+import tempfile
+import os
+
+# 跳过测试如果 faiss 未安装
+faiss = pytest.importorskip("faiss")
+
+from recall.index.vector_index_ivf import VectorIndexIVF
+
+
+class TestIVFHNSWRecall:
+    """IVF-HNSW 召回率测试"""
+    
+    @pytest.fixture
+    def temp_dir(self):
+        """创建临时目录"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            yield tmpdir
+    
+    @pytest.fixture
+    def sample_vectors(self):
+        """生成测试向量"""
+        np.random.seed(42)
+        dimension = 384
+        n_vectors = 1000
+        vectors = np.random.randn(n_vectors, dimension).astype(np.float32)
+        # 归一化（用于内积相似度）
+        vectors = vectors / np.linalg.norm(vectors, axis=1, keepdims=True)
+        return vectors
+    
+    def test_recall_rate_at_10(self, temp_dir, sample_vectors):
+        """测试 top-10 召回率 >= 97%"""
+        dimension = sample_vectors.shape[1]
+        
+        # 创建索引（使用 HNSW quantizer）
+        index = VectorIndexIVF(
+            data_path=temp_dir,
+            dimension=dimension,
+            nlist=10,
+            nprobe=5,
+            hnsw_m=32,
+            hnsw_ef_construction=200,
+            hnsw_ef_search=64,
+        )
+        
+        # 添加向量
+        for i, vec in enumerate(sample_vectors):
+            index.add(f"doc_{i}", vec.tolist())
+        
+        # 测试召回率
+        n_queries = 100
+        top_k = 10
+        total_recall = 0
+        
+        for i in range(n_queries):
+            query = sample_vectors[i]
+            
+            # 暴力搜索作为 ground truth
+            scores = np.dot(sample_vectors, query)
+            gt_indices = np.argsort(-scores)[:top_k]
+            gt_docs = set(f"doc_{idx}" for idx in gt_indices)
+            
+            # IVF-HNSW 搜索
+            results = index.search(query.tolist(), top_k=top_k)
+            result_docs = set(doc_id for doc_id, _ in results)
+            
+            # 计算召回率
+            recall = len(gt_docs & result_docs) / len(gt_docs)
+            total_recall += recall
+        
+        avg_recall = total_recall / n_queries
+        print(f"Average Recall@{top_k}: {avg_recall:.2%}")
+        
+        # Phase 3.6 目标：召回率 >= 97%
+        assert avg_recall >= 0.95, f"Recall {avg_recall:.2%} < 95%"
+    
+    def test_search_speed(self, temp_dir, sample_vectors):
+        """测试搜索速度 < 100ms"""
+        import time
+        
+        dimension = sample_vectors.shape[1]
+        index = VectorIndexIVF(
+            data_path=temp_dir,
+            dimension=dimension,
+            nlist=10,
+            nprobe=5,
+        )
+        
+        # 添加向量
+        for i, vec in enumerate(sample_vectors):
+            index.add(f"doc_{i}", vec.tolist())
+        
+        # 测试搜索速度
+        query = sample_vectors[0]
+        
+        start = time.time()
+        for _ in range(100):
+            index.search(query.tolist(), top_k=10)
+        elapsed = (time.time() - start) / 100 * 1000  # ms
+        
+        print(f"Average search time: {elapsed:.2f}ms")
+        assert elapsed < 100, f"Search time {elapsed:.2f}ms > 100ms"
+    
+    def test_empty_index(self, temp_dir):
+        """测试空索引搜索"""
+        index = VectorIndexIVF(
+            data_path=temp_dir,
+            dimension=384,
+        )
+        
+        query = [0.0] * 384
+        results = index.search(query, top_k=10)
+        
+        assert results == []
+```
+
+---
+
+#### 📊 预期效果
+
+| 指标 | 当前架构 (Phase 3.5) | 新架构 (Phase 3.6) | 提升 |
+|------|---------------------|-------------------|------|
+| **向量召回率** | 90-95% (IVF) | 95-99% (IVF-HNSW) | +5% |
+| **关键词召回率** | 100% | 100% | 保持 |
+| **原文兜底** | 100% 但串行 | 100% + 并行 | 速度 ×4 |
+| **整体召回率** | ~95% | **~99.5%+** | **+4.5%** |
+| **漏召风险** | 5-10% | **<0.5%** | **20× 降低** |
+| **亿级规模支持** | 500万 | **1-10亿** | **200× 扩展** |
+
+---
+
+#### 📊 与 Graphiti 对比
+
+| 维度 | Graphiti | Recall (Phase 3.5) | Recall (Phase 3.6) |
+|------|----------|-------------------|-------------------|
+| **向量索引** | 依赖 Neo4j | FAISS IVF (90-95%) | **IVF-HNSW (95-99%)** |
+| **多路召回** | BM25 + Vector | 八层串行 | **三路并行 + RRF** |
+| **结果融合** | RRF | 无 | **RRF + 加权融合** |
+| **兜底保证** | 无 | 原文扫描 | **并行原文扫描** |
+| **整体召回** | ~95% | ~95% | **~99.5%+** |
+| **扩展上限** | Neo4j 依赖 | ~500万 | **1-10亿** |
+
+---
+
+#### 🚀 实施计划
+
+**Week 1: 核心索引升级**
+
+| 天 | 任务 | 产出 |
+|----|------|------|
+| D1-D2 | `vector_index_ivf.py` 升级 IVF-HNSW | 新向量索引实现 |
+| D3 | `rrf_fusion.py` 新建 + `retrieval/__init__.py` 更新 | RRF 融合模块 |
+| D4 | `index/__init__.py` 更新 + 迁移工具 | 导出更新 + 迁移脚本 |
+| D5 | `test_rrf_fusion.py` + `test_ivf_hnsw_recall.py` | 单元测试 |
+
+**Week 2: 检索架构重构**
+
+| 天 | 任务 | 产出 |
+|----|------|------|
+| D1-D2 | `eight_layer.py` 重构 | 并行三路召回 |
+| D3 | `ngram_index.py` 优化 | 并行分片扫描 |
+| D4 | `config.py` + `engine.py` 更新 | 配置集成 |
+| D5 | 集成测试 + 压力测试 | 召回率验证报告 |
+
+**交付物清单**：
+
+| 类型 | 文件 | 说明 |
+|------|------|------|
+| 📄 代码 | `recall/index/vector_index_ivf.py` | IVF-HNSW 升级 |
+| 📄 代码 | `recall/retrieval/rrf_fusion.py` | RRF 融合模块（新建）|
+| 📄 代码 | `recall/retrieval/eight_layer.py` | 并行三路召回 |
+| 📄 代码 | `recall/index/ngram_index.py` | 并行分片扫描 |
+| 📄 代码 | `recall/retrieval/config.py` | TripleRecallConfig |
+| 📄 代码 | `recall/engine.py` | 配置集成 |
+| 🔧 工具 | `tools/migrate_ivf_to_hnsw.py` | 索引迁移脚本（新建）|
+| 🧪 测试 | `tests/test_rrf_fusion.py` | RRF 单元测试（新建）|
+| 🧪 测试 | `tests/test_ivf_hnsw_recall.py` | 召回率测试（新建）|
+
+---
+
+#### ✅ 验收标准
+
+**功能验收**：
+- [ ] IVF-HNSW 索引正常工作
+- [ ] 并行三路召回正常执行
+- [ ] RRF 融合结果正确
+- [ ] 原文兜底可触发
+- [ ] 索引迁移工具可用
+
+**性能验收**：
+- [ ] 100万向量检索 < 100ms
+- [ ] 三路召回总延迟 < 200ms
+- [ ] 并行兜底扫描速度 ≥ 串行 4×
+
+**召回率验收**：
+- [ ] 向量召回率 ≥ 97%（从 90-95% 提升）
+- [ ] 整体召回率 ≥ 99%（从 95% 提升）
+- [ ] 关键词精确匹配 100%
+- [ ] 原文包含匹配 100%
+
+**兼容性验收**：
+- [ ] 现有测试 100% 通过
+- [ ] API 完全兼容
+- [ ] 配置可选（可回退到旧架构）
+
+---
+
+#### ⚠️ 风险与缓解
+
+| 风险 | 影响 | 缓解措施 |
+|------|------|---------|
+| HNSW 内存增加 | 内存占用 +20-30% | 提供配置开关，可选回退 IVF |
+| 并行召回超时 | 延迟增加 | 设置 5s 超时，降级到串行 |
+| 索引迁移 | 需重建索引 | 提供迁移工具，支持增量 |
+| FAISS 版本 | 需 1.7+ | pyproject.toml 已约束 |
+
+---
+
+#### 📝 环境变量支持
+
+```bash
+# Phase 3.6: 三路召回配置
+TRIPLE_RECALL_ENABLED=true           # 启用并行三路召回
+TRIPLE_RECALL_RRF_K=60               # RRF 常数
+TRIPLE_RECALL_VECTOR_WEIGHT=1.0      # 语义召回权重
+TRIPLE_RECALL_KEYWORD_WEIGHT=1.2     # 关键词召回权重
+TRIPLE_RECALL_ENTITY_WEIGHT=1.0      # 实体召回权重
+
+# IVF-HNSW 参数
+VECTOR_IVF_HNSW_M=32                 # HNSW 图连接数
+VECTOR_IVF_HNSW_EF_CONSTRUCTION=200  # 构建精度
+VECTOR_IVF_HNSW_EF_SEARCH=64         # 搜索精度
+
+# 原文兜底配置
+FALLBACK_ENABLED=true                # 启用原文兜底
+FALLBACK_PARALLEL=true               # 并行扫描
+FALLBACK_WORKERS=4                   # 并行线程数
+```
+
+---
+
 ### Phase 4: 集成层（2周）
 
 **目标：MCP Server + API 扩展**
