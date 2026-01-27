@@ -199,8 +199,20 @@ def inspect_graph(data_root: str, user_id: str, ascii_mode: bool = False, detail
                 })
         relations = all_relations
     
-    safe_print(f"  实体数量: {len(entities)}")
-    safe_print(f"  关系数量: {len(relations)}")
+    # 从实体索引获取实体（知识图谱只存关系）
+    idx_data = load_entity_index(data_root)
+    idx_entities = idx_data.get("entities", {})
+    raw_list = idx_data.get("raw_list", [])
+    
+    # 合并：如果知识图谱没有实体，使用索引中的实体
+    if not entities and (idx_entities or raw_list):
+        if idx_entities:
+            entities = idx_entities
+        elif raw_list:
+            entities = {e.get('id', e.get('name', str(i))): e for i, e in enumerate(raw_list) if isinstance(e, dict)}
+    
+    safe_print(f"  实体数量: {len(entities)} (来自实体索引)")
+    safe_print(f"  关系数量: {len(relations)} (来自知识图谱)")
     
     if not entities and not relations:
         safe_print("\n  [!] 图谱为空！可能原因:")
@@ -311,21 +323,20 @@ def inspect_graph(data_root: str, user_id: str, ascii_mode: bool = False, detail
     print_header("7. 诊断结论")
     
     issues = []
+    entity_count = len(entities)
+    index_count = len(idx_entities) if idx_entities else len(raw_list)
     
-    if not entities:
-        issues.append("- 图谱无实体：检查实体提取器是否正常工作")
+    if entity_count == 0 and index_count == 0:
+        issues.append("- 无实体数据：检查实体提取器是否正常工作")
     
     if not relations:
-        issues.append("- 图谱无关系：检查关系提取器是否正常工作")
+        issues.append("- 无关系数据：检查关系提取器是否正常工作")
     
     if not memories:
         issues.append("- 无记忆数据：请先通过 API 添加一些记忆")
     
-    if memories and not entities:
+    if memories and entity_count == 0 and index_count == 0:
         issues.append("- 有记忆但无实体：实体提取可能未生效，检查 EntityExtractor")
-    
-    if len(idx_entities) != len(entities):
-        issues.append(f"- 实体数量不一致：索引={len(idx_entities)}, 图谱={len(entities)}")
     
     if issues:
         safe_print("  发现以下问题:")
@@ -333,7 +344,7 @@ def inspect_graph(data_root: str, user_id: str, ascii_mode: bool = False, detail
             safe_print(f"    {issue}")
     else:
         safe_print("  [OK] 图谱数据正常!")
-        safe_print(f"       实体: {len(entities)} | 关系: {len(relations)} | 记忆: {len(memories)}")
+        safe_print(f"       实体: {entity_count} | 关系: {len(relations)} | 记忆: {len(memories)}")
     
     print_separator()
 
