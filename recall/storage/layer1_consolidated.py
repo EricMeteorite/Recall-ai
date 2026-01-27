@@ -111,3 +111,12 @@ class ConsolidatedMemory:
             names.append(entity.name)
             names.extend(entity.aliases)
         return names
+    
+    def clear(self):
+        """清空所有长期记忆实体"""
+        self.entities.clear()
+        # 删除存储目录中的所有实体文件
+        if os.path.exists(self.storage_dir):
+            import shutil
+            shutil.rmtree(self.storage_dir)
+            os.makedirs(self.storage_dir, exist_ok=True)

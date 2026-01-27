@@ -1228,8 +1228,82 @@ class TemporalKnowledgeGraph:
             'temporal_enabled': self._temporal_index is not None
         }
     
+    def clear_user(self, user_id: str) -> int:
+        """清空指定用户的所有数据（节点、边、episodes）
+        
+        这是用户级别的清空操作，不会影响其他用户的数据。
+        
+        Args:
+            user_id: 要清空的用户ID
+        
+        Returns:
+            int: 删除的节点数量
+        """
+        deleted_count = 0
+        
+        # 1. 找出该用户的所有节点并清理索引
+        user_node_ids = set()
+        for node_id, node in list(self.nodes.items()):
+            if getattr(node, 'user_id', None) == user_id:
+                user_node_ids.add(node_id)
+                # 清理全文索引
+                if self._fulltext_index:
+                    self._fulltext_index.remove(f"node:{node.uuid}")
+                # 清理名称索引
+                if node.name in self._name_to_uuid:
+                    del self._name_to_uuid[node.name]
+                for alias in getattr(node, 'aliases', []):
+                    if alias in self._name_to_uuid:
+                        del self._name_to_uuid[alias]
+                del self.nodes[node_id]
+                deleted_count += 1
+        
+        # 2. 删除与这些节点相关的所有边
+        edges_to_delete = []
+        for edge_id, edge in self.edges.items():
+            # 边的 subject 和 object 对应节点 UUID
+            if edge.subject in user_node_ids or edge.object in user_node_ids:
+                edges_to_delete.append(edge_id)
+            # 同时检查边本身的 user_id
+            elif getattr(edge, 'user_id', None) == user_id:
+                edges_to_delete.append(edge_id)
+        for edge_id in edges_to_delete:
+            edge = self.edges[edge_id]
+            # 清理时态索引
+            if self._temporal_index:
+                self._temporal_index.remove(edge.uuid)
+            # 清理全文索引
+            if self._fulltext_index:
+                self._fulltext_index.remove(f"edge:{edge.uuid}")
+            del self.edges[edge_id]
+        
+        # 3. 删除该用户的 episodes
+        episodes_to_delete = []
+        for episode_id, episode in self.episodes.items():
+            if getattr(episode, 'user_id', None) == user_id:
+                episodes_to_delete.append(episode_id)
+        for episode_id in episodes_to_delete:
+            del self.episodes[episode_id]
+        
+        # 4. 重建索引并保存
+        total_deleted = deleted_count + len(edges_to_delete) + len(episodes_to_delete)
+        if total_deleted > 0:
+            self._rebuild_indexes()
+            self._dirty = True
+            self._save()
+        
+        return deleted_count
+    
+    def _rebuild_indexes(self):
+        """重建所有索引"""
+        self._indexes = GraphIndexes()
+        for node_id, node in self.nodes.items():
+            self._indexes.add_node(node_id, node.node_type)
+        for edge_id, edge in self.edges.items():
+            self._indexes.add_edge(edge_id, edge.subject, edge.object, edge.predicate)
+    
     def clear(self):
-        """清空图谱"""
+        """清空图谱（全部数据）"""
         self.nodes.clear()
         self.edges.clear()
         self.episodes.clear()

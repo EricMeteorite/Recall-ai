@@ -1597,7 +1597,10 @@ class RecallEngine:
         self,
         user_id: str = "default"
     ) -> bool:
-        """清空用户的所有记忆
+        """清空用户的所有记忆（级联删除该用户关联的数据）
+        
+        这是用户级别的清空操作，只会删除指定用户的数据，
+        不会影响其他用户的数据或全局共享索引。
         
         Args:
             user_id: 用户ID
@@ -1605,9 +1608,80 @@ class RecallEngine:
         Returns:
             bool: 是否成功
         """
-        scope = self.storage.get_scope(user_id)
-        scope.clear()
-        return True
+        try:
+            # 1. 清空该用户的记忆存储
+            scope = self.storage.get_scope(user_id)
+            scope.clear()
+            
+            # 2. 清空该用户在时态知识图谱中的数据
+            if self.temporal_graph is not None and hasattr(self.temporal_graph, 'clear_user'):
+                self.temporal_graph.clear_user(user_id)
+            
+            # 注意：以下全局索引不按用户隔离，不在这里清空
+            # - knowledge_graph: 旧版知识图谱，多用户共享
+            # - _entity_index: 实体索引，多用户共享
+            # - consolidated_memory: L1 整合存储，多用户共享
+            # - _vector_index: 向量索引，多用户共享
+            # 
+            # 如需完全清空所有数据，请使用 clear_all() 方法
+            
+            return True
+        except Exception as e:
+            _safe_print(f"[Recall] 清空用户记忆失败: {e}")
+            return False
+    
+    def clear_all(self) -> bool:
+        """清空所有数据（管理员操作）
+        
+        ⚠️ 危险操作！这将删除所有用户的全部数据，包括：
+        - 所有用户的记忆
+        - 知识图谱
+        - 实体索引
+        - L1 整合存储
+        - 向量索引
+        
+        Returns:
+            bool: 是否成功
+        """
+        try:
+            # 1. 清空所有用户的记忆存储
+            for user_id in self.storage.list_users():
+                scope = self.storage.get_scope(user_id)
+                scope.clear()
+            
+            # 2. 清空时态知识图谱
+            if self.temporal_graph is not None:
+                self.temporal_graph.clear()
+            
+            # 3. 清空旧版知识图谱
+            if self.knowledge_graph is not None and hasattr(self.knowledge_graph, 'clear'):
+                self.knowledge_graph.clear()
+            
+            # 4. 清空实体索引
+            if self._entity_index is not None and hasattr(self._entity_index, 'clear'):
+                self._entity_index.clear()
+            
+            # 5. 清空 L1 整合存储
+            if self.consolidated_memory is not None and hasattr(self.consolidated_memory, 'clear'):
+                self.consolidated_memory.clear()
+            
+            # 6. 清空向量索引
+            if self._vector_index is not None and hasattr(self._vector_index, 'clear'):
+                self._vector_index.clear()
+            
+            # 7. 清空倒排索引
+            if self._inverted_index is not None and hasattr(self._inverted_index, 'clear'):
+                self._inverted_index.clear()
+            
+            # 8. 清空 n-gram 索引
+            if self._ngram_index is not None and hasattr(self._ngram_index, 'clear'):
+                self._ngram_index.clear()
+            
+            _safe_print("[Recall] ✅ 已清空所有数据")
+            return True
+        except Exception as e:
+            _safe_print(f"[Recall] 清空所有数据失败: {e}")
+            return False
     
     def stats(self) -> Dict[str, Any]:
         """获取统计信息（get_stats 的别名）"""

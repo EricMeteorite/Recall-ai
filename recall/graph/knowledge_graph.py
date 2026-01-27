@@ -238,3 +238,10 @@ class KnowledgeGraph:
             })
         
         return results
+    
+    def clear(self):
+        """清空知识图谱"""
+        self.outgoing.clear()
+        self.incoming.clear()
+        self.relation_index.clear()
+        self._save()

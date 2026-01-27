@@ -146,3 +146,9 @@ class EntityIndex:
     def get_entity(self, name: str) -> Optional[IndexedEntity]:
         """通过名称获取实体（get_by_name 的别名）"""
         return self.get_by_name(name)
+    
+    def clear(self):
+        """清空所有实体索引"""
+        self.entities.clear()
+        self.name_index.clear()
+        self._save()

@@ -1455,6 +1455,52 @@ async def clear_memories(
         raise HTTPException(status_code=500, detail="清空失败")
 
 
+@app.delete("/v1/memories/all", tags=["Memories"])
+async def clear_all_memories(
+    confirm: bool = Query(default=False, description="确认删除，必须为 true"),
+    admin_key: str = Query(default="", description="管理员密钥")
+):
+    """清空所有用户的全部数据（管理员操作）
+    
+    ⚠️ 极端危险操作！这将删除系统中的全部数据，包括：
+    - 所有用户的记忆
+    - 知识图谱
+    - 实体索引
+    - L1 整合存储
+    - 向量索引
+    
+    此操作不可逆，请谨慎使用。
+    
+    示例:
+        DELETE /v1/memories/all?confirm=true&admin_key=your-admin-key
+    """
+    import os
+    expected_key = os.environ.get('ADMIN_KEY', 'recall-admin-2024')
+    
+    if not confirm:
+        raise HTTPException(
+            status_code=400, 
+            detail="请添加 confirm=true 参数确认删除操作"
+        )
+    
+    if admin_key != expected_key:
+        raise HTTPException(
+            status_code=403,
+            detail="管理员密钥错误"
+        )
+    
+    engine = get_engine()
+    success = engine.clear_all()
+    
+    if success:
+        return {
+            "success": True, 
+            "message": "已清空系统中的全部数据"
+        }
+    else:
+        raise HTTPException(status_code=500, detail="清空失败")
+
+
 @app.put("/v1/memories/{memory_id}", tags=["Memories"])
 async def update_memory(
     memory_id: str,
