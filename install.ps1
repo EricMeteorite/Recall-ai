@@ -25,6 +25,12 @@ param(
     [switch]$Help
 )
 
+# 设置控制台编码为 UTF-8，解决中文乱码问题
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+[Console]::InputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+chcp 65001 | Out-Null
+
 $ErrorActionPreference = "Stop"
 $Host.UI.RawUI.WindowTitle = "Recall AI 安装程序"
 

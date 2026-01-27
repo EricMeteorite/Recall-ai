@@ -265,6 +265,9 @@ class RecallEngine:
         if self._vector_index and self._vector_index.enabled:
             embedding_backend_for_trackers = self._vector_index.embedding_backend
         
+        # 保存 embedding_backend 到实例属性（供检索器等使用）
+        self.embedding_backend = embedding_backend_for_trackers
+        
         # 伏笔追踪器（支持语义去重）
         # 使用新的 {user_id}/{character_id}/ 存储结构
         self.foreshadowing_tracker = ForeshadowingTracker(
@@ -333,7 +336,7 @@ class RecallEngine:
             llm_client=self.llm_client,
             content_store=self._get_memory_content_by_id,
             # Phase 3.6: 传入 embedding_backend（用于 VectorIndexIVF）
-            embedding_backend=self.embedding_backend if hasattr(self, 'embedding_backend') else None,
+            embedding_backend=self.embedding_backend,
         )
         
         # Phase 3.6: 注入并行召回配置
@@ -654,7 +657,7 @@ class RecallEngine:
             
             self.deduplicator = ThreeStageDeduplicator(
                 config=config,
-                embedding_backend=self.embedding_backend if hasattr(self, 'embedding_backend') else None,
+                embedding_backend=self.embedding_backend,
                 llm_client=self.llm_client if llm_enabled else None,
                 budget_manager=self.budget_manager
             )
@@ -705,7 +708,7 @@ class RecallEngine:
                 knowledge_graph=self.temporal_graph,
                 cross_encoder=cross_encoder,
                 # Phase 3.6: 传入 embedding_backend（用于 VectorIndexIVF）
-                embedding_backend=self.embedding_backend if hasattr(self, 'embedding_backend') else None,
+                embedding_backend=self.embedding_backend,
                 # 配置
                 config=config
             )
@@ -1305,10 +1308,32 @@ class RecallEngine:
             try:
                 if self._entity_index:
                     for entity in entities:
+                        # 获取实体类型，兼容不同的实体对象格式
+                        entity_type = getattr(entity, 'entity_type', None)
+                        if entity_type is None and hasattr(entity, 'get'):
+                            entity_type = entity.get('entity_type', 'UNKNOWN')
+                        if entity_type is None:
+                            entity_type = 'UNKNOWN'
+                        
+                        # 获取别名（如果有）
+                        aliases = getattr(entity, 'aliases', None)
+                        if aliases is None and hasattr(entity, 'get'):
+                            aliases = entity.get('aliases', [])
+                        
+                        # 获取置信度
+                        confidence = getattr(entity, 'confidence', None)
+                        if confidence is None and hasattr(entity, 'get'):
+                            confidence = entity.get('confidence', 0.5)
+                        if confidence is None:
+                            confidence = 0.5
+                        
                         self._entity_index.add_entity_occurrence(
                             entity_name=entity.name,
                             turn_id=memory_id,
-                            context=content[:200]
+                            context=content[:200],
+                            entity_type=entity_type,
+                            aliases=aliases,
+                            confidence=confidence
                         )
                 
                 if self._inverted_index:
@@ -1343,10 +1368,31 @@ class RecallEngine:
             # 每个实体都会被自动整合和验证
             try:
                 for entity in entities:
+                    # 获取实体属性，兼容不同格式
+                    entity_type = getattr(entity, 'entity_type', None)
+                    if entity_type is None and hasattr(entity, 'get'):
+                        entity_type = entity.get('entity_type', 'UNKNOWN')
+                    if entity_type is None:
+                        entity_type = 'UNKNOWN'
+                    
+                    confidence = getattr(entity, 'confidence', None)
+                    if confidence is None and hasattr(entity, 'get'):
+                        confidence = entity.get('confidence', 0.5)
+                    if confidence is None:
+                        confidence = 0.5
+                    
+                    aliases = getattr(entity, 'aliases', None)
+                    if aliases is None and hasattr(entity, 'get'):
+                        aliases = entity.get('aliases', [])
+                    if aliases is None:
+                        aliases = []
+                    
                     consolidated_entity = ConsolidatedEntity(
                         id=f"entity_{entity.name.lower().replace(' ', '_')}",
                         name=entity.name,
-                        entity_type=entity.entity_type if hasattr(entity, 'entity_type') else "UNKNOWN",
+                        aliases=aliases,
+                        entity_type=entity_type,
+                        confidence=confidence,
                         source_turns=[memory_id],
                         source_memory_ids=[memory_id],  # 记录来源记忆ID，用于级联删除
                         last_verified=time.strftime('%Y-%m-%dT%H:%M:%S')
@@ -2725,10 +2771,24 @@ class RecallEngine:
                 }
         return None
     
-    def get_related_entities(self, name: str) -> List[str]:
-        """获取相关实体"""
+    def get_related_entities(self, name: str) -> List[Dict[str, str]]:
+        """获取相关实体
+        
+        Args:
+            name: 实体名称
+            
+        Returns:
+            [{"name": "目标实体", "relation_type": "关系类型"}, ...]
+        """
         neighbors = self.knowledge_graph.get_neighbors(name)
-        return [neighbor_id for neighbor_id, _ in neighbors]
+        result = []
+        for neighbor_id, relation in neighbors:
+            result.append({
+                "name": neighbor_id,
+                "relation_type": relation.relation_type,
+                "confidence": relation.confidence
+            })
+        return result
     
     # ==================== 管理 API ====================
     

@@ -14,6 +14,7 @@ class IndexedEntity:
     aliases: List[str]
     entity_type: str
     turn_references: List[str]  # 出现过的记忆ID (如 mem_xxx)
+    confidence: float = 0.5  # 置信度 (0-1)
 
 
 class EntityIndex:
@@ -55,6 +56,9 @@ class EntityIndex:
             existing = self.entities[entity.id]
             existing.turn_references = list(set(existing.turn_references + entity.turn_references))
             existing.aliases = list(set(existing.aliases + entity.aliases))
+            # 如果已有实体类型是 UNKNOWN 且新实体类型有效，则更新类型
+            if existing.entity_type == "UNKNOWN" and entity.entity_type != "UNKNOWN":
+                existing.entity_type = entity.entity_type
         else:
             self.entities[entity.id] = entity
         
@@ -103,13 +107,18 @@ class EntityIndex:
         )
         return sorted_entities[:limit]
     
-    def add_entity_occurrence(self, entity_name: str, turn_id: str, context: str = "") -> None:
+    def add_entity_occurrence(self, entity_name: str, turn_id: str, context: str = "", 
+                              entity_type: str = "UNKNOWN", aliases: List[str] = None,
+                              confidence: float = 0.5) -> None:
         """添加实体出现记录
         
         Args:
             entity_name: 实体名称
             turn_id: 轮次/记忆ID
             context: 上下文文本
+            entity_type: 实体类型 (PERSON, LOCATION, ITEM, ORG, CODE_SYMBOL 等)
+            aliases: 实体别名列表
+            confidence: 置信度 (0-1)
         """
         # 查找或创建实体
         existing = self.get_by_name(entity_name)
@@ -118,6 +127,18 @@ class EntityIndex:
             # 更新已有实体
             if turn_id not in existing.turn_references:
                 existing.turn_references.append(turn_id)
+            # 如果已有实体类型是 UNKNOWN 且新传入的类型有效，则更新类型
+            if existing.entity_type == "UNKNOWN" and entity_type != "UNKNOWN":
+                existing.entity_type = entity_type
+            # 合并别名
+            if aliases:
+                existing.aliases = list(set(existing.aliases + aliases))
+                # 同时更新别名索引
+                for alias in aliases:
+                    self.name_index[alias.lower()] = existing.id
+            # 更新置信度（取较高值）
+            if confidence > existing.confidence:
+                existing.confidence = confidence
             self._save()
         else:
             # 创建新实体
@@ -125,9 +146,10 @@ class EntityIndex:
             entity = IndexedEntity(
                 id=f"ent_{uuid.uuid4().hex[:8]}",
                 name=entity_name,
-                aliases=[],
-                entity_type="UNKNOWN",
-                turn_references=[turn_id]
+                aliases=aliases or [],
+                entity_type=entity_type,
+                turn_references=[turn_id],
+                confidence=confidence
             )
             self.add(entity)
     

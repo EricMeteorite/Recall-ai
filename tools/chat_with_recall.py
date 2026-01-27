@@ -430,28 +430,39 @@ class RecallChatApp:
             
             print(f"\n{Colors.CYAN}实体关系图谱:{Colors.RESET}")
             shown_relations = 0
+            shown_entities = 0
             
-            for e in entities[:10]:
+            for e in entities[:15]:  # 显示前15个实体
                 name = e.get("name", "")
                 if not name:
                     continue
                 
                 try:
-                    related = self.recall.get_related_entities(name)
-                    relations = related.get("related", [])
+                    result = self.recall.get_related_entities(name)
+                    # API 返回 {"entity": "xxx", "related": [...]}
+                    relations = result.get("related", []) if isinstance(result, dict) else result
+                    
+                    print(f"\n  {Colors.MAGENTA}{name}{Colors.RESET}:")
+                    shown_entities += 1
                     
                     if relations:
-                        print(f"\n  {Colors.MAGENTA}{name}{Colors.RESET}:")
                         for r in relations[:5]:
-                            target = r.get("name", r.get("target", "?"))
-                            rtype = r.get("relation_type", r.get("type", "RELATED"))
+                            if isinstance(r, dict):
+                                target = r.get("name", r.get("target", "?"))
+                                rtype = r.get("relation_type", r.get("type", "RELATED"))
+                            else:
+                                target = str(r)
+                                rtype = "RELATED"
                             print(f"    └─[{rtype}]─→ {Colors.CYAN}{target}{Colors.RESET}")
                             shown_relations += 1
-                except Exception:
-                    pass
+                        if len(relations) > 5:
+                            print(f"    ... 还有 {len(relations) - 5} 个关系")
+                    else:
+                        print(f"    {Colors.DIM}(暂无关系){Colors.RESET}")
+                except Exception as ex:
+                    print(f"    {Colors.DIM}(获取关系失败: {ex}){Colors.RESET}")
             
-            if shown_relations == 0:
-                print(f"  {Colors.YELLOW}暂无关系{Colors.RESET}")
+            print(f"\n  {Colors.DIM}共显示 {shown_entities} 个实体, {shown_relations} 条关系{Colors.RESET}")
         except Exception as e:
             self.logger.error(f"获取关系失败: {e}")
     

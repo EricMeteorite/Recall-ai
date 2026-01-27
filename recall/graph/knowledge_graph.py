@@ -96,8 +96,19 @@ class KnowledgeGraph:
         self.relation_index[rel.relation_type].append(rel)
     
     def add_relation(self, source_id: str, target_id: str, relation_type: str,
-                     properties: Dict = None, turn: int = 0, source_text: str = "") -> Relation:
-        """添加关系"""
+                     properties: Dict = None, turn: int = 0, source_text: str = "",
+                     confidence: float = 0.5) -> Relation:
+        """添加关系
+        
+        Args:
+            source_id: 源实体ID
+            target_id: 目标实体ID
+            relation_type: 关系类型
+            properties: 关系属性
+            turn: 创建轮次
+            source_text: 原文依据
+            confidence: 置信度 (0-1)
+        """
         # 检查是否已存在
         for rel in self.outgoing[source_id]:
             if rel.target_id == target_id and rel.relation_type == relation_type:
@@ -112,7 +123,7 @@ class KnowledgeGraph:
             relation_type=relation_type,
             properties=properties or {},
             created_turn=turn,
-            confidence=0.5,
+            confidence=confidence,
             source_text=source_text
         )
         self._index_relation(rel)
