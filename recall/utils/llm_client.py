@@ -238,7 +238,7 @@ class LLMClient:
         try:
             import json
             return json.loads(response)
-        except:
+        except Exception:
             return []
     
     def summarize(self, text: str, max_length: int = 100) -> str:
@@ -271,5 +271,5 @@ class LLMClient:
         try:
             scores = [float(s.strip()) for s in response.split(',')]
             return scores[:len(documents)]
-        except:
+        except Exception:
             return [0.5] * len(documents)

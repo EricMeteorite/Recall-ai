@@ -46,7 +46,7 @@ class RelationExtractor:
                 try:
                     source, rel_type, target = extractor(match)
                     relations.append((source.strip(), rel_type, target.strip(), match.group(0)))
-                except:
+                except Exception:
                     continue
         
         # 2. 基于共现（同一句话中出现的实体可能有关系）

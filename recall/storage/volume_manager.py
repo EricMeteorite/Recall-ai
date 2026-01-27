@@ -28,7 +28,7 @@ class VolumeManager:
     
     def _init_storage(self):
         """初始化存储目录"""
-        os.makedirs(f"{self.data_path}/L3_archive", exist_ok=True)
+        os.makedirs(os.path.join(self.data_path, "L3_archive"), exist_ok=True)
         self.manifest = self._load_or_create_manifest()
     
     def get_turn(self, turn_number: int) -> Optional[dict]:
@@ -45,7 +45,7 @@ class VolumeManager:
     
     def _load_volume(self, volume_id: int):
         """加载指定卷到内存"""
-        volume_path = f"{self.data_path}/L3_archive/volume_{volume_id:04d}"
+        volume_path = os.path.join(self.data_path, "L3_archive", f"volume_{volume_id:04d}")
         
         if not os.path.exists(volume_path):
             # 卷不存在，创建空卷（需要传递 base_path 才能持久化！）
@@ -57,7 +57,7 @@ class VolumeManager:
             return
         
         # 加载卷索引
-        index_path = f"{volume_path}/volume_index.json"
+        index_path = os.path.join(volume_path, "volume_index.json")
         if os.path.exists(index_path):
             with open(index_path, 'r', encoding='utf-8') as f:
                 volume_index = json.load(f)
@@ -115,7 +115,7 @@ class VolumeManager:
     
     def _load_or_create_manifest(self) -> dict:
         """加载或创建全局manifest"""
-        manifest_path = f"{self.data_path}/manifest.json"
+        manifest_path = os.path.join(self.data_path, "manifest.json")
         if os.path.exists(manifest_path):
             with open(manifest_path, 'r', encoding='utf-8') as f:
                 return json.load(f)
@@ -127,7 +127,7 @@ class VolumeManager:
     
     def _save_manifest(self):
         """保存manifest"""
-        manifest_path = f"{self.data_path}/manifest.json"
+        manifest_path = os.path.join(self.data_path, "manifest.json")
         with open(manifest_path, 'w', encoding='utf-8') as f:
             json.dump(self.manifest, f, ensure_ascii=False, indent=2)
     
@@ -155,7 +155,7 @@ class VolumeManager:
                     return turn_data
         
         # 2. 搜索未加载的磁盘卷（兜底 - 确保100%不遗忘）
-        archive_path = f"{self.data_path}/L3_archive"
+        archive_path = os.path.join(self.data_path, "L3_archive")
         if os.path.exists(archive_path):
             for volume_dir in os.listdir(archive_path):
                 if not volume_dir.startswith('volume_'):
@@ -167,10 +167,10 @@ class VolumeManager:
                     continue
                 
                 # 扫描磁盘文件
-                volume_path = f"{archive_path}/{volume_dir}"
+                volume_path = os.path.join(archive_path, volume_dir)
                 for file_name in os.listdir(volume_path):
                     if file_name.endswith('.jsonl'):
-                        file_path = f"{volume_path}/{file_name}"
+                        file_path = os.path.join(volume_path, file_name)
                         with open(file_path, 'r', encoding='utf-8') as f:
                             for line in f:
                                 try:
@@ -211,7 +211,7 @@ class VolumeManager:
                         return results
         
         # 2. 搜索未加载的磁盘卷（兜底 - 确保100%不遗忘）
-        archive_path = f"{self.data_path}/L3_archive"
+        archive_path = os.path.join(self.data_path, "L3_archive")
         if os.path.exists(archive_path):
             for volume_dir in os.listdir(archive_path):
                 if not volume_dir.startswith('volume_'):
@@ -223,10 +223,10 @@ class VolumeManager:
                     continue
                 
                 # 扫描磁盘文件
-                volume_path = f"{archive_path}/{volume_dir}"
+                volume_path = os.path.join(archive_path, volume_dir)
                 for file_name in os.listdir(volume_path):
                     if file_name.endswith('.jsonl'):
-                        file_path = f"{volume_path}/{file_name}"
+                        file_path = os.path.join(volume_path, file_name)
                         try:
                             with open(file_path, 'r', encoding='utf-8') as f:
                                 for line in f:
@@ -289,7 +289,7 @@ class VolumeData:
         
         if self.lazy_load and self.base_path:
             # 从文件读取
-            file_path = f"{self.base_path}/turns_{file_id*self.TURNS_PER_FILE+1:05d}_{(file_id+1)*self.TURNS_PER_FILE:05d}.jsonl"
+            file_path = os.path.join(self.base_path, f"turns_{file_id*self.TURNS_PER_FILE+1:05d}_{(file_id+1)*self.TURNS_PER_FILE:05d}.jsonl")
             if os.path.exists(file_path):
                 with open(file_path, 'r', encoding='utf-8') as f:
                     lines = f.readlines()
@@ -329,14 +329,14 @@ class VolumeData:
         for file_id, turns in unpersisted.items():
             if not turns:
                 continue
-            file_path = f"{self.base_path}/turns_{file_id*self.TURNS_PER_FILE+1:05d}_{(file_id+1)*self.TURNS_PER_FILE:05d}.jsonl"
+            file_path = os.path.join(self.base_path, f"turns_{file_id*self.TURNS_PER_FILE+1:05d}_{(file_id+1)*self.TURNS_PER_FILE:05d}.jsonl")
             with open(file_path, 'a', encoding='utf-8') as f:
                 for turn_num, turn_data in turns:
                     f.write(json.dumps(turn_data, ensure_ascii=False) + '\n')
                     self._persisted_turns.add(turn_num)  # 标记为已持久化
         
         # 保存卷索引
-        index_path = f"{self.base_path}/volume_index.json"
+        index_path = os.path.join(self.base_path, "volume_index.json")
         with open(index_path, 'w', encoding='utf-8') as f:
             json.dump(self.index, f, ensure_ascii=False, indent=2)
     
@@ -350,7 +350,7 @@ class VolumeData:
         
         for file_name in os.listdir(self.base_path):
             if file_name.endswith('.jsonl'):
-                file_path = f"{self.base_path}/{file_name}"
+                file_path = os.path.join(self.base_path, file_name)
                 with open(file_path, 'r', encoding='utf-8') as f:
                     for line in f:
                         turn = json.loads(line)

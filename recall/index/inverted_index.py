@@ -69,3 +69,37 @@ class InvertedIndex:
         for kw in keywords:
             result.update(self.index.get(kw.lower(), set()))
         return list(result)
+    
+    def clear(self):
+        """清空倒排索引"""
+        self.index.clear()
+        self._dirty_count = 0
+        self._save()
+    
+    def remove_by_memory_ids(self, memory_ids: Set[str]) -> int:
+        """根据 memory_id 删除索引项
+        
+        Args:
+            memory_ids: 要删除的 memory_id 集合
+        
+        Returns:
+            int: 清理的索引项数量
+        """
+        removed_count = 0
+        empty_keywords = []
+        
+        for keyword, turn_ids in self.index.items():
+            before_size = len(turn_ids)
+            turn_ids -= memory_ids  # Set 差集
+            removed_count += before_size - len(turn_ids)
+            if len(turn_ids) == 0:
+                empty_keywords.append(keyword)
+        
+        # 删除空的关键词条目
+        for kw in empty_keywords:
+            del self.index[kw]
+        
+        if removed_count > 0:
+            self._save()
+        
+        return removed_count

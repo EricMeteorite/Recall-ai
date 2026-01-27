@@ -744,6 +744,72 @@ class ForeshadowingTracker:
         logger.info(f"[ForeshadowingTracker] 已清空归档伏笔: {count} 个")
         return count
 
+    def clear_user(
+        self,
+        user_id: str = "default",
+        character_id: str = "default"
+    ) -> bool:
+        """清空指定用户的所有伏笔数据
+        
+        Args:
+            user_id: 用户ID
+            character_id: 角色ID（如果为空则清空该用户所有角色）
+            
+        Returns:
+            bool: 是否成功
+        """
+        import logging
+        import shutil
+        logger = logging.getLogger(__name__)
+        
+        try:
+            # 清空内存中的数据
+            cache_key = f"{user_id}/{character_id}"
+            if cache_key in self._user_data:
+                del self._user_data[cache_key]
+            
+            # 清空磁盘数据
+            if self.base_path:
+                safe_user_id = self._sanitize_path_component(user_id)
+                safe_char_id = self._sanitize_path_component(character_id)
+                user_path = os.path.join(self.base_path, safe_user_id, safe_char_id)
+                
+                if os.path.exists(user_path):
+                    shutil.rmtree(user_path)
+                    logger.info(f"[ForeshadowingTracker] 已清空用户数据: {user_id}/{character_id}")
+            
+            return True
+        except Exception as e:
+            logger.error(f"[ForeshadowingTracker] 清空用户数据失败: {e}")
+            return False
+    
+    def clear(self) -> bool:
+        """清空所有伏笔数据（全局）
+        
+        Returns:
+            bool: 是否成功
+        """
+        import logging
+        import shutil
+        logger = logging.getLogger(__name__)
+        
+        try:
+            # 清空内存中的所有数据
+            self._user_data.clear()
+            
+            # 清空磁盘上的所有数据
+            if self.base_path and os.path.exists(self.base_path):
+                for item in os.listdir(self.base_path):
+                    item_path = os.path.join(self.base_path, item)
+                    if os.path.isdir(item_path):
+                        shutil.rmtree(item_path)
+                logger.info("[ForeshadowingTracker] 已清空所有伏笔数据")
+            
+            return True
+        except Exception as e:
+            logger.error(f"[ForeshadowingTracker] 清空所有数据失败: {e}")
+            return False
+
     def archive_foreshadowing(
         self,
         foreshadowing_id: str,

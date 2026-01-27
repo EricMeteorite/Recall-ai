@@ -1348,6 +1348,7 @@ class RecallEngine:
                         name=entity.name,
                         entity_type=entity.entity_type if hasattr(entity, 'entity_type') else "UNKNOWN",
                         source_turns=[memory_id],
+                        source_memory_ids=[memory_id],  # 记录来源记忆ID，用于级联删除
                         last_verified=time.strftime('%Y-%m-%dT%H:%M:%S')
                     )
                     self.consolidated_memory.add_or_update(consolidated_entity)
@@ -1599,8 +1600,13 @@ class RecallEngine:
     ) -> bool:
         """清空用户的所有记忆（级联删除该用户关联的数据）
         
-        这是用户级别的清空操作，只会删除指定用户的数据，
-        不会影响其他用户的数据或全局共享索引。
+        这是用户级别的清空操作，只会删除指定用户的数据。
+        会级联清理：
+        - 用户的记忆存储
+        - 用户在时态知识图谱中的节点、边、episodes
+        - 实体索引中与该用户记忆关联的实体引用
+        - 向量索引中对应记忆的向量
+        - L1 整合存储中与该用户记忆关联的实体
         
         Args:
             user_id: 用户ID
@@ -1609,19 +1615,72 @@ class RecallEngine:
             bool: 是否成功
         """
         try:
-            # 1. 清空该用户的记忆存储
+            # 1. 先获取该用户的所有记忆 ID（用于后续清理索引）
             scope = self.storage.get_scope(user_id)
+            all_memories = scope.get_all()
+            memory_ids = [m.get('metadata', {}).get('id', '') for m in all_memories if m.get('metadata', {}).get('id')]
+            
+            # 2. 清空该用户的记忆存储
             scope.clear()
             
-            # 2. 清空该用户在时态知识图谱中的数据
+            # 3. 清空该用户在时态知识图谱中的数据
             if self.temporal_graph is not None and hasattr(self.temporal_graph, 'clear_user'):
                 self.temporal_graph.clear_user(user_id)
             
-            # 注意：以下全局索引不按用户隔离，不在这里清空
-            # - knowledge_graph: 旧版知识图谱，多用户共享
-            # - _entity_index: 实体索引，多用户共享
-            # - consolidated_memory: L1 整合存储，多用户共享
-            # - _vector_index: 向量索引，多用户共享
+            # 4. 清理实体索引中与该用户记忆关联的引用
+            if memory_ids and self._entity_index is not None:
+                if hasattr(self._entity_index, 'remove_by_turn_references'):
+                    deleted_entities = self._entity_index.remove_by_turn_references(memory_ids)
+                    if deleted_entities > 0:
+                        _safe_print(f"[Recall] 清理了 {deleted_entities} 个无引用实体")
+            
+            # 5. 清理向量索引中的对应向量
+            if memory_ids and self._vector_index is not None:
+                if hasattr(self._vector_index, 'remove_by_doc_ids'):
+                    removed_vectors = self._vector_index.remove_by_doc_ids(memory_ids)
+                    if removed_vectors > 0:
+                        _safe_print(f"[Recall] 清理了 {removed_vectors} 个向量")
+            
+            # 6. 清理 L1 整合存储中与该用户记忆关联的实体
+            if memory_ids and self.consolidated_memory is not None:
+                if hasattr(self.consolidated_memory, 'remove_by_memory_ids'):
+                    deleted_consolidated = self.consolidated_memory.remove_by_memory_ids(memory_ids)
+                    if deleted_consolidated > 0:
+                        _safe_print(f"[Recall] 清理了 {deleted_consolidated} 个整合实体")
+            
+            # 7. 清理倒排索引中的对应条目
+            if memory_ids and self._inverted_index is not None:
+                if hasattr(self._inverted_index, 'remove_by_memory_ids'):
+                    removed_inverted = self._inverted_index.remove_by_memory_ids(set(memory_ids))
+                    if removed_inverted > 0:
+                        _safe_print(f"[Recall] 清理了 {removed_inverted} 个倒排索引条目")
+            
+            # 8. 清理 n-gram 索引中的对应条目
+            if memory_ids and self._ngram_index is not None:
+                if hasattr(self._ngram_index, 'remove_by_memory_ids'):
+                    removed_ngram = self._ngram_index.remove_by_memory_ids(set(memory_ids))
+                    if removed_ngram > 0:
+                        _safe_print(f"[Recall] 清理了 {removed_ngram} 个 n-gram 原文")
+            
+            # 9. 清理全文索引中的对应文档
+            if memory_ids and self.fulltext_index is not None:
+                if hasattr(self.fulltext_index, 'remove_by_doc_ids'):
+                    removed_fulltext = self.fulltext_index.remove_by_doc_ids(set(memory_ids))
+                    if removed_fulltext > 0:
+                        _safe_print(f"[Recall] 清理了 {removed_fulltext} 个全文索引文档")
+            
+            # 10. 清理伏笔追踪器中的用户数据
+            if self.foreshadowing_tracker is not None:
+                if hasattr(self.foreshadowing_tracker, 'clear_user'):
+                    self.foreshadowing_tracker.clear_user(user_id)
+            
+            # 11. 清理上下文系统中的用户数据
+            if self.context_tracker is not None:
+                if hasattr(self.context_tracker, 'clear_user'):
+                    self.context_tracker.clear_user(user_id)
+            
+            # 注意：以下全局索引不支持按用户精确清理
+            # - knowledge_graph: 旧版知识图谱，结构不支持用户隔离
             # 
             # 如需完全清空所有数据，请使用 clear_all() 方法
             
@@ -1676,6 +1735,18 @@ class RecallEngine:
             # 8. 清空 n-gram 索引
             if self._ngram_index is not None and hasattr(self._ngram_index, 'clear'):
                 self._ngram_index.clear()
+            
+            # 9. 清空全文索引
+            if self.fulltext_index is not None and hasattr(self.fulltext_index, 'clear'):
+                self.fulltext_index.clear()
+            
+            # 10. 清空伏笔追踪器
+            if self.foreshadowing_tracker is not None and hasattr(self.foreshadowing_tracker, 'clear'):
+                self.foreshadowing_tracker.clear()
+            
+            # 11. 清空上下文系统
+            if self.context_tracker is not None and hasattr(self.context_tracker, 'clear'):
+                self.context_tracker.clear()
             
             _safe_print("[Recall] ✅ 已清空所有数据")
             return True
@@ -2778,7 +2849,7 @@ class RecallEngine:
         # 性能统计
         try:
             stats['performance'] = self.monitor.get_all_stats() if hasattr(self.monitor, 'get_all_stats') else {}
-        except:
+        except Exception:
             stats['performance'] = {}
         
         return stats

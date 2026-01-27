@@ -121,7 +121,7 @@ class EnvironmentManager:
         
         if not config_path.exists():
             default_config = {
-                'version': '3.0.0',
+                'version': '4.0.0',
                 'data_root': str(self.data_root),
                 'llm': {
                     'model': 'gpt-4o-mini',
@@ -163,7 +163,7 @@ class EnvironmentManager:
             import pkg_resources
             for pkg in pkg_resources.working_set:
                 packages[pkg.key] = pkg.version
-        except:
+        except Exception:
             pass
         return packages
     
@@ -233,7 +233,7 @@ class EnvironmentManager:
                 if item.stat().st_mtime < cutoff:
                     try:
                         item.unlink()
-                    except:
+                    except Exception:
                         pass
     
     def get_disk_usage(self) -> Dict[str, int]:

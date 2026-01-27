@@ -1998,9 +1998,10 @@ async function saveCoreSettings() {
  */
 async function triggerForeshadowingAnalysis() {
     const userId = encodeURIComponent(currentCharacterId || 'default');
+    const characterId = encodeURIComponent(currentCharacterId || 'default');
     
     try {
-        const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing/analyze/trigger?user_id=${userId}`, {
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing/analyze/trigger?user_id=${userId}&character_id=${characterId}`, {
             method: 'POST'
         });
         

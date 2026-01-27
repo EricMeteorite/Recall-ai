@@ -22,7 +22,8 @@ class ConsolidatedEntity:
     # 验证信息
     confidence: float = 0.5           # 置信度 (0-1)
     verification_count: int = 0       # 被验证次数
-    source_turns: List[int] = field(default_factory=list)     # 原始来源
+    source_turns: List[int] = field(default_factory=list)     # 原始来源（轮次）
+    source_memory_ids: List[str] = field(default_factory=list)  # 来源记忆ID列表
     last_verified: str = ""           # ISO格式时间戳
     
     # 关系
@@ -76,6 +77,12 @@ class ConsolidatedMemory:
             existing.last_verified = datetime.now().isoformat()
             # 合并状态
             existing.current_state.update(entity.current_state)
+            # 合并来源记忆ID（确保不重复）
+            if not hasattr(existing, 'source_memory_ids'):
+                existing.source_memory_ids = []
+            for mid in getattr(entity, 'source_memory_ids', []):
+                if mid and mid not in existing.source_memory_ids:
+                    existing.source_memory_ids.append(mid)
         else:
             self.entities[entity.id] = entity
         self._save()
@@ -120,3 +127,54 @@ class ConsolidatedMemory:
             import shutil
             shutil.rmtree(self.storage_dir)
             os.makedirs(self.storage_dir, exist_ok=True)
+    
+    def remove_by_memory_ids(self, memory_ids: List[str]) -> int:
+        """移除与指定记忆ID关联的实体
+        
+        从每个实体的 source_memory_ids 中移除指定的记忆ID。
+        如果实体的 source_memory_ids 变为空，则删除该实体。
+        
+        Args:
+            memory_ids: 要移除的记忆ID列表
+        
+        Returns:
+            int: 被完全删除的实体数量
+        """
+        if not memory_ids:
+            return 0
+        
+        memory_id_set = set(memory_ids)
+        entities_to_delete = []
+        modified = False
+        
+        for entity_id, entity in self.entities.items():
+            # 检查是否有 source_memory_ids 属性（兼容旧数据）
+            if not hasattr(entity, 'source_memory_ids'):
+                entity.source_memory_ids = []
+            
+            if not entity.source_memory_ids:
+                # 旧数据没有 source_memory_ids，保留实体
+                continue
+            
+            # 过滤掉被删除的记忆引用
+            remaining_refs = [
+                ref for ref in entity.source_memory_ids 
+                if ref not in memory_id_set
+            ]
+            
+            if not remaining_refs:
+                # 没有剩余引用，标记删除
+                entities_to_delete.append(entity_id)
+            elif len(remaining_refs) != len(entity.source_memory_ids):
+                # 有部分引用被移除，更新
+                entity.source_memory_ids = remaining_refs
+                modified = True
+        
+        # 删除无引用的实体
+        for entity_id in entities_to_delete:
+            del self.entities[entity_id]
+        
+        if entities_to_delete or modified:
+            self._save()
+        
+        return len(entities_to_delete)

@@ -18,7 +18,7 @@ class MemoryScope:
     
     def to_path(self) -> str:
         """转换为存储路径"""
-        return f"{self.user_id}/{self.character_id}/{self.session_id}"
+        return os.path.join(self.user_id, self.character_id, self.session_id)
 
 
 class ScopedMemory:
@@ -38,7 +38,7 @@ class ScopedMemory:
             try:
                 with open(self._memory_file, 'r', encoding='utf-8') as f:
                     self._memories = json.load(f)
-            except:
+            except Exception:
                 self._memories = []
     
     def _save(self):

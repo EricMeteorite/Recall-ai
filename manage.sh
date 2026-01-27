@@ -958,30 +958,51 @@ do_clear_data() {
     local cache_dir="$data_path/cache"
     local logs_dir="$data_path/logs"
     local temp_dir="$data_path/temp"
+    local indexes_dir="$data_path/indexes"
+    local l1_dir="$data_path/L1_consolidated"
+    local kg_file="$data_path/knowledge_graph.json"
     
     local to_delete=()
     
     if [[ -d "$data_dir" ]]; then
         local size=$(du -sh "$data_dir" 2>/dev/null | cut -f1 || echo "0")
-        echo -e "    ${RED}[x] data/      - 所有用户记忆和知识图谱 ($size)${NC}"
+        echo -e "    ${RED}[x] data/           - 所有用户记忆 ($size)${NC}"
         to_delete+=("$data_dir")
+    fi
+    
+    if [[ -d "$indexes_dir" ]]; then
+        local size=$(du -sh "$indexes_dir" 2>/dev/null | cut -f1 || echo "0")
+        echo -e "    ${RED}[x] indexes/        - 实体和向量索引 ($size)${NC}"
+        to_delete+=("$indexes_dir")
+    fi
+    
+    if [[ -d "$l1_dir" ]]; then
+        local size=$(du -sh "$l1_dir" 2>/dev/null | cut -f1 || echo "0")
+        echo -e "    ${RED}[x] L1_consolidated/ - 长期记忆 ($size)${NC}"
+        to_delete+=("$l1_dir")
+    fi
+    
+    if [[ -f "$kg_file" ]]; then
+        local size=$(du -sh "$kg_file" 2>/dev/null | cut -f1 || echo "0")
+        echo -e "    ${RED}[x] knowledge_graph.json - 知识图谱 ($size)${NC}"
+        to_delete+=("$kg_file")
     fi
     
     if [[ -d "$cache_dir" ]]; then
         local size=$(du -sh "$cache_dir" 2>/dev/null | cut -f1 || echo "0")
-        echo -e "    ${RED}[x] cache/     - Embedding 缓存 ($size)${NC}"
+        echo -e "    ${RED}[x] cache/          - Embedding 缓存 ($size)${NC}"
         to_delete+=("$cache_dir")
     fi
     
     if [[ -d "$logs_dir" ]]; then
         local size=$(du -sh "$logs_dir" 2>/dev/null | cut -f1 || echo "0")
-        echo -e "    ${RED}[x] logs/      - 日志文件 ($size)${NC}"
+        echo -e "    ${RED}[x] logs/           - 日志文件 ($size)${NC}"
         to_delete+=("$logs_dir")
     fi
     
     if [[ -d "$temp_dir" ]]; then
         local size=$(du -sh "$temp_dir" 2>/dev/null | cut -f1 || echo "0")
-        echo -e "    ${RED}[x] temp/      - 临时文件 ($size)${NC}"
+        echo -e "    ${RED}[x] temp/           - 临时文件 ($size)${NC}"
         to_delete+=("$temp_dir")
     fi
     

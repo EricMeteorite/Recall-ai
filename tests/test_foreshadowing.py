@@ -11,7 +11,7 @@ def check_server_available():
     try:
         r = requests.get(f'{BASE_URL}/health', timeout=1)
         return r.status_code == 200
-    except:
+    except Exception:
         return False
 
 

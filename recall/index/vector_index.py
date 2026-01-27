@@ -173,6 +173,83 @@ class VectorIndex:
         with open(self.mapping_file, 'w') as f:
             json.dump(self.turn_mapping, f)
     
+    def clear(self):
+        """清空向量索引"""
+        if not self._enabled:
+            return
+        
+        import faiss
+        
+        # 重置索引
+        self._index = faiss.IndexFlatIP(self.dimension)
+        self.turn_mapping = []
+        self._save()
+    
+    def remove_by_doc_ids(self, doc_ids_to_remove: List[str]) -> int:
+        """移除指定文档ID的向量
+        
+        由于 FAISS IndexFlatIP 不支持直接删除，这里通过重建索引实现。
+        
+        Args:
+            doc_ids_to_remove: 要移除的文档ID列表
+        
+        Returns:
+            int: 移除的向量数量
+        """
+        if not self._enabled or self._index is None:
+            return 0
+        
+        if not doc_ids_to_remove:
+            return 0
+        
+        import faiss
+        
+        remove_set = set(doc_ids_to_remove)
+        removed_count = 0
+        
+        # 找出需要保留的索引
+        keep_indices = []
+        new_mapping = []
+        for idx, doc_id in enumerate(self.turn_mapping):
+            if doc_id in remove_set:
+                removed_count += 1
+            else:
+                keep_indices.append(idx)
+                new_mapping.append(doc_id)
+        
+        if removed_count == 0:
+            return 0
+        
+        # 如果全部被删除
+        if not keep_indices:
+            self._index = faiss.IndexFlatIP(self.dimension)
+            self.turn_mapping = []
+            self._save()
+            return removed_count
+        
+        # 重建索引（只保留需要的向量）
+        try:
+            # 从原索引重建所有需保留的向量
+            new_vectors = []
+            for idx in keep_indices:
+                vec = self._index.reconstruct(idx)
+                new_vectors.append(vec)
+            
+            # 创建新索引
+            new_index = faiss.IndexFlatIP(self.dimension)
+            if new_vectors:
+                vectors_array = np.array(new_vectors, dtype=np.float32)
+                new_index.add(vectors_array)
+            
+            self._index = new_index
+            self.turn_mapping = new_mapping
+            self._save()
+            
+            return removed_count
+        except Exception as e:
+            _safe_print(f"[VectorIndex] 重建索引失败: {e}")
+            return 0
+    
     def encode(self, text: str) -> np.ndarray:
         """文本转向量"""
         if not self._enabled:

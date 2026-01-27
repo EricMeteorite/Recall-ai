@@ -295,6 +295,21 @@ class FullTextIndex:
         self._dirty = True
         return True
     
+    def remove_by_doc_ids(self, doc_ids: Set[str]) -> int:
+        """批量移除文档
+        
+        Args:
+            doc_ids: 要移除的文档ID集合
+        
+        Returns:
+            int: 成功移除的文档数量
+        """
+        removed_count = 0
+        for doc_id in doc_ids:
+            if self.remove(doc_id):
+                removed_count += 1
+        return removed_count
+    
     def search(
         self,
         query: str,

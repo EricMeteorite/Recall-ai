@@ -282,7 +282,7 @@ def run_api_test():
                 params={"user_id": "api_test"},
                 timeout=5
             )
-        except:
+        except Exception:
             pass
     
     return errors

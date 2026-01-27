@@ -42,8 +42,8 @@ class OptimizedNgramIndex:
     def __init__(self, data_path: str = None):
         # 数据目录
         self.data_path = data_path
-        self._index_file = f"{data_path}/ngram_index.json" if data_path else None
-        self._raw_content_file = f"{data_path}/ngram_raw_content.jsonl" if data_path else None
+        self._index_file = os.path.join(data_path, "ngram_index.json") if data_path else None
+        self._raw_content_file = os.path.join(data_path, "ngram_raw_content.jsonl") if data_path else None
         
         # 主索引：名词短语 → [memory_ids]
         self.noun_phrases: Dict[str, List[str]] = {}
@@ -360,6 +360,64 @@ class OptimizedNgramIndex:
                     f.write(json.dumps({'id': memory_id, 'content': content}, ensure_ascii=False) + '\n')
             except Exception as e:
                 _safe_print(f"[NgramIndex] 追加原文失败: {e}")
+    
+    def clear(self):
+        """清空所有索引和原文内容"""
+        self.noun_phrases.clear()
+        self._raw_content.clear()
+        
+        # 重置布隆过滤器
+        if self._bloom_filter is not None:
+            if isinstance(self._bloom_filter, set):
+                self._bloom_filter.clear()
+            else:
+                self._bloom_filter = None
+        
+        # 删除磁盘文件
+        if self._index_file and os.path.exists(self._index_file):
+            try:
+                os.remove(self._index_file)
+            except Exception:
+                pass
+        
+        if self._raw_content_file and os.path.exists(self._raw_content_file):
+            try:
+                os.remove(self._raw_content_file)
+            except Exception:
+                pass
+    
+    def remove_by_memory_ids(self, memory_ids: Set[str]) -> int:
+        """根据 memory_id 删除索引项
+        
+        Args:
+            memory_ids: 要删除的 memory_id 集合
+        
+        Returns:
+            int: 清理的原文数量
+        """
+        removed_count = 0
+        
+        # 从原文存储中删除
+        for mid in memory_ids:
+            if mid in self._raw_content:
+                del self._raw_content[mid]
+                removed_count += 1
+        
+        # 从名词短语索引中删除
+        empty_phrases = []
+        for phrase, mids in self.noun_phrases.items():
+            self.noun_phrases[phrase] = [m for m in mids if m not in memory_ids]
+            if len(self.noun_phrases[phrase]) == 0:
+                empty_phrases.append(phrase)
+        
+        for phrase in empty_phrases:
+            del self.noun_phrases[phrase]
+        
+        # 保存更新
+        if removed_count > 0:
+            self.save()
+        
+        return removed_count
     
     def __len__(self) -> int:
         """返回索引的原文数量"""

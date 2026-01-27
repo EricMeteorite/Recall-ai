@@ -21,7 +21,7 @@ def is_server_running():
     try:
         r = requests.get(f'{BASE}/health', timeout=2)
         return r.status_code == 200
-    except:
+    except Exception:
         return False
 
 

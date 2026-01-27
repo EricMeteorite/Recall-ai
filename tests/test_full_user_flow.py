@@ -427,7 +427,7 @@ def check_server() -> bool:
     try:
         resp = requests.get(f"{BASE_URL}/health", timeout=5)
         return resp.status_code == 200
-    except:
+    except Exception:
         return False
 
 def print_server_info():

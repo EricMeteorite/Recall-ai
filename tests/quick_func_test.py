@@ -15,7 +15,7 @@ def main():
         if r.status_code != 200:
             print('[FAIL] 服务未运行')
             return
-    except:
+    except Exception:
         print('[FAIL] 服务未运行，请先启动服务')
         return
     

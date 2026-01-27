@@ -134,7 +134,7 @@ class RecallInit:
         config = {
             'api_key': api_key,
             'initialized': True,
-            'version': '3.0',
+            'version': '4.0',
             'data_path': os.path.join(root, 'data'),
         }
         self._save_config(config, root)

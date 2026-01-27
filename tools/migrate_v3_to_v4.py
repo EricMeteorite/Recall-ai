@@ -266,7 +266,7 @@ def analyze_v3_data(data_path: str) -> Dict[str, Any]:
         for f in files:
             try:
                 result['total_size'] += os.path.getsize(os.path.join(root, f))
-            except:
+            except Exception:
                 pass
     
     return result

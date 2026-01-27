@@ -37,6 +37,7 @@ import logging
 import argparse
 import urllib.request
 import urllib.error
+import urllib.parse
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 
@@ -199,7 +200,7 @@ class RecallAPIClient:
         try:
             result = self._request("GET", "/health")
             return result.get("status") == "healthy"
-        except:
+        except Exception:
             return False
     
     def add_memory(self, content: str, user_id: str, role: str = "user") -> Dict:
@@ -238,7 +239,11 @@ class RecallAPIClient:
     
     def get_memories(self, user_id: str, limit: int = 50) -> List[Dict]:
         """获取记忆列表"""
-        return self._request("GET", f"/v1/memories?user_id={user_id}&limit={limit}")
+        result = self._request("GET", f"/v1/memories?user_id={user_id}&limit={limit}")
+        # API 返回 {"memories": [...], "count": ..., "total": ...}
+        if isinstance(result, dict) and "memories" in result:
+            return result["memories"]
+        return result if isinstance(result, list) else []
     
     def get_stats(self) -> Dict:
         """获取统计信息"""
@@ -250,7 +255,13 @@ class RecallAPIClient:
     
     def get_foreshadowings(self, user_id: str) -> List[Dict]:
         """获取伏笔"""
-        return self._request("GET", f"/v1/foreshadowings?user_id={user_id}")
+        result = self._request("GET", f"/v1/foreshadowing?user_id={user_id}")
+        # API 可能返回列表或包装对象
+        if isinstance(result, list):
+            return result
+        elif isinstance(result, dict) and "foreshadowings" in result:
+            return result["foreshadowings"]
+        return []
 
 
 class LLMClient:
@@ -436,7 +447,7 @@ class RecallChatApp:
                             rtype = r.get("relation_type", r.get("type", "RELATED"))
                             print(f"    └─[{rtype}]─→ {Colors.CYAN}{target}{Colors.RESET}")
                             shown_relations += 1
-                except:
+                except Exception:
                     pass
             
             if shown_relations == 0:
@@ -625,7 +636,7 @@ class RecallChatApp:
                     ai_entities = ai_result.get("entities", [])
                     if self.debug and ai_entities:
                         print(f"  {Colors.DIM}├─ AI回复实体: {ai_entities}{Colors.RESET}")
-                except:
+                except Exception:
                     pass
                 
                 self.conversation_history.append({"role": "assistant", "content": ai_response})

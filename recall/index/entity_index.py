@@ -147,6 +147,54 @@ class EntityIndex:
         """通过名称获取实体（get_by_name 的别名）"""
         return self.get_by_name(name)
     
+    def remove_by_turn_references(self, turn_ids: List[str]) -> int:
+        """移除与指定记忆ID关联的实体引用
+        
+        遍历所有实体，从 turn_references 中移除指定的记忆ID。
+        如果实体的 turn_references 变为空，则删除该实体。
+        
+        Args:
+            turn_ids: 要移除的记忆ID列表
+        
+        Returns:
+            int: 被完全删除的实体数量
+        """
+        if not turn_ids:
+            return 0
+        
+        turn_id_set = set(turn_ids)
+        entities_to_delete = []
+        
+        for entity_id, entity in self.entities.items():
+            # 过滤掉被删除的记忆引用
+            remaining_refs = [
+                ref for ref in entity.turn_references 
+                if ref not in turn_id_set
+            ]
+            
+            if not remaining_refs:
+                # 没有剩余引用，标记删除
+                entities_to_delete.append(entity_id)
+            elif len(remaining_refs) != len(entity.turn_references):
+                # 有部分引用被移除，更新
+                entity.turn_references = remaining_refs
+        
+        # 删除无引用的实体
+        for entity_id in entities_to_delete:
+            entity = self.entities[entity_id]
+            # 清理名称索引
+            if entity.name.lower() in self.name_index:
+                del self.name_index[entity.name.lower()]
+            for alias in entity.aliases:
+                if alias.lower() in self.name_index:
+                    del self.name_index[alias.lower()]
+            del self.entities[entity_id]
+        
+        if entities_to_delete or turn_ids:
+            self._save()
+        
+        return len(entities_to_delete)
+    
     def clear(self):
         """清空所有实体索引"""
         self.entities.clear()

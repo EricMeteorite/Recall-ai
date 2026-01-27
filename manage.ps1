@@ -955,39 +955,72 @@ function Do-ClearData {
     Write-Host "  This will DELETE the following data:" -ForegroundColor Yellow
     Write-Host ""
     
-    # Check each directory
+    # Check each directory/file
     $dataDir = Join-Path $dataPath "data"
     $cacheDir = Join-Path $dataPath "cache"
     $logsDir = Join-Path $dataPath "logs"
     $tempDir = Join-Path $dataPath "temp"
+    $indexesDir = Join-Path $dataPath "indexes"
+    $l1Dir = Join-Path $dataPath "L1_consolidated"
+    $kgFile = Join-Path $dataPath "knowledge_graph.json"
+    $kgFileInData = Join-Path $dataPath "data" "knowledge_graph.json"
     
     $toDelete = @()
     
     if (Test-Path $dataDir) {
         $size = (Get-ChildItem $dataDir -Recurse -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
         $sizeStr = if ($size) { "{0:N2} MB" -f ($size / 1MB) } else { "0 MB" }
-        Write-Host "    [x] data/      - All user memories and knowledge graph ($sizeStr)" -ForegroundColor Red
+        Write-Host "    [x] data/           - All user memories ($sizeStr)" -ForegroundColor Red
         $toDelete += $dataDir
+    }
+    
+    if (Test-Path $indexesDir) {
+        $size = (Get-ChildItem $indexesDir -Recurse -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
+        $sizeStr = if ($size) { "{0:N2} MB" -f ($size / 1MB) } else { "0 MB" }
+        Write-Host "    [x] indexes/        - Entity and vector indexes ($sizeStr)" -ForegroundColor Red
+        $toDelete += $indexesDir
+    }
+    
+    if (Test-Path $l1Dir) {
+        $size = (Get-ChildItem $l1Dir -Recurse -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
+        $sizeStr = if ($size) { "{0:N2} MB" -f ($size / 1MB) } else { "0 MB" }
+        Write-Host "    [x] L1_consolidated/ - Long-term memory ($sizeStr)" -ForegroundColor Red
+        $toDelete += $l1Dir
+    }
+    
+    # Check knowledge_graph.json in both root and data/ directory
+    if (Test-Path $kgFile) {
+        $size = (Get-Item $kgFile -ErrorAction SilentlyContinue).Length
+        $sizeStr = if ($size) { "{0:N2} KB" -f ($size / 1KB) } else { "0 KB" }
+        Write-Host "    [x] knowledge_graph.json - Knowledge graph ($sizeStr)" -ForegroundColor Red
+        $toDelete += $kgFile
+    }
+    if ((Test-Path $kgFileInData) -and (-not ($toDelete -contains $dataDir))) {
+        # Only show if data/ won't be deleted (which would include this file)
+        $size = (Get-Item $kgFileInData -ErrorAction SilentlyContinue).Length
+        $sizeStr = if ($size) { "{0:N2} KB" -f ($size / 1KB) } else { "0 KB" }
+        Write-Host "    [x] data/knowledge_graph.json - Knowledge graph ($sizeStr)" -ForegroundColor Red
+        $toDelete += $kgFileInData
     }
     
     if (Test-Path $cacheDir) {
         $size = (Get-ChildItem $cacheDir -Recurse -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
         $sizeStr = if ($size) { "{0:N2} MB" -f ($size / 1MB) } else { "0 MB" }
-        Write-Host "    [x] cache/     - Embedding cache ($sizeStr)" -ForegroundColor Red
+        Write-Host "    [x] cache/          - Embedding cache ($sizeStr)" -ForegroundColor Red
         $toDelete += $cacheDir
     }
     
     if (Test-Path $logsDir) {
         $size = (Get-ChildItem $logsDir -Recurse -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
         $sizeStr = if ($size) { "{0:N2} MB" -f ($size / 1MB) } else { "0 MB" }
-        Write-Host "    [x] logs/      - Log files ($sizeStr)" -ForegroundColor Red
+        Write-Host "    [x] logs/           - Log files ($sizeStr)" -ForegroundColor Red
         $toDelete += $logsDir
     }
     
     if (Test-Path $tempDir) {
         $size = (Get-ChildItem $tempDir -Recurse -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
         $sizeStr = if ($size) { "{0:N2} MB" -f ($size / 1MB) } else { "0 MB" }
-        Write-Host "    [x] temp/      - Temporary files ($sizeStr)" -ForegroundColor Red
+        Write-Host "    [x] temp/           - Temporary files ($sizeStr)" -ForegroundColor Red
         $toDelete += $tempDir
     }
     

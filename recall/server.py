@@ -1146,7 +1146,7 @@ def reload_engine():
     if _engine is not None:
         try:
             _engine.close()
-        except:
+        except Exception:
             pass
         _engine = None
     
@@ -1471,16 +1471,27 @@ async def clear_all_memories(
     
     此操作不可逆，请谨慎使用。
     
+    安全说明：
+    - 必须设置环境变量 ADMIN_KEY（不能使用默认值）
+    - 必须提供 confirm=true 参数
+    
     示例:
         DELETE /v1/memories/all?confirm=true&admin_key=your-admin-key
     """
     import os
-    expected_key = os.environ.get('ADMIN_KEY', 'recall-admin-2024')
+    expected_key = os.environ.get('ADMIN_KEY', '')
     
     if not confirm:
         raise HTTPException(
             status_code=400, 
             detail="请添加 confirm=true 参数确认删除操作"
+        )
+    
+    # 安全检查：必须配置 ADMIN_KEY
+    if not expected_key:
+        raise HTTPException(
+            status_code=403,
+            detail="管理员密钥未配置。请设置环境变量 ADMIN_KEY 后重试"
         )
     
     if admin_key != expected_key:
@@ -3654,7 +3665,7 @@ async def test_connection():
             cfg = engine.embedding_config
             current_backend = cfg.backend.value if cfg and cfg.backend else 'unknown'
             current_model = (cfg.api_model or cfg.local_model) if cfg else None
-        except:
+        except Exception:
             current_backend = os.environ.get('RECALL_EMBEDDING_MODE', 'auto')
             current_model = None
         
