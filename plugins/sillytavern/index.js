@@ -202,6 +202,149 @@
     };
 
     /**
+     * 后台任务追踪器
+     * 用于在前端面板显示后台操作的进度
+     */
+    const taskTracker = {
+        tasks: new Map(),  // taskId -> {type, title, detail, status, startTime}
+        taskIdCounter: 0,
+        
+        /**
+         * 添加任务
+         * @param {string} type - 任务类型: 'memory_save', 'foreshadowing_analysis', 'sync', 'config_load'
+         * @param {string} title - 任务标题
+         * @param {string} detail - 详情（可选）
+         * @returns {number} taskId
+         */
+        add(type, title, detail = '') {
+            const taskId = ++this.taskIdCounter;
+            this.tasks.set(taskId, {
+                type,
+                title,
+                detail,
+                status: 'running',  // 'pending', 'running', 'success', 'error'
+                startTime: Date.now()
+            });
+            this._updateUI();
+            return taskId;
+        },
+        
+        /**
+         * 更新任务状态
+         */
+        update(taskId, updates) {
+            const task = this.tasks.get(taskId);
+            if (task) {
+                Object.assign(task, updates);
+                this._updateUI();
+            }
+        },
+        
+        /**
+         * 完成任务
+         */
+        complete(taskId, success = true, detail = '') {
+            const task = this.tasks.get(taskId);
+            if (task) {
+                task.status = success ? 'success' : 'error';
+                if (detail) task.detail = detail;
+                this._updateUI();
+                
+                // 成功的任务 2 秒后移除，失败的任务 5 秒后移除
+                setTimeout(() => {
+                    this.tasks.delete(taskId);
+                    this._updateUI();
+                }, success ? 2000 : 5000);
+            }
+        },
+        
+        /**
+         * 获取当前活跃任务数
+         */
+        getActiveCount() {
+            let count = 0;
+            for (const task of this.tasks.values()) {
+                if (task.status === 'pending' || task.status === 'running') {
+                    count++;
+                }
+            }
+            return count;
+        },
+        
+        /**
+         * 更新 UI
+         */
+        _updateUI() {
+            const indicator = document.getElementById('recall-tasks-indicator');
+            const countEl = document.getElementById('recall-tasks-count');
+            const listEl = document.getElementById('recall-tasks-list');
+            
+            if (!indicator) return;
+            
+            const activeCount = this.getActiveCount();
+            const totalCount = this.tasks.size;
+            
+            // 更新指示器
+            if (totalCount > 0) {
+                indicator.style.display = 'inline-flex';
+                if (countEl) countEl.textContent = activeCount > 0 ? activeCount : '✓';
+            } else {
+                indicator.style.display = 'none';
+            }
+            
+            // 更新任务列表
+            if (listEl) {
+                if (this.tasks.size === 0) {
+                    listEl.innerHTML = '<div class="recall-task-empty">暂无后台任务</div>';
+                } else {
+                    const taskHtml = [];
+                    for (const [id, task] of this.tasks) {
+                        const icon = this._getIcon(task.type, task.status);
+                        const statusText = this._getStatusText(task.status);
+                        const elapsed = Math.round((Date.now() - task.startTime) / 1000);
+                        
+                        taskHtml.push(`
+                            <div class="recall-task-item" data-task-id="${id}">
+                                <span class="recall-task-icon ${task.status === 'running' ? 'spinning' : ''}">${icon}</span>
+                                <div class="recall-task-content">
+                                    <div class="recall-task-title">${task.title}</div>
+                                    ${task.detail ? `<div class="recall-task-detail">${task.detail}</div>` : ''}
+                                </div>
+                                <span class="recall-task-status ${task.status}">${statusText}${task.status === 'running' ? ` ${elapsed}s` : ''}</span>
+                            </div>
+                        `);
+                    }
+                    listEl.innerHTML = taskHtml.join('');
+                }
+            }
+        },
+        
+        _getIcon(type, status) {
+            if (status === 'success') return '✓';
+            if (status === 'error') return '✗';
+            
+            switch (type) {
+                case 'memory-save': return '💾';
+                case 'foreshadow': return '🔮';
+                case 'sync': return '🔄';
+                case 'config': return '⚙️';
+                case 'load': return '📥';
+                default: return '📋';
+            }
+        },
+        
+        _getStatusText(status) {
+            switch (status) {
+                case 'pending': return '等待';
+                case 'running': return '处理中';
+                case 'success': return '完成';
+                case 'error': return '失败';
+                default: return status;
+            }
+        }
+    };
+
+    /**
      * 安全执行函数 - 捕获所有错误，不影响 ST
      */
     function safeExecute(fn, errorMsg = 'Recall 插件错误') {
@@ -329,6 +472,22 @@ function createUI() {
                     <span id="recall-connection-indicator" class="recall-indicator recall-indicator-disconnected"></span>
                     <span id="recall-connection-text">未连接</span>
                     <span id="recall-character-badge" class="recall-character-badge" style="display:none"></span>
+                    <!-- 后台任务指示器（点击展开详情） -->
+                    <span id="recall-tasks-indicator" class="recall-tasks-indicator" style="display:none" title="点击查看后台任务">
+                        <i class="fa-solid fa-spinner fa-spin"></i>
+                        <span id="recall-tasks-count">0</span>
+                    </span>
+                </div>
+                
+                <!-- 后台任务面板（默认隐藏） -->
+                <div id="recall-tasks-panel" class="recall-tasks-panel">
+                    <div class="recall-tasks-header">
+                        <span>📋 后台任务</span>
+                        <button id="recall-tasks-close" class="recall-icon-btn" title="关闭">✕</button>
+                    </div>
+                    <div id="recall-tasks-list" class="recall-tasks-list">
+                        <div class="recall-task-empty">暂无后台任务</div>
+                    </div>
                 </div>
                 
                 <!-- 标签页导航 -->
@@ -1123,6 +1282,20 @@ function createUI() {
     document.getElementById('recall-refresh-btn')?.addEventListener('click', safeExecute(loadMemories, '刷新失败'));
     document.getElementById('recall-load-more-btn')?.addEventListener('click', safeExecute(onLoadMoreMemories, '加载更多失败'));
     
+    // 后台任务面板事件
+    document.getElementById('recall-tasks-indicator')?.addEventListener('click', () => {
+        const panel = document.getElementById('recall-tasks-panel');
+        if (panel) {
+            panel.classList.toggle('visible');
+        }
+    });
+    document.getElementById('recall-tasks-close')?.addEventListener('click', () => {
+        const panel = document.getElementById('recall-tasks-panel');
+        if (panel) {
+            panel.classList.remove('visible');
+        }
+    });
+    
     // 子标签页切换
     document.querySelectorAll('.recall-sub-tab').forEach(tab => {
         tab.addEventListener('click', () => {
@@ -1246,6 +1419,7 @@ function createUI() {
  * 加载 API 配置
  */
 async function loadApiConfig() {
+    const taskId = taskTracker.add('config', '加载 API 配置');
     try {
         const response = await fetch(`${pluginSettings.apiUrl}/v1/config/full`);
         const config = await response.json();
@@ -1294,8 +1468,10 @@ async function loadApiConfig() {
         }
         
         console.log('[Recall] API 配置加载完成');
+        taskTracker.complete(taskId, true);
     } catch (e) {
         console.warn('[Recall] 加载 API 配置失败:', e);
+        taskTracker.complete(taskId, false, e.message);
     }
 }
 
@@ -1303,6 +1479,7 @@ async function loadApiConfig() {
  * 加载容量限制配置
  */
 async function loadCapacityConfig() {
+    const taskId = taskTracker.add('config', '加载容量限制配置');
     try {
         const response = await fetch(`${pluginSettings.apiUrl}/v1/config`);
         const config = await response.json();
@@ -1344,9 +1521,11 @@ async function loadCapacityConfig() {
         
         safeToastr.success('容量限制配置已加载', 'Recall');
         console.log('[Recall] 容量限制配置加载完成');
+        taskTracker.complete(taskId, true);
     } catch (e) {
         console.warn('[Recall] 加载容量限制配置失败:', e);
         safeToastr.error('加载容量限制配置失败: ' + e.message, 'Recall');
+        taskTracker.complete(taskId, false, e.message);
     }
 }
 
@@ -1843,6 +2022,7 @@ async function onSaveLLMConfig() {
  */
 async function loadForeshadowingAnalyzerConfig() {
     const statusEl = document.getElementById('recall-analyzer-status');
+    const taskId = taskTracker.add('config', '加载伏笔分析器配置');
     
     try {
         if (!pluginSettings.apiUrl) {
@@ -1850,6 +2030,7 @@ async function loadForeshadowingAnalyzerConfig() {
                 statusEl.textContent = '未配置';
                 statusEl.className = 'recall-api-status recall-status-error';
             }
+            taskTracker.complete(taskId, false, '未配置');
             return;
         }
         
@@ -1886,11 +2067,13 @@ async function loadForeshadowingAnalyzerConfig() {
             }
             
             console.log('[Recall] 伏笔分析器配置已加载:', config);
+            taskTracker.complete(taskId, true);
         } else {
             if (statusEl) {
                 statusEl.textContent = '加载失败';
                 statusEl.className = 'recall-api-status recall-status-error';
             }
+            taskTracker.complete(taskId, false, '加载失败');
         }
     } catch (e) {
         console.error('[Recall] 加载伏笔分析器配置失败:', e);
@@ -1898,6 +2081,7 @@ async function loadForeshadowingAnalyzerConfig() {
             statusEl.textContent = '连接失败';
             statusEl.className = 'recall-api-status recall-status-error';
         }
+        taskTracker.complete(taskId, false, e.message);
     }
 }
 
@@ -2586,6 +2770,10 @@ async function onAddPersistentContext() {
 function notifyForeshadowingAnalyzer(content, role) {
     // Fire-and-forget: 发送请求但不等待响应
     const userId = currentCharacterId || 'default';
+    
+    // 添加任务跟踪
+    const taskId = taskTracker.add('foreshadow', '伏笔分析', role === 'user' ? '用户消息' : 'AI回复');
+    
     fetch(`${pluginSettings.apiUrl}/v1/foreshadowing/analyze/turn`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2598,12 +2786,16 @@ function notifyForeshadowingAnalyzer(content, role) {
     }).then(response => {
         if (!response.ok) {
             console.debug('[Recall] 伏笔分析通知发送失败:', response.status);
+            taskTracker.complete(taskId, false, `HTTP ${response.status}`);
+        } else {
+            taskTracker.complete(taskId, true);
         }
         // 不处理响应内容，服务器会在后台异步处理
         // 如果需要刷新伏笔列表，可以通过定时器或手动刷新
     }).catch(e => {
         // 静默失败，不影响主流程
         console.debug('[Recall] 伏笔分析器通知失败:', e.message);
+        taskTracker.complete(taskId, false, e.message);
     });
 }
 
@@ -2664,6 +2856,9 @@ const memorySaveQueue = {
         // 取出一条记忆
         const item = this.queue.shift();
         
+        // 添加任务跟踪
+        const taskId = taskTracker.add('memory-save', '保存记忆', `队列剩余: ${this.queue.length}`);
+        
         try {
             const response = await fetch(`${pluginSettings.apiUrl}/v1/memories`, {
                 method: 'POST',
@@ -2681,6 +2876,7 @@ const memorySaveQueue = {
                         consistency_warnings: result.consistency_warnings || []
                     });
                     console.log('[Recall] 记忆保存成功（队列处理）');
+                    taskTracker.complete(taskId, true);
                     
                     // 显示一致性检查警告（如果有）
                     if (result.consistency_warnings && result.consistency_warnings.length > 0) {
@@ -2693,6 +2889,7 @@ const memorySaveQueue = {
                     // 服务器返回成功状态码，但业务上未保存（如重复内容）
                     item.resolve({ success: false, message: result.message });
                     console.log('[Recall] 记忆跳过:', result.message);
+                    taskTracker.complete(taskId, true, result.message);
                 }
             } else if (response.status === 429) {
                 // API 限流，延长间隔并重试
@@ -2701,11 +2898,13 @@ const memorySaveQueue = {
                 item.retries++;
                 if (item.retries < this.maxRetries) {
                     this.queue.unshift(item); // 放回队首
+                    taskTracker.complete(taskId, true, '限流重试');
                 } else {
                     // 保存到本地存储，等待下次启动时重试
                     this._saveToLocalStorage(item.memory);
                     item.resolve({ success: false, queued: true });
                     safeToastr.warning('记忆暂存到本地，将在重新连接后同步', 'Recall', { timeOut: 5000 });
+                    taskTracker.complete(taskId, false, '已暂存本地');
                 }
             } else {
                 throw new Error(`HTTP ${response.status}`);
@@ -2715,11 +2914,13 @@ const memorySaveQueue = {
             item.retries++;
             if (item.retries < this.maxRetries) {
                 this.queue.push(item); // 放回队尾
+                taskTracker.complete(taskId, true, '重试中');
             } else {
                 // 保存到本地存储
                 this._saveToLocalStorage(item.memory);
                 item.resolve({ success: false, queued: true });
                 safeToastr.warning('记忆保存失败，已暂存到本地', 'Recall', { timeOut: 5000 });
+                taskTracker.complete(taskId, false, '保存失败');
             }
         }
         
@@ -2757,6 +2958,7 @@ const memorySaveQueue = {
      * 同步本地缓存的记忆
      */
     async syncLocalStorage() {
+        let taskId = null;
         try {
             const key = 'recall_pending_memories';
             const pending = JSON.parse(localStorage.getItem(key) || '[]');
@@ -2764,14 +2966,18 @@ const memorySaveQueue = {
             
             console.log(`[Recall] 发现 ${pending.length} 条待同步的本地记忆`);
             
+            taskId = taskTracker.add('sync', '同步本地缓存', `${pending.length} 条记忆`);
+            
             for (const memory of pending) {
                 this.add(memory);
             }
             
             // 清空本地缓存
             localStorage.removeItem(key);
+            taskTracker.complete(taskId, true);
         } catch (e) {
             console.warn('[Recall] 同步本地缓存失败:', e);
+            if (taskId) taskTracker.complete(taskId, false, e.message);
         }
     }
 };
@@ -3583,6 +3789,8 @@ async function onClearAllForeshadowings() {
 async function loadPersistentContexts() {
     if (!isConnected) return;
     
+    const taskId = taskTracker.add('load', '加载持久条件');
+    
     try {
         // 添加超时控制（8秒）
         const controller = new AbortController();
@@ -3616,9 +3824,12 @@ async function loadPersistentContexts() {
         } catch (archivedErr) {
             // 忽略归档计数加载失败
         }
+        
+        taskTracker.complete(taskId, true);
     } catch (e) {
         const errMsg = e.name === 'AbortError' ? '请求超时' : e.message;
         console.error('[Recall] 加载持久条件失败:', errMsg);
+        taskTracker.complete(taskId, false, errMsg);
     }
 }
 
