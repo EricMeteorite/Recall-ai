@@ -180,7 +180,7 @@ class RecallAPIClient:
             else:
                 req = urllib.request.Request(url, method=method)
             
-            with urllib.request.urlopen(req, timeout=120) as response:
+            with urllib.request.urlopen(req, timeout=1200) as response:
                 result = json.loads(response.read().decode("utf-8"))
                 elapsed = time.time() - start_time
                 self.logger.api_response(response.status, result, elapsed)
@@ -297,7 +297,7 @@ class LLMClient:
         
         start_time = time.time()
         try:
-            with urllib.request.urlopen(req, timeout=120) as response:
+            with urllib.request.urlopen(req, timeout=1200) as response:
                 result = json.loads(response.read().decode("utf-8"))
                 elapsed = time.time() - start_time
                 
