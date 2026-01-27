@@ -31,9 +31,15 @@ class RelationExtractor:
     def __init__(self, entity_extractor=None):
         self.entity_extractor = entity_extractor
     
-    def extract(self, text: str, turn: int = 0) -> List[Tuple[str, str, str, str]]:
+    def extract(self, text: str, turn: int = 0, entities: list = None) -> List[Tuple[str, str, str, str]]:
         """
         从文本中提取关系
+        
+        Args:
+            text: 原始文本
+            turn: 轮次（暂未使用）
+            entities: 可选，已提取的实体列表。如果提供则复用，否则重新提取。
+                      支持 ExtractedEntity 对象列表或字符串列表。
         
         Returns:
             [(source, relation_type, target, source_text), ...]
@@ -50,16 +56,32 @@ class RelationExtractor:
                     continue
         
         # 2. 基于共现（同一句话中出现的实体可能有关系）
-        if self.entity_extractor:
-            sentences = re.split(r'[。.!?！？]', text)
+        # 优先使用传入的实体列表，否则重新提取
+        if entities is None and self.entity_extractor:
             entities = self.entity_extractor.extract(text)
+        
+        if entities:
+            sentences = re.split(r'[。.!?！？\n]', text)
+            
+            # 统一转换为实体名列表
+            entity_names = []
+            for e in entities:
+                if hasattr(e, 'name'):
+                    entity_names.append(e.name)
+                elif isinstance(e, str):
+                    entity_names.append(e)
+                elif isinstance(e, dict) and 'name' in e:
+                    entity_names.append(e['name'])
             
             for sentence in sentences:
-                sentence_entities = [e for e in entities if e.name in sentence]
+                if len(sentence) < 3:
+                    continue
+                # 找出此句子中包含的实体
+                sentence_entities = [name for name in entity_names if name in sentence]
                 # 如果同一句话有多个实体，建立弱关系
                 if len(sentence_entities) >= 2:
                     for i, e1 in enumerate(sentence_entities[:-1]):
                         for e2 in sentence_entities[i+1:]:
-                            relations.append((e1.name, 'MENTIONED_WITH', e2.name, sentence))
+                            relations.append((e1, 'MENTIONED_WITH', e2, sentence))
         
         return relations

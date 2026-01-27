@@ -1403,7 +1403,8 @@ class RecallEngine:
             
             # 6. 更新知识图谱（失败不影响主流程）
             try:
-                relations = self.relation_extractor.extract(content, 0)  # 传入turn=0
+                # 复用已提取的实体列表，避免重复提取导致不一致
+                relations = self.relation_extractor.extract(content, 0, entities=entities)
                 for rel in relations:
                     source_id, relation_type, target_id, source_text = rel
                     self.knowledge_graph.add_relation(
