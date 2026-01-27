@@ -167,6 +167,41 @@
     let isInitialized = false;
 
     /**
+     * 安全的 toastr 包装对象
+     * 避免在 toastr 未加载时报错
+     */
+    const safeToastr = {
+        success: (msg, title, options) => {
+            if (typeof toastr !== 'undefined' && toastr.success) {
+                toastr.success(msg, title, options);
+            } else {
+                console.log(`[Recall] ✓ ${title || 'Success'}: ${msg}`);
+            }
+        },
+        error: (msg, title, options) => {
+            if (typeof toastr !== 'undefined' && toastr.error) {
+                toastr.error(msg, title, options);
+            } else {
+                console.error(`[Recall] ✗ ${title || 'Error'}: ${msg}`);
+            }
+        },
+        warning: (msg, title, options) => {
+            if (typeof toastr !== 'undefined' && toastr.warning) {
+                toastr.warning(msg, title, options);
+            } else {
+                console.warn(`[Recall] ⚠ ${title || 'Warning'}: ${msg}`);
+            }
+        },
+        info: (msg, title, options) => {
+            if (typeof toastr !== 'undefined' && toastr.info) {
+                toastr.info(msg, title, options);
+            } else {
+                console.info(`[Recall] ℹ ${title || 'Info'}: ${msg}`);
+            }
+        }
+    };
+
+    /**
      * 安全执行函数 - 捕获所有错误，不影响 ST
      */
     function safeExecute(fn, errorMsg = 'Recall 插件错误') {
@@ -1192,14 +1227,8 @@ function createUI() {
     bindModelSelectEvents('recall-embedding-model', 'recall-embedding-model-custom', 'recall-embedding-dimension');
     bindModelSelectEvents('recall-llm-model', 'recall-llm-model-custom', null);
     
-    // 初始化加载 API 配置
-    loadApiConfig();
-    
-    // 初始化加载伏笔分析器配置
-    loadForeshadowingAnalyzerConfig();
-    
-    // 初始化加载容量限制配置
-    loadCapacityConfig();
+    // 注意：API 配置加载移到 checkConnection 成功后执行
+    // 避免在 API 未就绪时静默失败
     
     // 回车键快捷搜索
     document.getElementById('recall-search-input')?.addEventListener('keypress', (e) => {
@@ -1313,11 +1342,11 @@ async function loadCapacityConfig() {
             }
         }
         
-        toastr.success('容量限制配置已加载', 'Recall');
+        safeToastr.success('容量限制配置已加载', 'Recall');
         console.log('[Recall] 容量限制配置加载完成');
     } catch (e) {
         console.warn('[Recall] 加载容量限制配置失败:', e);
-        toastr.error('加载容量限制配置失败: ' + e.message, 'Recall');
+        safeToastr.error('加载容量限制配置失败: ' + e.message, 'Recall');
     }
 }
 
@@ -1357,17 +1386,17 @@ async function saveCapacityConfig() {
         const result = await response.json();
         
         if (result.success !== false) {
-            toastr.success('容量限制配置已保存', 'Recall');
+            safeToastr.success('容量限制配置已保存', 'Recall');
             console.log('[Recall] 容量限制配置保存成功:', result);
             
             // 热更新配置
             await fetch(`${pluginSettings.apiUrl}/v1/config/reload`, { method: 'POST' });
         } else {
-            toastr.error('保存失败: ' + (result.message || '未知错误'), 'Recall');
+            safeToastr.error('保存失败: ' + (result.message || '未知错误'), 'Recall');
         }
     } catch (e) {
         console.error('[Recall] 保存容量限制配置失败:', e);
-        toastr.error('保存容量限制配置失败: ' + e.message, 'Recall');
+        safeToastr.error('保存容量限制配置失败: ' + e.message, 'Recall');
     }
 }
 
@@ -1514,13 +1543,13 @@ async function loadEmbeddingModels() {
                 setModelSelectValue('recall-embedding-model', 'recall-embedding-model-custom', currentValue);
             }
             
-            toastr.success(`成功获取 ${data.models.length} 个 Embedding 模型`, 'Recall');
+            safeToastr.success(`成功获取 ${data.models.length} 个 Embedding 模型`, 'Recall');
         } else {
-            toastr.warning(data.message || '未获取到模型列表，请检查 API 配置', 'Recall');
+            safeToastr.warning(data.message || '未获取到模型列表，请检查 API 配置', 'Recall');
         }
     } catch (error) {
         console.error('Failed to load embedding models:', error);
-        toastr.error(`获取模型列表失败: ${error.message}`, 'Recall');
+        safeToastr.error(`获取模型列表失败: ${error.message}`, 'Recall');
     } finally {
         if (refreshBtn) {
             refreshBtn.disabled = false;
@@ -1583,13 +1612,13 @@ async function loadLLMModels() {
                 setModelSelectValue('recall-llm-model', 'recall-llm-model-custom', currentValue);
             }
             
-            toastr.success(`成功获取 ${data.models.length} 个 LLM 模型`, 'Recall');
+            safeToastr.success(`成功获取 ${data.models.length} 个 LLM 模型`, 'Recall');
         } else {
-            toastr.warning(data.message || '未获取到模型列表，请检查 API 配置', 'Recall');
+            safeToastr.warning(data.message || '未获取到模型列表，请检查 API 配置', 'Recall');
         }
     } catch (error) {
         console.error('Failed to load LLM models:', error);
-        toastr.error(`获取模型列表失败: ${error.message}`, 'Recall');
+        safeToastr.error(`获取模型列表失败: ${error.message}`, 'Recall');
     } finally {
         if (refreshBtn) {
             refreshBtn.disabled = false;
@@ -1644,15 +1673,25 @@ async function onTestEmbedding() {
         const result = await response.json();
         
         if (result.success) {
+            // 获取当前已保存的维度
+            const dimInput = document.getElementById('recall-embedding-dimension');
+            const currentDim = dimInput ? parseInt(dimInput.value) : 0;
+            const newDim = result.dimension;
+            
             // 自动填充检测到的维度到输入框（不自动保存，由用户手动保存）
-            if (result.dimension) {
-                const dimInput = document.getElementById('recall-embedding-dimension');
-                if (dimInput) {
-                    dimInput.value = result.dimension;
-                }
+            if (newDim && dimInput) {
+                dimInput.value = newDim;
             }
             
-            alert(`✅ Embedding 连接成功！\n\n模型: ${result.model}\n维度: ${result.dimension} (已填充，请保存配置)\n延迟: ${result.latency_ms}ms`);
+            let message = `✅ Embedding 连接成功！\n\n模型: ${result.model}\n维度: ${newDim} (已填充，请保存配置)\n延迟: ${result.latency_ms}ms`;
+            
+            // 检测维度变化，警告用户需要重建索引
+            if (currentDim > 0 && newDim && currentDim !== newDim) {
+                message += `\n\n⚠️ 警告：检测到 Embedding 维度变化！\n旧维度: ${currentDim}\n新维度: ${newDim}\n\n如果已有记忆数据，切换模型后需要重建向量索引，否则搜索功能将无法正常工作。`;
+                safeToastr.warning(`Embedding 维度从 ${currentDim} 变更为 ${newDim}，已有数据可能需要重建索引`, 'Recall', { timeOut: 10000 });
+            }
+            
+            alert(message);
             updateEmbeddingStatusDirect(true);
         } else {
             alert(`❌ Embedding 连接失败\n\n${result.message}`);
@@ -1719,8 +1758,8 @@ async function onSaveEmbeddingConfig() {
     
     const configData = {};
     
-    // 只有当输入的不是掩码值时才更新 API Key
-    if (embKey && !embKey.includes('*')) {
+    // 只有当输入的不是掩码值时才更新 API Key（服务器返回 xxxx****xxxx 格式）
+    if (embKey && !embKey.includes('****')) {
         configData.embedding_api_key = embKey;
     }
     if (embBase) configData.embedding_api_base = embBase;
@@ -2079,6 +2118,14 @@ async function consolidateMemories() {
         return;
     }
     
+    // 显示加载状态
+    const btn = document.getElementById('recall-consolidate-memories');
+    const originalHtml = btn ? btn.innerHTML : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 整合中...';
+    }
+    
     try {
         const response = await fetch(`${pluginSettings.apiUrl}/v1/consolidate?user_id=${userId}`, {
             method: 'POST'
@@ -2086,16 +2133,22 @@ async function consolidateMemories() {
         
         if (response.ok) {
             const result = await response.json();
-            alert(`✅ 记忆整合完成\n\n${result.message || '整合成功'}`);
+            safeToastr.success(result.message || '记忆整合完成', 'Recall');
             
             // 刷新记忆列表
             loadMemories();
         } else {
             const error = await response.json().catch(() => ({}));
-            alert(`❌ 整合失败: ${error.detail || '未知错误'}`);
+            safeToastr.error(`整合失败: ${error.detail || '未知错误'}`, 'Recall');
         }
     } catch (e) {
-        alert(`❌ 整合失败: ${e.message}`);
+        safeToastr.error(`整合失败: ${e.message}`, 'Recall');
+    } finally {
+        // 恢复按钮状态
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+        }
     }
 }
 
@@ -2271,10 +2324,17 @@ async function checkConnection() {
                 // 加载 API 配置（从服务器获取已配置的值）
                 loadApiConfig();
                 
-                // 加载记忆
+                // 加载伏笔分析器配置
+                loadForeshadowingAnalyzerConfig();
+                
+                // 加载容量限制配置
+                loadCapacityConfig();
+                
+                // 加载记忆和持久条件
                 if (currentCharacterId) {
                     loadMemories();
                     loadForeshadowings();
+                    loadPersistentContexts();
                 }
                 
                 // 【新增】同步本地缓存的记忆（解决离线期间的保存）
@@ -2432,13 +2492,19 @@ async function onAddMemory() {
     const content = document.getElementById('recall-add-input')?.value;
     if (!content || !isConnected) return;
     
+    const userId = currentCharacterId || 'default';
     try {
         const response = await fetch(`${pluginSettings.apiUrl}/v1/memories`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 content: content,
-                user_id: currentCharacterId || 'default'
+                user_id: userId,
+                metadata: {
+                    role: 'manual',
+                    source: 'sillytavern',
+                    character_id: userId
+                }
             })
         });
         
@@ -2451,16 +2517,14 @@ async function onAddMemory() {
             if (result.consistency_warnings && result.consistency_warnings.length > 0) {
                 const warningMsg = result.consistency_warnings.join('\n');
                 console.warn('[Recall] 一致性检查警告:', warningMsg);
-                // 使用 toastr 显示警告（如果可用）
-                if (typeof toastr !== 'undefined' && toastr.warning) {
-                    toastr.warning(warningMsg, '一致性检查警告', { timeOut: 8000 });
-                }
+                // 使用 safeToastr 显示警告
+                safeToastr.warning(warningMsg, '一致性检查警告', { timeOut: 8000 });
             }
         } else {
             // 显示保存失败的原因
             console.log('[Recall] 记忆未保存:', result.message);
-            if (result.message && typeof toastr !== 'undefined' && toastr.info) {
-                toastr.info(result.message, 'Recall', { timeOut: 3000 });
+            if (result.message) {
+                safeToastr.info(result.message, 'Recall', { timeOut: 3000 });
             }
         }
     } catch (e) {
@@ -2475,13 +2539,15 @@ async function onPlantForeshadowing() {
     const content = document.getElementById('recall-foreshadowing-input')?.value;
     if (!content || !isConnected) return;
     
+    const userId = currentCharacterId || 'default';
     try {
         const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 content: content,
-                user_id: currentCharacterId || 'default',
+                user_id: userId,
+                character_id: userId,
                 importance: 0.5
             })
         });
@@ -2519,13 +2585,15 @@ async function onAddPersistentContext() {
  */
 function notifyForeshadowingAnalyzer(content, role) {
     // Fire-and-forget: 发送请求但不等待响应
+    const userId = currentCharacterId || 'default';
     fetch(`${pluginSettings.apiUrl}/v1/foreshadowing/analyze/turn`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
             content: content,
             role: role,
-            user_id: currentCharacterId || 'default'
+            user_id: userId,
+            character_id: userId
         })
     }).then(response => {
         if (!response.ok) {
@@ -2617,11 +2685,9 @@ const memorySaveQueue = {
                     // 显示一致性检查警告（如果有）
                     if (result.consistency_warnings && result.consistency_warnings.length > 0) {
                         console.warn('[Recall] 一致性检查警告:', result.consistency_warnings);
-                        // 使用 toastr 显示警告（如果可用），不阻塞流程
-                        if (typeof toastr !== 'undefined' && toastr.warning) {
-                            const warningMsg = result.consistency_warnings.join('\n');
-                            toastr.warning(warningMsg, '一致性检查警告', { timeOut: 8000 });
-                        }
+                        // 使用 safeToastr 显示警告，不阻塞流程
+                        const warningMsg = result.consistency_warnings.join('\n');
+                        safeToastr.warning(warningMsg, '一致性检查警告', { timeOut: 8000 });
                     }
                 } else {
                     // 服务器返回成功状态码，但业务上未保存（如重复内容）
@@ -2639,6 +2705,7 @@ const memorySaveQueue = {
                     // 保存到本地存储，等待下次启动时重试
                     this._saveToLocalStorage(item.memory);
                     item.resolve({ success: false, queued: true });
+                    safeToastr.warning('记忆暂存到本地，将在重新连接后同步', 'Recall', { timeOut: 5000 });
                 }
             } else {
                 throw new Error(`HTTP ${response.status}`);
@@ -2652,6 +2719,7 @@ const memorySaveQueue = {
                 // 保存到本地存储
                 this._saveToLocalStorage(item.memory);
                 item.resolve({ success: false, queued: true });
+                safeToastr.warning('记忆保存失败，已暂存到本地', 'Recall', { timeOut: 5000 });
             }
         }
         
@@ -2921,6 +2989,16 @@ function onChatChanged() {
     const context = SillyTavern.getContext();
     const characterId = context.characterId;
     const character = characterId !== undefined ? context.characters[characterId] : null;
+    
+    // 清除旧角色的记忆注入，避免残留
+    try {
+        if (context.setExtensionPrompt) {
+            context.setExtensionPrompt('recall_memory', '', 0, 0, false, 0);
+            console.log('[Recall] 已清除旧角色的记忆注入');
+        }
+    } catch (e) {
+        console.warn('[Recall] 清除旧注入失败:', e);
+    }
     
     if (character) {
         currentCharacterId = character.name || `char_${characterId}`;
@@ -3430,7 +3508,7 @@ async function loadForeshadowings() {
         const timeoutId = setTimeout(() => controller.abort(), 8000);
         
         const userId = encodeURIComponent(currentCharacterId || 'default');
-        const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing?user_id=${userId}`, {
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing?user_id=${userId}&character_id=${userId}`, {
             signal: controller.signal
         });
         clearTimeout(timeoutId);
@@ -3451,7 +3529,7 @@ async function loadForeshadowings() {
         
         // 同时加载归档数量（只获取计数）
         try {
-            const archivedRes = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing/archived?user_id=${userId}&page=1&page_size=1`);
+            const archivedRes = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing/archived?user_id=${userId}&character_id=${userId}&page=1&page_size=1`);
             if (archivedRes.ok) {
                 const archivedData = await archivedRes.json();
                 const archivedCountEl = document.getElementById('recall-foreshadowing-archived-count');
@@ -3483,7 +3561,7 @@ async function onClearAllForeshadowings() {
     
     try {
         const userId = encodeURIComponent(currentCharacterId || 'default');
-        const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing?user_id=${userId}`, {
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing?user_id=${userId}&character_id=${userId}`, {
             method: 'DELETE'
         });
         
@@ -3511,7 +3589,7 @@ async function loadPersistentContexts() {
         const timeoutId = setTimeout(() => controller.abort(), 8000);
         
         const userId = encodeURIComponent(currentCharacterId || 'default');
-        const response = await fetch(`${pluginSettings.apiUrl}/v1/persistent-contexts?user_id=${userId}`, {
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/persistent-contexts?user_id=${userId}&character_id=${userId}`, {
             signal: controller.signal
         });
         clearTimeout(timeoutId);
@@ -3529,7 +3607,7 @@ async function loadPersistentContexts() {
         
         // 同时加载归档数量（只获取计数）
         try {
-            const archivedRes = await fetch(`${pluginSettings.apiUrl}/v1/persistent-contexts/archived?user_id=${userId}&page=1&page_size=1`);
+            const archivedRes = await fetch(`${pluginSettings.apiUrl}/v1/persistent-contexts/archived?user_id=${userId}&character_id=${userId}&page=1&page_size=1`);
             if (archivedRes.ok) {
                 const archivedData = await archivedRes.json();
                 const archivedCountEl = document.getElementById('recall-context-archived-count');
@@ -3637,6 +3715,7 @@ function displayPersistentContexts(contexts) {
 async function addPersistentContext(content, contextType) {
     if (!isConnected || !content.trim()) return;
     
+    const userId = currentCharacterId || 'default';
     try {
         const response = await fetch(`${pluginSettings.apiUrl}/v1/persistent-contexts`, {
             method: 'POST',
@@ -3644,7 +3723,8 @@ async function addPersistentContext(content, contextType) {
             body: JSON.stringify({
                 content: content.trim(),
                 context_type: contextType,
-                user_id: currentCharacterId || 'default'
+                user_id: userId,
+                character_id: userId
             })
         });
         
@@ -3665,7 +3745,7 @@ async function addPersistentContext(content, contextType) {
 async function removePersistentContext(contextId) {
     try {
         const userId = encodeURIComponent(currentCharacterId || 'default');
-        const response = await fetch(`${pluginSettings.apiUrl}/v1/persistent-contexts/${contextId}?user_id=${userId}`, {
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/persistent-contexts/${contextId}?user_id=${userId}&character_id=${userId}`, {
             method: 'DELETE'
         });
         
@@ -3697,7 +3777,7 @@ async function onClearAllContexts() {
     
     try {
         const userId = encodeURIComponent(currentCharacterId || 'default');
-        const response = await fetch(`${pluginSettings.apiUrl}/v1/persistent-contexts?user_id=${userId}`, {
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/persistent-contexts?user_id=${userId}&character_id=${userId}`, {
             method: 'DELETE'
         });
         
@@ -3735,7 +3815,7 @@ async function loadArchivedContexts(page = archivedContextsPage) {
     
     try {
         const userId = encodeURIComponent(currentCharacterId || 'default');
-        let url = `${pluginSettings.apiUrl}/v1/persistent-contexts/archived?user_id=${userId}&page=${page}&page_size=${pageSize}`;
+        let url = `${pluginSettings.apiUrl}/v1/persistent-contexts/archived?user_id=${userId}&character_id=${userId}&page=${page}&page_size=${pageSize}`;
         if (search) url += `&search=${encodeURIComponent(search)}`;
         if (contextType) url += `&context_type=${encodeURIComponent(contextType)}`;
         
@@ -3846,7 +3926,7 @@ function renderContextsPagination(data) {
     }
     
     let html = '';
-    html += `<button ${data.page <= 1 ? 'disabled' : ''} onclick="loadArchivedContexts(${data.page - 1})">‹</button>`;
+    html += `<button ${data.page <= 1 ? 'disabled' : ''} onclick="RecallPlugin.loadArchivedContexts(${data.page - 1})">‹</button>`;
     
     // 显示页码
     const maxPages = 5;
@@ -3855,20 +3935,20 @@ function renderContextsPagination(data) {
     startPage = Math.max(1, endPage - maxPages + 1);
     
     if (startPage > 1) {
-        html += `<button onclick="loadArchivedContexts(1)">1</button>`;
+        html += `<button onclick="RecallPlugin.loadArchivedContexts(1)">1</button>`;
         if (startPage > 2) html += '<span class="recall-pagination-info">...</span>';
     }
     
     for (let i = startPage; i <= endPage; i++) {
-        html += `<button class="${i === data.page ? 'active' : ''}" onclick="loadArchivedContexts(${i})">${i}</button>`;
+        html += `<button class="${i === data.page ? 'active' : ''}" onclick="RecallPlugin.loadArchivedContexts(${i})">${i}</button>`;
     }
     
     if (endPage < data.total_pages) {
         if (endPage < data.total_pages - 1) html += '<span class="recall-pagination-info">...</span>';
-        html += `<button onclick="loadArchivedContexts(${data.total_pages})">${data.total_pages}</button>`;
+        html += `<button onclick="RecallPlugin.loadArchivedContexts(${data.total_pages})">${data.total_pages}</button>`;
     }
     
-    html += `<button ${data.page >= data.total_pages ? 'disabled' : ''} onclick="loadArchivedContexts(${data.page + 1})">›</button>`;
+    html += `<button ${data.page >= data.total_pages ? 'disabled' : ''} onclick="RecallPlugin.loadArchivedContexts(${data.page + 1})">›</button>`;
     html += `<span class="recall-pagination-info">${data.total} 条</span>`;
     
     paginationEl.innerHTML = html;
@@ -3880,7 +3960,7 @@ function renderContextsPagination(data) {
 async function restoreArchivedContext(contextId) {
     try {
         const userId = encodeURIComponent(currentCharacterId || 'default');
-        const response = await fetch(`${pluginSettings.apiUrl}/v1/persistent-contexts/${contextId}/restore?user_id=${userId}`, {
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/persistent-contexts/${contextId}/restore?user_id=${userId}&character_id=${userId}`, {
             method: 'POST'
         });
         
@@ -3902,7 +3982,7 @@ async function restoreArchivedContext(contextId) {
 async function deleteArchivedContext(contextId) {
     try {
         const userId = encodeURIComponent(currentCharacterId || 'default');
-        const response = await fetch(`${pluginSettings.apiUrl}/v1/persistent-contexts/archived/${contextId}?user_id=${userId}`, {
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/persistent-contexts/archived/${contextId}?user_id=${userId}&character_id=${userId}`, {
             method: 'DELETE'
         });
         
@@ -3930,7 +4010,7 @@ async function onClearAllArchivedContexts() {
     
     try {
         const userId = encodeURIComponent(currentCharacterId || 'default');
-        const response = await fetch(`${pluginSettings.apiUrl}/v1/persistent-contexts/archived?user_id=${userId}`, {
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/persistent-contexts/archived?user_id=${userId}&character_id=${userId}`, {
             method: 'DELETE'
         });
         
@@ -3950,7 +4030,7 @@ async function onClearAllArchivedContexts() {
 async function archiveContext(contextId) {
     try {
         const userId = encodeURIComponent(currentCharacterId || 'default');
-        const response = await fetch(`${pluginSettings.apiUrl}/v1/persistent-contexts/${contextId}/archive?user_id=${userId}`, {
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/persistent-contexts/${contextId}/archive?user_id=${userId}&character_id=${userId}`, {
             method: 'POST'
         });
         
@@ -3980,7 +4060,7 @@ async function loadArchivedForeshadowings(page = archivedForeshadowingsPage) {
     
     try {
         const userId = encodeURIComponent(currentCharacterId || 'default');
-        let url = `${pluginSettings.apiUrl}/v1/foreshadowing/archived?user_id=${userId}&page=${page}&page_size=${pageSize}`;
+        let url = `${pluginSettings.apiUrl}/v1/foreshadowing/archived?user_id=${userId}&character_id=${userId}&page=${page}&page_size=${pageSize}`;
         if (search) url += `&search=${encodeURIComponent(search)}`;
         if (status) url += `&status=${encodeURIComponent(status)}`;
         
@@ -4082,7 +4162,7 @@ function renderForeshadowingsPagination(data) {
     }
     
     let html = '';
-    html += `<button ${data.page <= 1 ? 'disabled' : ''} onclick="loadArchivedForeshadowings(${data.page - 1})">‹</button>`;
+    html += `<button ${data.page <= 1 ? 'disabled' : ''} onclick="RecallPlugin.loadArchivedForeshadowings(${data.page - 1})">‹</button>`;
     
     const maxPages = 5;
     let startPage = Math.max(1, data.page - Math.floor(maxPages / 2));
@@ -4090,20 +4170,20 @@ function renderForeshadowingsPagination(data) {
     startPage = Math.max(1, endPage - maxPages + 1);
     
     if (startPage > 1) {
-        html += `<button onclick="loadArchivedForeshadowings(1)">1</button>`;
+        html += `<button onclick="RecallPlugin.loadArchivedForeshadowings(1)">1</button>`;
         if (startPage > 2) html += '<span class="recall-pagination-info">...</span>';
     }
     
     for (let i = startPage; i <= endPage; i++) {
-        html += `<button class="${i === data.page ? 'active' : ''}" onclick="loadArchivedForeshadowings(${i})">${i}</button>`;
+        html += `<button class="${i === data.page ? 'active' : ''}" onclick="RecallPlugin.loadArchivedForeshadowings(${i})">${i}</button>`;
     }
     
     if (endPage < data.total_pages) {
         if (endPage < data.total_pages - 1) html += '<span class="recall-pagination-info">...</span>';
-        html += `<button onclick="loadArchivedForeshadowings(${data.total_pages})">${data.total_pages}</button>`;
+        html += `<button onclick="RecallPlugin.loadArchivedForeshadowings(${data.total_pages})">${data.total_pages}</button>`;
     }
     
-    html += `<button ${data.page >= data.total_pages ? 'disabled' : ''} onclick="loadArchivedForeshadowings(${data.page + 1})">›</button>`;
+    html += `<button ${data.page >= data.total_pages ? 'disabled' : ''} onclick="RecallPlugin.loadArchivedForeshadowings(${data.page + 1})">›</button>`;
     html += `<span class="recall-pagination-info">${data.total} 条</span>`;
     
     paginationEl.innerHTML = html;
@@ -4115,7 +4195,7 @@ function renderForeshadowingsPagination(data) {
 async function restoreArchivedForeshadowing(foreshadowingId) {
     try {
         const userId = encodeURIComponent(currentCharacterId || 'default');
-        const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing/${foreshadowingId}/restore?user_id=${userId}`, {
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing/${foreshadowingId}/restore?user_id=${userId}&character_id=${userId}`, {
             method: 'POST'
         });
         
@@ -4137,7 +4217,7 @@ async function restoreArchivedForeshadowing(foreshadowingId) {
 async function deleteArchivedForeshadowing(foreshadowingId) {
     try {
         const userId = encodeURIComponent(currentCharacterId || 'default');
-        const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing/archived/${foreshadowingId}?user_id=${userId}`, {
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing/archived/${foreshadowingId}?user_id=${userId}&character_id=${userId}`, {
             method: 'DELETE'
         });
         
@@ -4165,7 +4245,7 @@ async function onClearAllArchivedForeshadowings() {
     
     try {
         const userId = encodeURIComponent(currentCharacterId || 'default');
-        const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing/archived?user_id=${userId}`, {
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing/archived?user_id=${userId}&character_id=${userId}`, {
             method: 'DELETE'
         });
         
@@ -4185,7 +4265,7 @@ async function onClearAllArchivedForeshadowings() {
 async function archiveForeshadowing(foreshadowingId) {
     try {
         const userId = encodeURIComponent(currentCharacterId || 'default');
-        const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing/${foreshadowingId}/archive?user_id=${userId}`, {
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing/${foreshadowingId}/archive?user_id=${userId}&character_id=${userId}`, {
             method: 'POST'
         });
         
@@ -4291,7 +4371,7 @@ function showEditContextModal(ctx) {
 async function updateContext(contextId, updates) {
     try {
         const userId = encodeURIComponent(currentCharacterId || 'default');
-        const url = `${pluginSettings.apiUrl}/v1/persistent-contexts/${contextId}?user_id=${userId}`;
+        const url = `${pluginSettings.apiUrl}/v1/persistent-contexts/${contextId}?user_id=${userId}&character_id=${userId}`;
         console.log(`[Recall] 更新条件请求: ${url}`, updates);
         
         const response = await fetch(url, {
@@ -4303,16 +4383,16 @@ async function updateContext(contextId, updates) {
         if (response.ok) {
             const result = await response.json();
             console.log(`[Recall] 已更新条件: ${contextId}`, result);
-            toastr.success('持久条件已更新', 'Recall');
+            safeToastr.success('持久条件已更新', 'Recall');
             loadPersistentContexts();
         } else {
             const errorText = await response.text();
             console.error('[Recall] 更新条件失败:', response.status, errorText);
-            toastr.error(`更新失败: ${response.status} ${errorText}`, 'Recall');
+            safeToastr.error(`更新失败: ${response.status} ${errorText}`, 'Recall');
         }
     } catch (e) {
         console.error('[Recall] 更新条件失败:', e);
-        toastr.error(`更新失败: ${e.message}`, 'Recall');
+        safeToastr.error(`更新失败: ${e.message}`, 'Recall');
     }
 }
 
@@ -4406,7 +4486,7 @@ function showEditForeshadowingModal(fsh) {
 async function updateForeshadowing(foreshadowingId, updates) {
     try {
         const userId = encodeURIComponent(currentCharacterId || 'default');
-        const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing/${foreshadowingId}?user_id=${userId}`, {
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing/${foreshadowingId}?user_id=${userId}&character_id=${userId}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(updates)
@@ -4423,9 +4503,10 @@ async function updateForeshadowing(foreshadowingId, updates) {
     }
 }
 
-// 将分页函数暴露到全局作用域
-window.loadArchivedContexts = loadArchivedContexts;
-window.loadArchivedForeshadowings = loadArchivedForeshadowings;
+// 将分页函数暴露到命名空间，避免全局污染
+window.RecallPlugin = window.RecallPlugin || {};
+window.RecallPlugin.loadArchivedContexts = loadArchivedContexts;
+window.RecallPlugin.loadArchivedForeshadowings = loadArchivedForeshadowings;
 
 /**
  * 压缩合并持久条件
@@ -4435,7 +4516,7 @@ async function consolidatePersistentContexts() {
     
     try {
         const userId = encodeURIComponent(currentCharacterId || 'default');
-        const response = await fetch(`${pluginSettings.apiUrl}/v1/persistent-contexts/consolidate?user_id=${userId}&force=true`, {
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/persistent-contexts/consolidate?user_id=${userId}&character_id=${userId}&force=true`, {
             method: 'POST'
         });
         
@@ -4608,7 +4689,7 @@ function displayForeshadowings(foreshadowings) {
 async function resolveForeshadowing(foreshadowingId) {
     try {
         const userId = encodeURIComponent(currentCharacterId || 'default');
-        const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing/${foreshadowingId}/resolve?user_id=${userId}`, {
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing/${foreshadowingId}/resolve?user_id=${userId}&character_id=${userId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ resolution: '用户手动标记为已解决' })
@@ -4631,7 +4712,7 @@ async function resolveForeshadowing(foreshadowingId) {
 async function abandonForeshadowing(foreshadowingId) {
     try {
         const userId = encodeURIComponent(currentCharacterId || 'default');
-        const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing/${foreshadowingId}?user_id=${userId}`, {
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing/${foreshadowingId}?user_id=${userId}&character_id=${userId}`, {
             method: 'DELETE'
         });
         
@@ -4655,15 +4736,18 @@ async function getMemoryContext(query) {
         return '';
     }
     
+    const userId = currentCharacterId || 'default';
     try {
         const response = await fetch(`${pluginSettings.apiUrl}/v1/context`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 query: query,
-                user_id: currentCharacterId || 'default',
+                user_id: userId,
+                character_id: userId,
                 max_tokens: pluginSettings.maxContextTokens || 2000,
-                include_recent: 3
+                include_recent: 3,
+                include_core_facts: true
             })
         });
         
@@ -4686,14 +4770,14 @@ function escapeHtml(text) {
 }
 
 // 导出供外部使用（安全方式）
-window.RecallPlugin = {
-    getMemoryContext: safeExecute(getMemoryContext, '获取记忆上下文失败'),
-    loadMemories: safeExecute(loadMemories, '加载记忆失败'),
-    loadForeshadowings: safeExecute(loadForeshadowings, '加载伏笔失败'),
-    loadPersistentContexts: safeExecute(loadPersistentContexts, '加载持久条件失败'),
-    isConnected: () => isConnected,
-    isInitialized: () => isInitialized,
-    getSettings: () => ({ ...pluginSettings })
-};
+// 注意：保留之前设置的分页函数
+window.RecallPlugin = window.RecallPlugin || {};
+window.RecallPlugin.getMemoryContext = safeExecute(getMemoryContext, '获取记忆上下文失败');
+window.RecallPlugin.loadMemories = safeExecute(loadMemories, '加载记忆失败');
+window.RecallPlugin.loadForeshadowings = safeExecute(loadForeshadowings, '加载伏笔失败');
+window.RecallPlugin.loadPersistentContexts = safeExecute(loadPersistentContexts, '加载持久条件失败');
+window.RecallPlugin.isConnected = () => isConnected;
+window.RecallPlugin.isInitialized = () => isInitialized;
+window.RecallPlugin.getSettings = () => ({ ...pluginSettings });
 
 })(); // IIFE 结束
