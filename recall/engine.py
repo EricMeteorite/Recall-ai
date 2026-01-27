@@ -2064,11 +2064,34 @@ class RecallEngine:
         return ""
     
     def _build_core_facts_section(self, user_id: str, budget: int) -> str:
-        """构建核心事实部分 - 从 L1 ConsolidatedMemory 获取压缩知识"""
-        # 获取所有已验证的实体和核心事实
+        """构建核心事实部分 - 从 L1 ConsolidatedMemory 获取压缩知识
+        
+        注意：只返回与当前用户记忆关联的实体，确保用户隔离。
+        """
+        # 1. 先获取该用户的所有记忆 ID
+        user_memory_ids = set()
+        try:
+            scope = self.storage.get_scope(user_id)
+            all_memories = scope.get_all()
+            user_memory_ids = {m.get('metadata', {}).get('id', '') for m in all_memories if m.get('metadata', {}).get('id')}
+        except Exception:
+            pass
+        
+        # 2. 获取所有实体，但只保留与用户记忆关联的
         all_entities = list(self.consolidated_memory.entities.values()) if hasattr(self, 'consolidated_memory') else []
         
-        if not all_entities:
+        # 过滤：只保留 source_memory_ids 与用户记忆有交集的实体
+        if user_memory_ids:
+            filtered_entities = [
+                e for e in all_entities 
+                if hasattr(e, 'source_memory_ids') and e.source_memory_ids and 
+                   any(mid in user_memory_ids for mid in e.source_memory_ids)
+            ]
+        else:
+            # 用户没有记忆，不应该有实体
+            filtered_entities = []
+        
+        if not filtered_entities:
             # 如果没有整合的记忆，尝试生成摘要
             return self._generate_memory_summary(user_id, budget)
         
@@ -2076,7 +2099,7 @@ class RecallEngine:
         current_length = 0
         
         # 按置信度排序，优先高置信度的
-        sorted_entities = sorted(all_entities, key=lambda e: -e.confidence)
+        sorted_entities = sorted(filtered_entities, key=lambda e: -e.confidence)
         
         for entity in sorted_entities:
             fact_line = f"• {entity.name}"
