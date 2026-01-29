@@ -372,10 +372,10 @@ def main():
     print('[HINT] 已启用自动热重载: 保存 api_keys.env 后 2 秒内自动生效（无需手动调用）')
     
     # =========================================================================
-    # Part 6: Phase 2/3.5 高级功能集成状态
+    # Part 6: Phase 2/3.5/4.1 高级功能集成状态
     # =========================================================================
     print()
-    print("[Part 6] Phase 2/3.5 高级功能集成状态")
+    print("[Part 6] Phase 2/3.5/4.1 高级功能集成状态")
     print("-" * 40)
     
     # 检查 engine.py 是否导入了这些组件
@@ -421,6 +421,28 @@ def main():
             print('[INFO] CommunityDetector 未集成 (Phase 3.5 可选功能)')
             print('       -> 配置项 COMMUNITY_DETECTION_* 在 engine.py 中暂不生效')
         
+        # === Phase 4.1 功能 ===
+        # LLMRelationExtractor 集成状态
+        if 'LLMRelationExtractor' in engine_content:
+            print('[PASS] LLMRelationExtractor 已集成到 engine.py')
+        else:
+            print('[INFO] LLMRelationExtractor 未集成 (Phase 4.1 可选功能)')
+            print('       -> 配置项 LLM_RELATION_* 在 engine.py 中暂不生效')
+        
+        # EpisodeStore 集成状态
+        if 'EpisodeStore' in engine_content:
+            print('[PASS] EpisodeStore 已集成到 engine.py')
+        else:
+            print('[INFO] EpisodeStore 未集成 (Phase 4.1 可选功能)')
+            print('       -> 配置项 EPISODE_TRACKING_* 在 engine.py 中暂不生效')
+        
+        # EntitySummarizer 集成状态
+        if 'EntitySummarizer' in engine_content:
+            print('[PASS] EntitySummarizer 已集成到 engine.py')
+        else:
+            print('[INFO] EntitySummarizer 未集成 (Phase 4.1 可选功能)')
+            print('       -> 配置项 ENTITY_SUMMARY_* 在 engine.py 中暂不生效')
+        
         print()
         print('[NOTE] 高级功能资源消耗说明:')
         print('       Phase 2:')
@@ -430,6 +452,10 @@ def main():
         print('       Phase 3.5:')
         print('         - QueryPlanner: 本地缓存优化，零 API 成本')
         print('         - CommunityDetector: 本地图算法，零 API 成本')
+        print('       Phase 4.1:')
+        print('         - LLMRelationExtractor: RULES 模式零 LLM 成本，ADAPTIVE/LLM 模式按需调用')
+        print('         - EpisodeStore: 本地 JSONL 存储，零 API 成本')
+        print('         - EntitySummarizer: 仅在 ENTITY_SUMMARY_ENABLED=true 时调用 LLM')
     
     # =========================================================================
     # Summary

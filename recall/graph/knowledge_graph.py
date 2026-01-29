@@ -17,6 +17,10 @@ class Relation:
     created_turn: int = 0    # 创建轮次
     confidence: float = 0.5  # 置信度
     source_text: str = ""    # 原文依据
+    # === Recall 4.1 新增时态字段 ===
+    valid_at: Optional[str] = None      # 事实生效时间 (ISO 8601)
+    invalid_at: Optional[str] = None    # 事实失效时间 (ISO 8601)
+    fact: str = ""                      # 自然语言事实描述
 
 
 class KnowledgeGraph:
@@ -97,7 +101,9 @@ class KnowledgeGraph:
     
     def add_relation(self, source_id: str, target_id: str, relation_type: str,
                      properties: Dict = None, turn: int = 0, source_text: str = "",
-                     confidence: float = 0.5) -> Relation:
+                     confidence: float = 0.5,
+                     valid_at: Optional[str] = None, invalid_at: Optional[str] = None,
+                     fact: str = "") -> Relation:
         """添加关系
         
         Args:
@@ -108,6 +114,9 @@ class KnowledgeGraph:
             turn: 创建轮次
             source_text: 原文依据
             confidence: 置信度 (0-1)
+            valid_at: 事实生效时间 (ISO 8601) - Recall 4.1
+            invalid_at: 事实失效时间 (ISO 8601) - Recall 4.1
+            fact: 自然语言事实描述 - Recall 4.1
         """
         # 检查是否已存在
         for rel in self.outgoing[source_id]:
@@ -124,7 +133,10 @@ class KnowledgeGraph:
             properties=properties or {},
             created_turn=turn,
             confidence=confidence,
-            source_text=source_text
+            source_text=source_text,
+            valid_at=valid_at,
+            invalid_at=invalid_at,
+            fact=fact
         )
         self._index_relation(rel)
         self._save()

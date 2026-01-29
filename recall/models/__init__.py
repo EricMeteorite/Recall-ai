@@ -23,6 +23,14 @@ from .temporal import (
     relation_to_temporal_fact,
 )
 
+# === Recall 4.1 新增: 实体类型 Schema ===
+from .entity_schema import (
+    AttributeType,
+    AttributeDefinition,
+    EntityTypeDefinition,
+    EntitySchemaRegistry,
+)
+
 __all__ = [
     # v3 原有导出（保持向后兼容）
     'EntityType',
@@ -47,4 +55,10 @@ __all__ = [
     'GraphIndexes',
     'entity_to_unified_node',
     'relation_to_temporal_fact',
+    
+    # === Recall 4.1 新增导出 ===
+    'AttributeType',
+    'AttributeDefinition',
+    'EntityTypeDefinition',
+    'EntitySchemaRegistry',
 ]

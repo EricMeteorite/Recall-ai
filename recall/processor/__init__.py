@@ -30,6 +30,9 @@ from .three_stage_deduplicator import (
     MatchType
 )
 
+# === Recall 4.1 新增: 实体摘要生成器 ===
+from .entity_summarizer import EntitySummarizer, EntitySummary
+
 __all__ = [
     'EntityExtractor',
     'ExtractedEntity',
@@ -64,4 +67,8 @@ __all__ = [
     'DedupMatch',
     'DedupResult',
     'MatchType',
+    
+    # === Recall 4.1 新增导出 ===
+    'EntitySummarizer',
+    'EntitySummary',
 ]

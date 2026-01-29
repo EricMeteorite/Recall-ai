@@ -123,8 +123,8 @@ class APIEmbeddingBackend(EmbeddingBackend):
         EmbeddingBackendType.CUSTOM: None,  # 必须指定
     }
     
-    def __init__(self, config: EmbeddingConfig):
-        super().__init__(config)
+    def __init__(self, config: EmbeddingConfig, cache_dir: str = None):
+        super().__init__(config, cache_dir=cache_dir)
         self._client = None
         
         # 确定 API 基地址（优先使用配置，然后环境变量，最后默认值）
@@ -210,7 +210,7 @@ class APIEmbeddingBackend(EmbeddingBackend):
                 # 处理 429 错误（速率限制）
                 if '429' in error_str or 'rate limit' in error_str:
                     if attempt < max_retries - 1:
-                        wait_time = (attempt + 1) * 15  # 指数退避: 15, 30, 45 秒
+                        wait_time = (attempt + 1) * 3  # 更快退避: 3, 6, 9 秒（总共最多18秒）
                         _safe_print(f"[Embedding] API 限流 (429)，等待 {wait_time} 秒后重试 ({attempt + 1}/{max_retries})")
                         time.sleep(wait_time)
                         continue
@@ -255,7 +255,7 @@ class APIEmbeddingBackend(EmbeddingBackend):
                     # 处理 429 错误
                     if '429' in error_str or 'rate limit' in error_str:
                         if attempt < max_retries - 1:
-                            wait_time = (attempt + 1) * 15
+                            wait_time = (attempt + 1) * 3  # 更快退避: 3, 6, 9 秒
                             _safe_print(f"[Embedding] API 限流 (429)，等待 {wait_time} 秒后重试")
                             time.sleep(wait_time)
                             continue

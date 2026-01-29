@@ -27,11 +27,12 @@ def _safe_print(msg: str) -> None:
         print(msg.encode('ascii', errors='replace').decode('ascii'))
 
 
-def create_embedding_backend(config: Optional[EmbeddingConfig] = None) -> EmbeddingBackend:
+def create_embedding_backend(config: Optional[EmbeddingConfig] = None, cache_dir: str = None) -> EmbeddingBackend:
     """创建 Embedding 后端
     
     Args:
         config: Embedding 配置，为 None 时使用默认 Local 模式
+        cache_dir: 持久化缓存目录，用于存储 embedding 缓存以减少 API 调用
     
     Returns:
         对应的 EmbeddingBackend 实例
@@ -72,14 +73,14 @@ def create_embedding_backend(config: Optional[EmbeddingConfig] = None) -> Embedd
         return NoneBackend(config)
     
     elif backend_type == EmbeddingBackendType.LOCAL:
-        backend = LocalEmbeddingBackend(config)
+        backend = LocalEmbeddingBackend(config, cache_dir=cache_dir)
         if not backend.is_available:
             _safe_print("[Embedding] 警告: sentence-transformers 未安装，回退到 Lite 模式")
             return NoneBackend(EmbeddingConfig.lite())
         return backend
     
     elif backend_type in (EmbeddingBackendType.OPENAI, EmbeddingBackendType.SILICONFLOW, EmbeddingBackendType.CUSTOM):
-        backend = APIEmbeddingBackend(config)
+        backend = APIEmbeddingBackend(config, cache_dir=cache_dir)
         if not backend.is_available:
             _safe_print(f"[Embedding] 警告: {backend_type.value} API key 未配置，回退到 Lite 模式")
             return NoneBackend(EmbeddingConfig.lite())

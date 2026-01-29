@@ -141,9 +141,51 @@ class EmbeddingConfig:
 class EmbeddingBackend(ABC):
     """Embedding 后端抽象基类"""
     
-    def __init__(self, config: EmbeddingConfig):
+    def __init__(self, config: EmbeddingConfig, cache_dir: str = None):
         self.config = config
-        self._cache = {}  # 简单缓存
+        self._cache = {}  # 内存缓存
+        self._cache_dir = cache_dir
+        self._disk_cache = {}  # 磁盘缓存（延迟加载）
+        self._disk_cache_loaded = False
+        
+        # 如果配置了缓存目录，尝试加载磁盘缓存
+        if cache_dir:
+            self._load_disk_cache()
+    
+    def _load_disk_cache(self):
+        """加载磁盘缓存"""
+        if self._disk_cache_loaded or not self._cache_dir:
+            return
+        
+        import os
+        import pickle
+        
+        cache_file = os.path.join(self._cache_dir, 'embedding_cache.pkl')
+        if os.path.exists(cache_file):
+            try:
+                with open(cache_file, 'rb') as f:
+                    self._disk_cache = pickle.load(f)
+                # 合并到内存缓存
+                self._cache.update(self._disk_cache)
+            except Exception:
+                pass
+        self._disk_cache_loaded = True
+    
+    def _save_disk_cache(self):
+        """保存磁盘缓存"""
+        if not self._cache_dir:
+            return
+        
+        import os
+        import pickle
+        
+        os.makedirs(self._cache_dir, exist_ok=True)
+        cache_file = os.path.join(self._cache_dir, 'embedding_cache.pkl')
+        try:
+            with open(cache_file, 'wb') as f:
+                pickle.dump(self._cache, f)
+        except Exception:
+            pass
     
     @property
     @abstractmethod
@@ -168,9 +210,13 @@ class EmbeddingBackend(ABC):
         pass
     
     def encode_with_cache(self, text: str) -> np.ndarray:
-        """带缓存的编码"""
+        """带缓存的编码（内存 + 磁盘持久化）"""
         if not self.config.cache_embeddings:
             return self.encode(text)
+        
+        # 确保磁盘缓存已加载
+        if not self._disk_cache_loaded:
+            self._load_disk_cache()
         
         cache_key = hash(text)
         if cache_key in self._cache:
@@ -185,6 +231,11 @@ class EmbeddingBackend(ABC):
                 del self._cache[k]
         
         self._cache[cache_key] = embedding
+        
+        # 每 50 次新缓存保存一次到磁盘
+        if self._cache_dir and len(self._cache) % 50 == 0:
+            self._save_disk_cache()
+        
         return embedding
     
     def clear_cache(self):

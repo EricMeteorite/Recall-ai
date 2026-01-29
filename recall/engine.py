@@ -543,7 +543,171 @@ class RecallEngine:
                 _safe_print(f"[Recall v4.0 Phase 3.5] 社区检测器已启用 (算法: {algorithm})")
             except Exception as e:
                 _safe_print(f"[Recall v4.0] 社区检测器初始化失败（不影响核心功能）: {e}")
+        
+        # 10. Recall 4.1: LLM 关系提取器
+        self._init_llm_relation_extractor()
+        
+        # 11. Recall 4.1: Episode 追溯
+        self._init_episode_store()
+        
+        # 12. Recall 4.1: 实体摘要生成器
+        self._init_entity_summarizer()
     
+    def _init_llm_relation_extractor(self):
+        """初始化 LLM 关系提取器 (Recall 4.1)
+        
+        用于增强关系提取能力，支持：
+        - RULES 模式：纯规则（零成本）
+        - ADAPTIVE 模式：规则 + LLM 精炼
+        - LLM 模式：纯 LLM（最高质量）
+        """
+        self._llm_relation_extractor = None
+        
+        llm_relation_mode = os.environ.get('LLM_RELATION_MODE', 'rules').lower()
+        if llm_relation_mode != 'rules' and self.llm_client:
+            try:
+                from .graph.llm_relation_extractor import (
+                    LLMRelationExtractor, LLMRelationExtractorConfig, RelationExtractionMode
+                )
+                mode_map = {
+                    'adaptive': RelationExtractionMode.ADAPTIVE,
+                    'llm': RelationExtractionMode.LLM,
+                }
+                
+                complexity_threshold = float(os.environ.get('LLM_RELATION_COMPLEXITY_THRESHOLD', '0.5'))
+                enable_temporal = os.environ.get('LLM_RELATION_ENABLE_TEMPORAL', 'true').lower() == 'true'
+                enable_fact = os.environ.get('LLM_RELATION_ENABLE_FACT_DESCRIPTION', 'true').lower() == 'true'
+                
+                self._llm_relation_extractor = LLMRelationExtractor(
+                    llm_client=self.llm_client,
+                    budget_manager=self.budget_manager if hasattr(self, 'budget_manager') else None,
+                    entity_extractor=self.entity_extractor,
+                    config=LLMRelationExtractorConfig(
+                        mode=mode_map.get(llm_relation_mode, RelationExtractionMode.RULES),
+                        complexity_threshold=complexity_threshold,
+                        enable_temporal=enable_temporal,
+                        enable_fact_description=enable_fact
+                    )
+                )
+                _safe_print(f"[Recall v4.1] LLM 关系提取器已启用 (模式: {llm_relation_mode})")
+            except ImportError:
+                pass  # 模块不存在时静默跳过
+            except Exception as e:
+                _safe_print(f"[Recall v4.1] LLM 关系提取器初始化失败: {e}")
+    
+    def _init_episode_store(self):
+        """初始化 Episode 存储 (Recall 4.1)
+        
+        用于追溯记忆来源：
+        - Episode -> Memory 关联
+        - Episode -> Entity 关联
+        - Episode -> Relation 关联
+        """
+        self.episode_store = None
+        self._episode_tracking_enabled = False
+        
+        episode_enabled = os.environ.get('EPISODE_TRACKING_ENABLED', 'false').lower() == 'true'
+        if episode_enabled:
+            try:
+                from .storage.episode_store import EpisodeStore
+                self.episode_store = EpisodeStore(
+                    data_path=os.path.join(self.data_root, 'data')
+                )
+                self._episode_tracking_enabled = True
+                _safe_print("[Recall v4.1] Episode 追溯已启用")
+            except ImportError:
+                pass  # 模块不存在时静默跳过
+            except Exception as e:
+                _safe_print(f"[Recall v4.1] Episode 存储初始化失败: {e}")
+    
+    def _init_entity_summarizer(self):
+        """初始化实体摘要生成器 (Recall 4.1)
+        
+        为实体自动生成摘要，总结实体的所有已知信息
+        """
+        self.entity_summarizer = None
+        self._entity_summary_enabled = False
+        self._entity_summary_min_facts = 5
+        
+        summary_enabled = os.environ.get('ENTITY_SUMMARY_ENABLED', 'false').lower() == 'true'
+        if summary_enabled:
+            try:
+                from .processor.entity_summarizer import EntitySummarizer
+                self.entity_summarizer = EntitySummarizer(
+                    llm_client=self.llm_client
+                )
+                self._entity_summary_enabled = True
+                self._entity_summary_min_facts = int(
+                    os.environ.get('ENTITY_SUMMARY_MIN_FACTS', '5')
+                )
+                _safe_print("[Recall v4.1] 实体摘要生成已启用")
+            except ImportError:
+                pass  # 模块不存在时静默跳过
+            except Exception as e:
+                _safe_print(f"[Recall v4.1] 实体摘要生成器初始化失败: {e}")
+    
+    def _maybe_update_entity_summary(self, entity_name: str):
+        """检查并更新实体摘要（如果需要）- Recall 4.1
+        
+        只有当实体的事实数量超过阈值时才会触发摘要生成。
+        """
+        if not self._entity_summary_enabled or not self.entity_summarizer:
+            return
+        
+        # 获取实体
+        if not self._entity_index:
+            return
+        
+        entity = self._entity_index.get_entity(entity_name)
+        if not entity:
+            return
+        
+        # 检查是否需要更新（事实数量超过阈值且没有摘要）
+        fact_count = len(entity.turn_references)
+        if fact_count < self._entity_summary_min_facts:
+            return
+        
+        # 如果已有摘要，跳过（可考虑定期更新策略）
+        if entity.summary:
+            return
+        
+        try:
+            # 获取关系
+            relations = []
+            if self.knowledge_graph:
+                kg_relations = self.knowledge_graph.get_relations_for_entity(entity_name)
+                relations = [(r.source_id, r.relation_type, r.target_id) for r in kg_relations]
+            
+            # 获取事实（从记忆中提取）
+            facts = []
+            scope = self.storage.get_scope("default")
+            for memory_id in entity.turn_references[:10]:  # 限制数量
+                for mem in scope.get_all(limit=100):
+                    if mem.get('metadata', {}).get('id') == memory_id:
+                        facts.append(mem.get('content', '')[:100])
+                        break
+            
+            if not facts:
+                return
+            
+            # 生成摘要
+            summary_result = self.entity_summarizer.generate(
+                entity_name=entity_name,
+                facts=facts,
+                relations=relations
+            )
+            
+            # 更新 EntityIndex
+            from datetime import datetime
+            self._entity_index.update_entity_fields(
+                entity_name=entity_name,
+                summary=summary_result.summary,
+                last_summary_update=datetime.now().isoformat()
+            )
+            _safe_print(f"[Recall v4.1] 实体摘要已更新: {entity_name}")
+        except Exception as e:
+            _safe_print(f"[Recall v4.1] 摘要生成失败 {entity_name}: {e}")
+
     def _init_budget_manager(self):
         """初始化预算管理器 (Phase 2)
         
@@ -590,6 +754,7 @@ class RecallEngine:
         - LLM 模式：全部使用 LLM（最高质量）
         """
         self.smart_extractor = None
+        self.entity_schema_registry = None  # Recall 4.1
         
         # 读取配置
         mode_str = os.environ.get('SMART_EXTRACTOR_MODE', 'RULES').upper()
@@ -619,10 +784,20 @@ class RecallEngine:
                 enable_temporal_detection=enable_temporal
             )
             
+            # === Recall 4.1: 初始化 Entity Schema Registry ===
+            try:
+                from .models.entity_schema import EntitySchemaRegistry
+                self.entity_schema_registry = EntitySchemaRegistry(
+                    data_path=self.data_root
+                )
+            except ImportError:
+                pass  # 模块不存在时跳过
+            
             self.smart_extractor = SmartExtractor(
                 config=config,
                 llm_client=self.llm_client if mode != ExtractionMode.RULES else None,
-                budget_manager=self.budget_manager
+                budget_manager=self.budget_manager,
+                entity_schema_registry=self.entity_schema_registry  # Recall 4.1
             )
             _safe_print(f"[Recall v4.0] 智能抽取器已启用 (模式: {mode.value})")
         except Exception as e:
@@ -1061,6 +1236,23 @@ class RecallEngine:
         start_time = time.time()
         consistency_warnings = []  # 收集一致性警告
         
+        # === Recall 4.1: 创建 Episode（如果启用）===
+        current_episode = None
+        if self._episode_tracking_enabled and self.episode_store:
+            try:
+                from .models.temporal import EpisodicNode, EpisodeType
+                current_episode = EpisodicNode(
+                    source_type=EpisodeType.MESSAGE,
+                    content=content,
+                    user_id=user_id,
+                    source_description=f"User: {user_id}",
+                )
+                self.episode_store.save(current_episode)
+                _safe_print(f"[Recall] Episode 已创建: {current_episode.uuid}")
+            except Exception as e:
+                _safe_print(f"[Recall] Episode 创建失败（不影响主流程）: {e}")
+                current_episode = None
+        
         try:
             # 【升级】去重检查：优先使用三阶段去重器（Phase 2），回退到简单字符串匹配
             scope = self.storage.get_scope(user_id)
@@ -1403,18 +1595,36 @@ class RecallEngine:
             
             # 6. 更新知识图谱（失败不影响主流程）
             try:
-                # 复用已提取的实体列表，避免重复提取导致不一致
-                relations = self.relation_extractor.extract(content, 0, entities=entities)
-                for rel in relations:
-                    source_id, relation_type, target_id, source_text = rel
-                    self.knowledge_graph.add_relation(
-                        source_id=source_id,
-                        target_id=target_id,
-                        relation_type=relation_type,
-                        source_text=source_text
-                    )
+                # === Recall 4.1: 优先使用 LLM 关系提取器（如果启用）===
+                if self._llm_relation_extractor:
+                    relations_v2 = self._llm_relation_extractor.extract(content, 0, entities)
+                    for rel in relations_v2:
+                        self.knowledge_graph.add_relation(
+                            source_id=rel.source_id,
+                            target_id=rel.target_id,
+                            relation_type=rel.relation_type,
+                            source_text=rel.source_text,
+                            confidence=rel.confidence,
+                            valid_at=getattr(rel, 'valid_at', None),
+                            invalid_at=getattr(rel, 'invalid_at', None),
+                            fact=getattr(rel, 'fact', '')
+                        )
+                    # 转换为兼容格式供后续使用
+                    relations = [rel.to_legacy_tuple() for rel in relations_v2]
+                else:
+                    # 使用传统规则提取器
+                    relations = self.relation_extractor.extract(content, 0, entities=entities)
+                    for rel in relations:
+                        source_id, relation_type, target_id, source_text = rel
+                        self.knowledge_graph.add_relation(
+                            source_id=source_id,
+                            target_id=target_id,
+                            relation_type=relation_type,
+                            source_text=source_text
+                        )
             except Exception as e:
                 _safe_print(f"[Recall] 知识图谱更新失败（不影响主流程）: {e}")
+                relations = []  # 确保 relations 变量存在
             
             # 6.5 更新全文索引 BM25（Phase 1 功能）
             if self.fulltext_index is not None:
@@ -1445,6 +1655,44 @@ class RecallEngine:
             # 注意：之前这里调用 extract_from_text 时没有传递 character_id，
             # 导致所有条件都存储到 "default" 角色下，与其他角色数据混淆。
             # 现在由 server.py 在添加记忆后正确传递 character_id 来提取条件。
+            
+            # === Recall 4.1: 更新 Episode 关联 ===
+            if current_episode and self.episode_store:
+                try:
+                    # 收集关联的实体ID
+                    entity_ids = []
+                    for e in entities:
+                        if hasattr(e, 'id') and e.id:
+                            entity_ids.append(e.id)
+                        elif hasattr(e, 'name'):
+                            entity_ids.append(f"entity_{e.name.lower().replace(' ', '_')}")
+                    
+                    # 收集关联的关系ID（如果有）
+                    relation_ids = []
+                    if 'relations' in dir() and relations:
+                        for i, rel in enumerate(relations):
+                            if isinstance(rel, tuple) and len(rel) >= 3:
+                                source_id, relation_type, target_id = rel[:3]
+                                relation_ids.append(f"rel_{source_id}_{relation_type}_{target_id}")
+                    
+                    self.episode_store.update_links(
+                        episode_uuid=current_episode.uuid,
+                        memory_ids=[memory_id] if memory_id else [],
+                        entity_ids=entity_ids,
+                        relation_ids=relation_ids
+                    )
+                    _safe_print(f"[Recall] Episode 关联已更新: memories={len([memory_id])}, entities={len(entity_ids)}, relations={len(relation_ids)}")
+                except Exception as e:
+                    _safe_print(f"[Recall] Episode 关联更新失败（不影响主流程）: {e}")
+            
+            # === Recall 4.1: 更新实体摘要（如果启用）===
+            if self._entity_summary_enabled and self.entity_summarizer:
+                try:
+                    for entity in entities:
+                        entity_name = entity.name if hasattr(entity, 'name') else str(entity)
+                        self._maybe_update_entity_summary(entity_name)
+                except Exception as e:
+                    _safe_print(f"[Recall] 实体摘要更新失败（不影响主流程）: {e}")
             
             # 记录性能
             try:

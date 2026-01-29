@@ -232,6 +232,18 @@ SUPPORTED_CONFIG_KEYS = {
     'FALLBACK_PARALLEL',              # 是否启用并行兜底扫描
     'FALLBACK_WORKERS',               # 并行扫描线程数（推荐 4）
     'FALLBACK_MAX_RESULTS',           # 兜底最大结果数
+    
+    # ====== v4.1 增强功能配置 ======
+    # LLM 关系提取配置
+    'LLM_RELATION_MODE',              # 模式: rules/adaptive/llm
+    'LLM_RELATION_COMPLEXITY_THRESHOLD',  # 自适应模式复杂度阈值
+    'LLM_RELATION_ENABLE_TEMPORAL',   # 是否提取时态信息
+    'LLM_RELATION_ENABLE_FACT_DESCRIPTION',  # 是否生成事实描述
+    # 实体摘要配置
+    'ENTITY_SUMMARY_ENABLED',         # 是否启用实体摘要
+    'ENTITY_SUMMARY_MIN_FACTS',       # 触发 LLM 摘要的最小事实数
+    # Episode 追溯配置
+    'EPISODE_TRACKING_ENABLED',       # 是否启用 Episode 追溯
 }
 
 
@@ -733,6 +745,50 @@ FALLBACK_WORKERS=4
 # 兜底最大结果数
 # Max fallback results
 FALLBACK_MAX_RESULTS=50
+
+# ╔══════════════════════════════════════════════════════════════════════════╗
+# ║  v4.1 增强功能配置 - RECALL 4.1 ENHANCED FEATURES                        ║
+# ╚══════════════════════════════════════════════════════════════════════════╝
+
+# ----------------------------------------------------------------------------
+# LLM 关系提取配置
+# LLM Relation Extraction Configuration
+# ----------------------------------------------------------------------------
+# 模式: rules（纯规则，默认）/ adaptive（自适应）/ llm（纯LLM）
+# Mode: rules (pure rules, default) / adaptive / llm
+LLM_RELATION_MODE=rules
+
+# 自适应模式下触发 LLM 的复杂度阈值 (0.0-1.0)
+# Complexity threshold to trigger LLM in adaptive mode
+LLM_RELATION_COMPLEXITY_THRESHOLD=0.5
+
+# 是否提取时态信息
+# Enable temporal information extraction
+LLM_RELATION_ENABLE_TEMPORAL=true
+
+# 是否生成事实描述
+# Enable fact description generation
+LLM_RELATION_ENABLE_FACT_DESCRIPTION=true
+
+# ----------------------------------------------------------------------------
+# 实体摘要配置
+# Entity Summary Configuration
+# ----------------------------------------------------------------------------
+# 是否启用实体摘要生成
+# Enable entity summary generation
+ENTITY_SUMMARY_ENABLED=false
+
+# 触发 LLM 摘要的最小事实数
+# Minimum facts to trigger LLM summary
+ENTITY_SUMMARY_MIN_FACTS=5
+
+# ----------------------------------------------------------------------------
+# Episode 追溯配置
+# Episode Tracking Configuration
+# ----------------------------------------------------------------------------
+# 是否启用 Episode 追溯
+# Enable episode tracking
+EPISODE_TRACKING_ENABLED=false
 '''
 
 
@@ -3345,6 +3401,207 @@ async def get_related_entities(name: str):
     engine = get_engine()
     related = engine.get_related_entities(name)
     return {"entity": name, "related": related}
+
+
+# ==================== Episode API (Recall 4.1) ====================
+
+@app.get("/v1/episodes", tags=["Episodes"])
+async def list_episodes(
+    user_id: str = Query(default="default"),
+    limit: int = Query(default=50, ge=1, le=200)
+):
+    """获取 Episode 列表 (Recall 4.1)"""
+    engine = get_engine()
+    
+    if not engine._episode_tracking_enabled or not engine.episode_store:
+        return {
+            "enabled": False,
+            "episodes": [],
+            "message": "Episode 追踪未启用，请设置 EPISODE_TRACKING_ENABLED=true"
+        }
+    
+    try:
+        # 获取所有 Episodes
+        all_episodes = []
+        for ep in engine.episode_store._episodes.values():
+            if ep.user_id == user_id or user_id == "all":
+                all_episodes.append({
+                    "uuid": ep.uuid,
+                    "content": ep.content[:100] + "..." if len(ep.content) > 100 else ep.content,
+                    "user_id": ep.user_id,
+                    "source_type": ep.source_type.value,
+                    "memory_ids": ep.memory_ids,
+                    "entity_ids": getattr(ep, 'entity_edges', []),
+                    "relation_ids": getattr(ep, 'relation_ids', []),
+                    "created_at": ep.created_at.isoformat() if ep.created_at else None
+                })
+        
+        # 按创建时间倒序
+        all_episodes.sort(key=lambda x: x.get('created_at') or '', reverse=True)
+        
+        return {
+            "enabled": True,
+            "episodes": all_episodes[:limit],
+            "count": len(all_episodes[:limit]),
+            "total": len(all_episodes)
+        }
+    except Exception as e:
+        _safe_print(f"[Recall][Episode] 获取失败: {e}")
+        return {"enabled": True, "episodes": [], "error": str(e)}
+
+
+@app.get("/v1/episodes/{episode_uuid}", tags=["Episodes"])
+async def get_episode(episode_uuid: str):
+    """获取单个 Episode 详情 (Recall 4.1)"""
+    engine = get_engine()
+    
+    if not engine._episode_tracking_enabled or not engine.episode_store:
+        raise HTTPException(status_code=400, detail="Episode 追踪未启用")
+    
+    episode = engine.episode_store.get(episode_uuid)
+    if not episode:
+        raise HTTPException(status_code=404, detail="Episode 不存在")
+    
+    return {
+        "uuid": episode.uuid,
+        "content": episode.content,
+        "user_id": episode.user_id,
+        "source_type": episode.source_type.value,
+        "memory_ids": episode.memory_ids,
+        "entity_ids": getattr(episode, 'entity_edges', []),
+        "relation_ids": getattr(episode, 'relation_ids', []),
+        "created_at": episode.created_at.isoformat() if episode.created_at else None
+    }
+
+
+@app.get("/v1/episodes/by-memory/{memory_id}", tags=["Episodes"])
+async def get_episodes_by_memory(memory_id: str):
+    """根据记忆ID查找关联的 Episodes (Recall 4.1)"""
+    engine = get_engine()
+    
+    if not engine._episode_tracking_enabled or not engine.episode_store:
+        return {"enabled": False, "episodes": []}
+    
+    episodes = engine.episode_store.get_by_memory_id(memory_id)
+    return {
+        "memory_id": memory_id,
+        "episodes": [
+            {
+                "uuid": ep.uuid,
+                "content": ep.content[:100],
+                "created_at": ep.created_at.isoformat() if ep.created_at else None
+            }
+            for ep in episodes
+        ]
+    }
+
+
+# ==================== Entity Summary API (Recall 4.1) ====================
+
+@app.get("/v1/entities/{name}/summary", tags=["Entities"])
+async def get_entity_summary(name: str):
+    """获取实体摘要 (Recall 4.1)"""
+    engine = get_engine()
+    
+    if not engine._entity_index:
+        raise HTTPException(status_code=400, detail="实体索引未启用")
+    
+    entity = engine._entity_index.get_entity(name)
+    if not entity:
+        raise HTTPException(status_code=404, detail="实体不存在")
+    
+    return {
+        "name": entity.name,
+        "summary": entity.summary or "(暂无摘要)",
+        "attributes": entity.attributes,
+        "last_summary_update": entity.last_summary_update,
+        "fact_count": len(entity.turn_references),
+        "summary_enabled": engine._entity_summary_enabled
+    }
+
+
+@app.post("/v1/entities/{name}/generate-summary", tags=["Entities"])
+async def generate_entity_summary(name: str):
+    """手动触发实体摘要生成 (Recall 4.1)"""
+    engine = get_engine()
+    
+    if not engine.entity_summarizer:
+        raise HTTPException(status_code=400, detail="实体摘要生成器未启用，请设置 ENTITY_SUMMARY_ENABLED=true")
+    
+    if not engine._entity_index:
+        raise HTTPException(status_code=400, detail="实体索引未启用")
+    
+    entity = engine._entity_index.get_entity(name)
+    if not entity:
+        raise HTTPException(status_code=404, detail="实体不存在")
+    
+    try:
+        # 强制更新摘要（忽略阈值）
+        # 获取关系
+        relations = []
+        if engine.knowledge_graph:
+            kg_relations = engine.knowledge_graph.get_relations_for_entity(name)
+            relations = [(r.source_id, r.relation_type, r.target_id) for r in kg_relations]
+        
+        # 获取事实
+        facts = []
+        scope = engine.storage.get_scope("default")
+        for memory_id in entity.turn_references[:10]:
+            for mem in scope.get_all(limit=100):
+                if mem.get('metadata', {}).get('id') == memory_id:
+                    facts.append(mem.get('content', '')[:100])
+                    break
+        
+        # 生成摘要
+        summary_result = engine.entity_summarizer.generate(
+            entity_name=name,
+            facts=facts,
+            relations=relations
+        )
+        
+        # 更新索引
+        from datetime import datetime
+        engine._entity_index.update_entity_fields(
+            entity_name=name,
+            summary=summary_result.summary,
+            last_summary_update=datetime.now().isoformat()
+        )
+        
+        return {
+            "name": name,
+            "summary": summary_result.summary,
+            "key_facts": summary_result.key_facts,
+            "updated": True
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"摘要生成失败: {str(e)}")
+
+
+# ==================== Recall 4.1 Config API ====================
+
+@app.get("/v1/config/v41", tags=["Admin"])
+async def get_v41_config():
+    """获取 Recall 4.1 功能配置状态"""
+    engine = get_engine()
+    
+    return {
+        "llm_relation_extractor": {
+            "enabled": engine._llm_relation_extractor is not None,
+            "mode": os.environ.get('LLM_RELATION_MODE', 'rules')
+        },
+        "entity_schema_registry": {
+            "enabled": engine.entity_schema_registry is not None,
+            "builtin_types": 7 if engine.entity_schema_registry else 0
+        },
+        "episode_tracking": {
+            "enabled": engine._episode_tracking_enabled,
+            "store_initialized": engine.episode_store is not None
+        },
+        "entity_summary": {
+            "enabled": engine._entity_summary_enabled,
+            "min_facts": engine._entity_summary_min_facts
+        }
+    }
 
 
 # ==================== 管理 API ====================

@@ -354,10 +354,22 @@ class EpisodicNode(UnifiedNode):
     turn_number: int = 0        # 对话轮次（兼容现有系统）
     role: str = ""              # 角色（user/assistant）
     
+    # === Recall 4.1 新增：SillyTavern 关联 ===
+    # 注意：user_id 和 group_id 已从 UnifiedNode 继承
+    character_id: str = ""      # 角色ID（SillyTavern 特有）
+    
+    # === Recall 4.1 新增：追溯链 ===
+    memory_ids: List[str] = field(default_factory=list)    # 关联的记忆ID
+    relation_ids: List[str] = field(default_factory=list)  # 关联的关系ID
+    
     def to_dict(self) -> Dict[str, Any]:
         """转换为可序列化的字典"""
         result = super().to_dict()
         result['source_type'] = self.source_type.value
+        # Recall 4.1: 新增字段（user_id/group_id 已由父类处理）
+        result['character_id'] = self.character_id
+        result['memory_ids'] = self.memory_ids
+        result['relation_ids'] = self.relation_ids
         return result
     
     @classmethod

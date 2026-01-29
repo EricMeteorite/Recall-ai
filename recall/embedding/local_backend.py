@@ -39,8 +39,8 @@ class LocalEmbeddingBackend(EmbeddingBackend):
     - 首次加载较慢
     """
     
-    def __init__(self, config: EmbeddingConfig):
-        super().__init__(config)
+    def __init__(self, config: EmbeddingConfig, cache_dir: str = None):
+        super().__init__(config, cache_dir=cache_dir)
         self._model = None
         self._dimension = None
     

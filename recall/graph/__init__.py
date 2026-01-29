@@ -14,6 +14,14 @@ from .community_detector import CommunityDetector, Community
 # v4.0 Phase 3.5: 图后端抽象层
 from .backends import GraphBackend, GraphNode, GraphEdge, create_graph_backend
 
+# === Recall 4.1 新增: LLM 关系提取 ===
+from .llm_relation_extractor import (
+    LLMRelationExtractor,
+    LLMRelationExtractorConfig,
+    RelationExtractionMode,
+    ExtractedRelationV2
+)
+
 __all__ = [
     # v3 原有导出（保持向后兼容）
     'KnowledgeGraph',
@@ -38,4 +46,10 @@ __all__ = [
     'GraphNode',
     'GraphEdge',
     'create_graph_backend',
+    
+    # === Recall 4.1 新增导出 ===
+    'LLMRelationExtractor',
+    'LLMRelationExtractorConfig',
+    'RelationExtractionMode',
+    'ExtractedRelationV2',
 ]

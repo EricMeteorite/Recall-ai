@@ -121,7 +121,10 @@ class VectorIndex:
     def embedding_backend(self) -> EmbeddingBackend:
         """获取 Embedding 后端（懒加载）"""
         if self._embedding_backend is None:
-            self._embedding_backend = create_embedding_backend(self.embedding_config)
+            # 使用 cache 目录作为 embedding 缓存目录
+            import os
+            cache_dir = os.path.join(self.data_path, 'cache')
+            self._embedding_backend = create_embedding_backend(self.embedding_config, cache_dir=cache_dir)
         return self._embedding_backend
     
     @property

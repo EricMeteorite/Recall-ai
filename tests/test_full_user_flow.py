@@ -3381,10 +3381,13 @@ class TestFullUserFlow:
     
     def test_memory_search(self, server_running):
         """搜索记忆"""
-        add_memory("pytest 搜索测试内容", "user")
-        time.sleep(0.3)
-        results = search_memory("pytest 搜索")
-        assert len(results) > 0
+        import uuid
+        unique_id = str(uuid.uuid4())[:8]
+        unique_content = f"pytest 搜索测试 唯一标识 {unique_id}"
+        add_memory(unique_content, "user")
+        time.sleep(0.5)
+        results = search_memory(unique_id)
+        assert len(results) > 0, f"未找到包含 {unique_id} 的记忆"
     
     def test_context_build(self, server_running):
         """构建上下文"""

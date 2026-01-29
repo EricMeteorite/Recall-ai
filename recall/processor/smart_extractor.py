@@ -198,7 +198,7 @@ class SmartExtractor:
         (r'(\w+)\s+(?:likes?|loves?)\s+(\w+)', 'likes'),
     ]
     
-    # LLM 抽取 Prompt
+    # LLM 抽取 Prompt（基础版，会被 _build_extraction_prompt 动态替换）
     EXTRACTION_PROMPT = '''请从以下文本中抽取实体、关系和时态信息。
 
 文本：
@@ -223,12 +223,46 @@ class SmartExtractor:
 3. 置信度反映抽取的确定性
 4. 如果没有相关信息，对应数组为空'''
 
+    # Recall 4.1: 增强版提示词模板（支持自定义实体类型）
+    EXTRACTION_PROMPT_V2 = '''你是一个专业的实体和关系提取专家。请从以下文本中提取实体。
+
+## 支持的实体类型：
+{entity_types}
+
+## 文本：
+{text}
+
+## 提取要求：
+1. 识别文本中明确提及的实体
+2. 识别文本中隐式提及的实体（如"他的公司"隐含一个组织实体）
+3. 为每个实体分配正确的类型
+4. 评估每个实体的置信度（0.0-1.0）：
+   - 0.9+: 明确提及的专有名词
+   - 0.7-0.9: 明确提及的通用名词
+   - 0.5-0.7: 隐式推断的实体
+
+## 输出格式（JSON）：
+{{
+  "entities": [
+    {{"name": "实体名称", "type": "实体类型", "confidence": 0.9, "is_implicit": false, "context": "提及该实体的原文片段"}}
+  ],
+  "relations": [
+    {{"subject": "主体", "predicate": "关系类型", "object": "客体", "temporal": "时态信息（可选）"}}
+  ],
+  "temporal_markers": [
+    {{"text": "原文片段", "type": "START/END/DURATION/POINT", "normalized": "标准化时间"}}
+  ]
+}}
+
+请只输出 JSON，不要输出其他内容。'''
+
     def __init__(
         self,
         config: Optional[SmartExtractorConfig] = None,
         local_extractor: Optional[EntityExtractor] = None,
         llm_client: Optional[LLMClient] = None,
-        budget_manager: Optional[BudgetManager] = None
+        budget_manager: Optional[BudgetManager] = None,
+        entity_schema_registry: Optional['EntitySchemaRegistry'] = None  # Recall 4.1 新增
     ):
         """初始化智能抽取器
         
@@ -237,17 +271,35 @@ class SmartExtractor:
             local_extractor: 本地实体抽取器（复用现有）
             llm_client: LLM 客户端
             budget_manager: 预算管理器
+            entity_schema_registry: 实体类型注册表（Recall 4.1）
         """
         self.config = config or SmartExtractorConfig()
         self.local_extractor = local_extractor or EntityExtractor()
         self.llm_client = llm_client
         self.budget_manager = budget_manager
+        self.entity_schema_registry = entity_schema_registry  # Recall 4.1
         
         # 编译关系模式
         self._relation_patterns = [
             (re.compile(pattern, re.IGNORECASE), rel_type)
             for pattern, rel_type in self.RELATION_PATTERNS
         ]
+    
+    def _build_extraction_prompt(self, text: str) -> str:
+        """构建提取提示词，使用自定义实体类型（Recall 4.1）"""
+        if self.entity_schema_registry:
+            entity_types = self.entity_schema_registry.get_all_for_prompt()
+        else:
+            entity_types = """1. PERSON（人物）: 真实或虚构的人物
+2. LOCATION（地点）: 地理位置、地名
+3. ORGANIZATION（组织）: 公司、机构、团体
+4. ITEM（物品）: 物品、道具
+5. CONCEPT（概念）: 抽象概念、术语"""
+        
+        return self.EXTRACTION_PROMPT_V2.format(
+            entity_types=entity_types,
+            text=text[:3000]  # 限制长度
+        )
     
     def extract(
         self,

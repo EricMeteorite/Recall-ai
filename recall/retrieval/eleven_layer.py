@@ -241,7 +241,7 @@ class ElevenLayerRetriever:
         if config.l2_enabled and self.temporal_index and temporal_context:
             temporal_candidates = self._l2_temporal_filter(temporal_context, config)
         
-        # 1. 并行执行三路召回
+        # 1. 并行执行三路召回（带优雅超时处理）
         with ThreadPoolExecutor(max_workers=3) as executor:
             futures = {
                 executor.submit(self._vector_recall_parallel, query, top_k * 2): 'vector',
@@ -250,13 +250,28 @@ class ElevenLayerRetriever:
             }
             
             all_results: Dict[str, List[Tuple[str, float]]] = {}
-            for future in as_completed(futures, timeout=10.0):
-                source = futures[future]
-                try:
-                    all_results[source] = future.result()
-                except Exception as e:
-                    all_results[source] = []
-                    logger.warning(f"[ElevenLayer] {source} recall failed: {e}")
+            try:
+                for future in as_completed(futures, timeout=30.0):
+                    source = futures[future]
+                    try:
+                        all_results[source] = future.result()
+                    except Exception as e:
+                        all_results[source] = []
+                        logger.warning(f"[ElevenLayer] {source} recall failed: {e}")
+            except TimeoutError:
+                # 优雅处理超时：收集已完成的结果，记录未完成的路径
+                completed_sources = set(all_results.keys())
+                for future, source in futures.items():
+                    if source not in completed_sources:
+                        if future.done():
+                            try:
+                                all_results[source] = future.result()
+                            except Exception as e:
+                                all_results[source] = []
+                                logger.warning(f"[ElevenLayer] {source} recall failed after timeout: {e}")
+                        else:
+                            all_results[source] = []
+                            logger.warning(f"[ElevenLayer] {source} recall timed out, using other paths")
         
         # L5: Graph Traversal - 图遍历扩展（附加到实体召回）
         if config.l5_enabled and self.knowledge_graph and entities:

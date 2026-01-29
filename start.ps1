@@ -197,7 +197,15 @@ function Import-ApiKeys {
         # IVF-HNSW 向量索引参数
         'VECTOR_IVF_HNSW_M', 'VECTOR_IVF_HNSW_EF_CONSTRUCTION', 'VECTOR_IVF_HNSW_EF_SEARCH',
         # 原文兜底配置
-        'FALLBACK_ENABLED', 'FALLBACK_PARALLEL', 'FALLBACK_WORKERS', 'FALLBACK_MAX_RESULTS'
+        'FALLBACK_ENABLED', 'FALLBACK_PARALLEL', 'FALLBACK_WORKERS', 'FALLBACK_MAX_RESULTS',
+        # ====== v4.1 增强功能配置 ======
+        # LLM 关系提取配置
+        'LLM_RELATION_MODE', 'LLM_RELATION_COMPLEXITY_THRESHOLD',
+        'LLM_RELATION_ENABLE_TEMPORAL', 'LLM_RELATION_ENABLE_FACT_DESCRIPTION',
+        # 实体摘要配置
+        'ENTITY_SUMMARY_ENABLED', 'ENTITY_SUMMARY_MIN_FACTS',
+        # Episode 追溯配置
+        'EPISODE_TRACKING_ENABLED'
     )
     
     if (Test-Path $configFile) {
@@ -722,6 +730,50 @@ FALLBACK_WORKERS=4
 # 兜底最大结果数
 # Max fallback results
 FALLBACK_MAX_RESULTS=50
+
+# ╔══════════════════════════════════════════════════════════════════════════╗
+# ║  v4.1 增强功能配置 - RECALL 4.1 ENHANCED FEATURES                        ║
+# ╚══════════════════════════════════════════════════════════════════════════╝
+
+# ----------------------------------------------------------------------------
+# LLM 关系提取配置
+# LLM Relation Extraction Configuration
+# ----------------------------------------------------------------------------
+# 模式: rules（纯规则，默认）/ adaptive（自适应）/ llm（纯LLM）
+# Mode: rules (pure rules, default) / adaptive / llm
+LLM_RELATION_MODE=rules
+
+# 自适应模式下触发 LLM 的复杂度阈值 (0.0-1.0)
+# Complexity threshold to trigger LLM in adaptive mode
+LLM_RELATION_COMPLEXITY_THRESHOLD=0.5
+
+# 是否提取时态信息
+# Enable temporal information extraction
+LLM_RELATION_ENABLE_TEMPORAL=true
+
+# 是否生成事实描述
+# Enable fact description generation
+LLM_RELATION_ENABLE_FACT_DESCRIPTION=true
+
+# ----------------------------------------------------------------------------
+# 实体摘要配置
+# Entity Summary Configuration
+# ----------------------------------------------------------------------------
+# 是否启用实体摘要生成
+# Enable entity summary generation
+ENTITY_SUMMARY_ENABLED=false
+
+# 触发 LLM 摘要的最小事实数
+# Minimum facts to trigger LLM summary
+ENTITY_SUMMARY_MIN_FACTS=5
+
+# ----------------------------------------------------------------------------
+# Episode 追溯配置
+# Episode Tracking Configuration
+# ----------------------------------------------------------------------------
+# 是否启用 Episode 追溯
+# Enable episode tracking
+EPISODE_TRACKING_ENABLED=false
 '@
         Set-Content -Path $configFile -Value $defaultConfig -Encoding UTF8
         Write-Host "  $([char]0x2192) 已创建配置文件: $configFile" -ForegroundColor Cyan

@@ -2,8 +2,8 @@
 
 import json
 import os
-from typing import Dict, List, Optional
-from dataclasses import dataclass, asdict
+from typing import Dict, List, Optional, Any
+from dataclasses import dataclass, asdict, field
 
 
 @dataclass
@@ -15,6 +15,10 @@ class IndexedEntity:
     entity_type: str
     turn_references: List[str]  # 出现过的记忆ID (如 mem_xxx)
     confidence: float = 0.5  # 置信度 (0-1)
+    # === Recall 4.1 新增字段 ===
+    summary: str = ""                           # 实体摘要
+    attributes: Dict[str, Any] = field(default_factory=dict)  # 动态属性
+    last_summary_update: Optional[str] = None   # 摘要最后更新时间
 
 
 class EntityIndex:
@@ -222,3 +226,51 @@ class EntityIndex:
         self.entities.clear()
         self.name_index.clear()
         self._save()
+    
+    # === Recall 4.1 新增方法 ===
+    
+    def update_entity_fields(
+        self,
+        entity_name: str,
+        summary: Optional[str] = None,
+        attributes: Optional[Dict[str, Any]] = None,
+        last_summary_update: Optional[str] = None
+    ) -> bool:
+        """更新实体的扩展字段 (Recall 4.1)
+        
+        Args:
+            entity_name: 实体名称
+            summary: 实体摘要
+            attributes: 动态属性字典
+            last_summary_update: 摘要最后更新时间
+        
+        Returns:
+            bool: 是否成功
+        """
+        entity = self.get_entity(entity_name)
+        if not entity:
+            return False
+        
+        if summary is not None:
+            entity.summary = summary
+        if attributes is not None:
+            entity.attributes.update(attributes)
+        if last_summary_update is not None:
+            entity.last_summary_update = last_summary_update
+        
+        self._save()
+        return True
+    
+    def get_entities_needing_summary(self, min_facts: int = 5) -> List[IndexedEntity]:
+        """获取需要生成摘要的实体 (Recall 4.1)
+        
+        Args:
+            min_facts: 最小事实数阈值
+        
+        Returns:
+            List[IndexedEntity]: 需要摘要的实体列表
+        """
+        return [
+            entity for entity in self.entities.values()
+            if len(entity.turn_references) >= min_facts and not entity.summary
+        ]

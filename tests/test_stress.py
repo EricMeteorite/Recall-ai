@@ -31,26 +31,38 @@ def get_memory_usage():
 
 
 def generate_test_content(turn: int, idx: int) -> str:
-    """生成测试内容 - 确保唯一性避免语义去重"""
+    """生成测试内容 - 确保唯一性避免语义去重
+    
+    重要：使用随机字符串确保每条记忆的 Jaccard 相似度低于去重阈值(0.85)
+    """
+    import hashlib
+    
     names = ["Alice", "Bob", "Charlie", "David", "Eva", "Frank", "Grace", "Henry"]
     locations = ["北京", "上海", "纽约", "东京", "伦敦", "巴黎", "柏林", "悉尼"]
     actions = ["去了", "住在", "工作于", "旅行到", "搬到", "访问了"]
     topics = ["编程", "音乐", "电影", "美食", "运动", "读书", "旅行", "摄影"]
+    verbs = ["学习", "研究", "探索", "发现", "创造", "设计", "开发", "构建"]
+    adjectives = ["精彩的", "有趣的", "神奇的", "独特的", "创新的", "经典的", "现代的", "传统的"]
     
-    # 使用 turn 和 idx 创建确定性索引，避免随机重复
+    # 使用 turn 和 idx 创建确定性索引
     name1 = names[(turn + idx) % len(names)]
-    name2 = names[(turn + idx + 1) % len(names)]
-    location = locations[(turn + idx) % len(locations)]
-    action = actions[(turn + idx) % len(actions)]
-    topic = topics[(turn + idx) % len(topics)]
+    name2 = names[(turn * 3 + idx + 2) % len(names)]
+    location = locations[(turn * 2 + idx) % len(locations)]
+    action = actions[(turn + idx * 2) % len(actions)]
+    topic = topics[(turn * idx + 1) % len(topics)]
+    verb = verbs[(turn + idx) % len(verbs)]
+    adj = adjectives[(turn * 2 + idx) % len(adjectives)]
     
-    # 根据 idx 选择不同模板，并包含唯一标识符
-    templates = [
-        f"[T{turn}I{idx}] {name1}{action}{location}，这是第{turn}轮第{idx}条记忆",
-        f"[T{turn}I{idx}] {name1}喜欢{topic}，经常和朋友讨论第{turn}轮话题",
-        f"[T{turn}I{idx}] {name1}是{name2}的朋友，他们在{location}相识于第{turn}天",
-    ]
-    return templates[idx % len(templates)]
+    # 生成唯一哈希作为额外区分符
+    unique_hash = hashlib.md5(f"stress_test_{turn}_{idx}".encode()).hexdigest()[:8]
+    
+    # 根据 idx 选择不同模板，使用更多差异化内容
+    if idx == 0:
+        return f"[U{unique_hash}] {name1}在{location}{action}，{verb}了{adj}{topic}项目，记录编号T{turn}"
+    elif idx == 1:
+        return f"[U{unique_hash}] {name1}热爱{topic}，在{location}与{name2}{verb}了一个{adj}作品，时间点{turn}"
+    else:
+        return f"[U{unique_hash}] {name1}和{name2}成为好友，他们在{location}共同{action}，一起{verb}{adj}{topic}，序号{turn}"
 
 
 def test_write_performance():
@@ -197,8 +209,14 @@ def test_incremental_add():
     
     # 再添加100条
     print("添加100条新记忆...")
+    import hashlib
+    incremental_topics = ["量子计算", "人工智能", "区块链", "虚拟现实", "云原生", "边缘计算", "物联网", "大数据"]
+    incremental_verbs = ["研发", "部署", "测试", "优化", "迭代", "重构", "监控", "分析"]
     for i in range(100):
-        engine.add(f"增量测试记忆 #{i}: 这是新添加的内容")
+        topic = incremental_topics[i % len(incremental_topics)]
+        verb = incremental_verbs[(i * 3) % len(incremental_verbs)]
+        unique_id = hashlib.md5(f"incremental_{i}_{time.time()}".encode()).hexdigest()[:10]
+        engine.add(f"[INC{unique_id}] 增量记忆#{i}: 关于{topic}的{verb}工作，详细编号{i * 17 + 31}")
     
     after_count = len(engine.get_all())
     print(f"添加后记忆数: {after_count}")

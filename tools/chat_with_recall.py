@@ -262,6 +262,29 @@ class RecallAPIClient:
         elif isinstance(result, dict) and "foreshadowings" in result:
             return result["foreshadowings"]
         return []
+    
+    # === Recall 4.1 新增 API ===
+    
+    def get_episodes(self, user_id: str, limit: int = 20) -> Dict:
+        """获取 Episode 列表"""
+        return self._request("GET", f"/v1/episodes?user_id={user_id}&limit={limit}")
+    
+    def get_contradictions(self, status: str = "pending") -> Dict:
+        """获取矛盾列表"""
+        return self._request("GET", f"/v1/contradictions?status={status}")
+    
+    def get_persistent_contexts(self, user_id: str) -> List[Dict]:
+        """获取持久条件"""
+        result = self._request("GET", f"/v1/persistent-contexts?user_id={user_id}")
+        return result if isinstance(result, list) else []
+    
+    def get_entity_summary(self, name: str) -> Dict:
+        """获取实体摘要"""
+        return self._request("GET", f"/v1/entities/{urllib.parse.quote(name)}/summary")
+    
+    def get_v41_config(self) -> Dict:
+        """获取 Recall 4.1 配置状态"""
+        return self._request("GET", "/v1/config/v41")
 
 
 class LLMClient:
@@ -387,6 +410,7 @@ class RecallChatApp:
         print(f"""
 {Colors.CYAN}可用命令:{Colors.RESET}
   {Colors.YELLOW}/entities{Colors.RESET}      - 查看所有提取的实体
+  {Colors.YELLOW}/summary <名>{Colors.RESET}  - 查看实体摘要 (v4.1)
   {Colors.YELLOW}/relations{Colors.RESET}     - 查看实体关系图谱
   {Colors.YELLOW}/search <词>{Colors.RESET}   - 搜索记忆
   {Colors.YELLOW}/context{Colors.RESET}       - 查看当前构建的上下文
@@ -394,6 +418,10 @@ class RecallChatApp:
   {Colors.YELLOW}/stats{Colors.RESET}         - 查看统计信息
   {Colors.YELLOW}/graph{Colors.RESET}         - 查看图谱概览（实体+关系）
   {Colors.YELLOW}/foreshadowing{Colors.RESET} - 查看伏笔
+  {Colors.YELLOW}/episodes{Colors.RESET}      - 查看 Episode 追踪 (v4.1)
+  {Colors.YELLOW}/contradictions{Colors.RESET}- 查看矛盾检测结果
+  {Colors.YELLOW}/conditions{Colors.RESET}    - 查看持久条件
+  {Colors.YELLOW}/v41{Colors.RESET}           - 查看 Recall 4.1 功能状态
   {Colors.YELLOW}/clear{Colors.RESET}         - 清空当前用户记忆（需确认）
   {Colors.YELLOW}/debug{Colors.RESET}         - 切换调试模式
   {Colors.YELLOW}/help{Colors.RESET}          - 显示此帮助
@@ -584,6 +612,131 @@ class RecallChatApp:
         self.logger.debug_mode = self.debug
         print(f"  调试模式: {Colors.GREEN if self.debug else Colors.RED}{'开启' if self.debug else '关闭'}{Colors.RESET}")
     
+    # === Recall 4.1 新增命令 ===
+    
+    def cmd_episodes(self):
+        """查看 Episode 追踪"""
+        try:
+            result = self.recall.get_episodes(self.user_id)
+            
+            if not result.get("enabled", False):
+                print(f"  {Colors.YELLOW}Episode 追踪未启用{Colors.RESET}")
+                print(f"  {Colors.DIM}提示: 设置 EPISODE_TRACKING_ENABLED=true 启用{Colors.RESET}")
+                return
+            
+            episodes = result.get("episodes", [])
+            if not episodes:
+                print(f"  {Colors.YELLOW}暂无 Episode{Colors.RESET}")
+                return
+            
+            print(f"\n{Colors.CYAN}Episode 列表 ({result.get('count', 0)}/{result.get('total', 0)}):{Colors.RESET}")
+            for ep in episodes[:15]:
+                uuid_short = ep.get("uuid", "")[:8]
+                content = ep.get("content", "")[:40]
+                mem_count = len(ep.get("memory_ids", []))
+                ent_count = len(ep.get("entity_ids", []))
+                print(f"  • [{uuid_short}...] {content}...")
+                print(f"    {Colors.DIM}├─ 关联: {mem_count} 记忆, {ent_count} 实体{Colors.RESET}")
+        except Exception as e:
+            self.logger.error(f"获取 Episode 失败: {e}")
+    
+    def cmd_contradictions(self):
+        """查看矛盾检测结果"""
+        try:
+            result = self.recall.get_contradictions("all")
+            
+            contradictions = result.get("contradictions", [])
+            if not contradictions:
+                print(f"  {Colors.GREEN}未检测到矛盾{Colors.RESET}")
+                return
+            
+            print(f"\n{Colors.CYAN}矛盾列表 ({len(contradictions)}条):{Colors.RESET}")
+            for c in contradictions[:10]:
+                ctype = c.get("type", "?")
+                status = c.get("status", "pending")
+                old_fact = c.get("old_fact", {}).get("fact", "")[:30]
+                new_fact = c.get("new_fact", {}).get("fact", "")[:30]
+                status_color = Colors.YELLOW if status == "pending" else Colors.GREEN
+                print(f"  • [{status_color}{status}{Colors.RESET}] [{ctype}]")
+                print(f"    {Colors.DIM}旧: {old_fact}...{Colors.RESET}")
+                print(f"    {Colors.DIM}新: {new_fact}...{Colors.RESET}")
+        except Exception as e:
+            self.logger.error(f"获取矛盾失败: {e}")
+    
+    def cmd_conditions(self):
+        """查看持久条件"""
+        try:
+            contexts = self.recall.get_persistent_contexts(self.user_id)
+            
+            if not contexts:
+                print(f"  {Colors.YELLOW}暂无持久条件{Colors.RESET}")
+                return
+            
+            print(f"\n{Colors.CYAN}持久条件 ({len(contexts)}条):{Colors.RESET}")
+            for ctx in contexts[:15]:
+                content = ctx.get("content", "")[:50]
+                ctype = ctx.get("type", "?")
+                conf = ctx.get("confidence", 0)
+                print(f"  • [{ctype}] {content}... (置信度: {conf:.0%})")
+        except Exception as e:
+            self.logger.error(f"获取持久条件失败: {e}")
+    
+    def cmd_summary(self, entity_name: str):
+        """查看实体摘要"""
+        if not entity_name:
+            print(f"  {Colors.YELLOW}请指定实体名: /summary <实体名>{Colors.RESET}")
+            return
+        
+        try:
+            result = self.recall.get_entity_summary(entity_name)
+            
+            print(f"\n{Colors.CYAN}实体摘要: {entity_name}{Colors.RESET}")
+            print(f"  摘要: {result.get('summary', '(无)')}")
+            print(f"  事实数: {result.get('fact_count', 0)}")
+            
+            attrs = result.get('attributes', {})
+            if attrs:
+                print(f"  属性: {attrs}")
+            
+            last_update = result.get('last_summary_update')
+            if last_update:
+                print(f"  {Colors.DIM}最后更新: {last_update}{Colors.RESET}")
+            
+            if not result.get('summary_enabled'):
+                print(f"  {Colors.YELLOW}提示: 实体摘要功能未启用，设置 ENTITY_SUMMARY_ENABLED=true{Colors.RESET}")
+        except Exception as e:
+            self.logger.error(f"获取实体摘要失败: {e}")
+    
+    def cmd_v41(self):
+        """查看 Recall 4.1 功能状态"""
+        try:
+            config = self.recall.get_v41_config()
+            
+            print(f"\n{Colors.CYAN}Recall 4.1 功能状态:{Colors.RESET}")
+            
+            # LLM 关系提取
+            llm_rel = config.get("llm_relation_extractor", {})
+            status = Colors.GREEN + "✓" if llm_rel.get("enabled") else Colors.RED + "✗"
+            print(f"  {status}{Colors.RESET} LLM 关系提取: 模式={llm_rel.get('mode', 'rules')}")
+            
+            # 实体 Schema
+            schema = config.get("entity_schema_registry", {})
+            status = Colors.GREEN + "✓" if schema.get("enabled") else Colors.RED + "✗"
+            print(f"  {status}{Colors.RESET} 实体 Schema 注册表: {schema.get('builtin_types', 0)} 内置类型")
+            
+            # Episode 追踪
+            episode = config.get("episode_tracking", {})
+            status = Colors.GREEN + "✓" if episode.get("enabled") else Colors.RED + "✗"
+            print(f"  {status}{Colors.RESET} Episode 追踪")
+            
+            # 实体摘要
+            summary = config.get("entity_summary", {})
+            status = Colors.GREEN + "✓" if summary.get("enabled") else Colors.RED + "✗"
+            print(f"  {status}{Colors.RESET} 实体摘要: min_facts={summary.get('min_facts', 5)}")
+            
+        except Exception as e:
+            self.logger.error(f"获取 v4.1 配置失败: {e}")
+
     def process_user_message(self, message: str):
         """处理用户消息"""
         self.turn_count += 1
@@ -714,6 +867,17 @@ class RecallChatApp:
                         self.cmd_clear()
                     elif cmd == "debug":
                         self.cmd_debug()
+                    # === Recall 4.1 新增命令 ===
+                    elif cmd == "episodes":
+                        self.cmd_episodes()
+                    elif cmd == "contradictions":
+                        self.cmd_contradictions()
+                    elif cmd == "conditions":
+                        self.cmd_conditions()
+                    elif cmd == "summary":
+                        self.cmd_summary(arg)
+                    elif cmd == "v41":
+                        self.cmd_v41()
                     else:
                         print(f"  {Colors.YELLOW}未知命令: {cmd}，输入 /help 查看帮助{Colors.RESET}")
                 else:

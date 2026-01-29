@@ -487,11 +487,15 @@ class ThreeStageDeduplicator:
             return None
         
         try:
-            # 获取新项目的 embedding
+            # 获取新项目的 embedding（使用缓存）
             if item.embedding:
                 item_embedding = item.embedding
             else:
-                item_embedding = self.embedding_backend.encode(item.get_text())
+                # 使用带缓存的编码，减少 API 调用
+                if hasattr(self.embedding_backend, 'encode_with_cache'):
+                    item_embedding = self.embedding_backend.encode_with_cache(item.get_text())
+                else:
+                    item_embedding = self.embedding_backend.encode(item.get_text())
                 if hasattr(item_embedding, 'tolist'):
                     item_embedding = item_embedding.tolist()
             
@@ -500,11 +504,15 @@ class ThreeStageDeduplicator:
             best_similarity = 0.0
             
             for existing_id, existing_item in self._item_map.items():
-                # 获取现有项目的 embedding
+                # 获取现有项目的 embedding（优先使用缓存）
                 if existing_item.embedding:
                     existing_embedding = existing_item.embedding
                 else:
-                    existing_embedding = self.embedding_backend.encode(existing_item.get_text())
+                    # 使用带缓存的编码，减少 API 调用
+                    if hasattr(self.embedding_backend, 'encode_with_cache'):
+                        existing_embedding = self.embedding_backend.encode_with_cache(existing_item.get_text())
+                    else:
+                        existing_embedding = self.embedding_backend.encode(existing_item.get_text())
                     if hasattr(existing_embedding, 'tolist'):
                         existing_embedding = existing_embedding.tolist()
                     existing_item.embedding = existing_embedding
