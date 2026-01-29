@@ -467,7 +467,7 @@ class RecallEngine:
                 _safe_print(f"[Recall v4.0] 全文检索初始化失败（不影响核心功能）: {e}")
         
         # 4. Phase 3: 十一层检索器（可选升级）
-        eleven_layer_enabled = os.environ.get('ELEVEN_LAYER_RETRIEVER_ENABLED', 'false').lower() == 'true'
+        eleven_layer_enabled = os.environ.get('ELEVEN_LAYER_RETRIEVER_ENABLED', 'true').lower() == 'true'
         if eleven_layer_enabled:
             self._init_eleven_layer_retriever()
         
@@ -500,7 +500,7 @@ class RecallEngine:
         if not self.temporal_graph:
             return
         
-        query_planner_enabled = os.environ.get('QUERY_PLANNER_ENABLED', 'false').lower() == 'true'
+        query_planner_enabled = os.environ.get('QUERY_PLANNER_ENABLED', 'true').lower() == 'true'
         if query_planner_enabled:
             try:
                 from .graph import QueryPlanner
@@ -563,7 +563,7 @@ class RecallEngine:
         """
         self._llm_relation_extractor = None
         
-        llm_relation_mode = os.environ.get('LLM_RELATION_MODE', 'rules').lower()
+        llm_relation_mode = os.environ.get('LLM_RELATION_MODE', 'llm').lower()
         if llm_relation_mode != 'rules' and self.llm_client:
             try:
                 from .graph.llm_relation_extractor import (
@@ -629,7 +629,7 @@ class RecallEngine:
         self._entity_summary_enabled = False
         self._entity_summary_min_facts = 5
         
-        summary_enabled = os.environ.get('ENTITY_SUMMARY_ENABLED', 'false').lower() == 'true'
+        summary_enabled = os.environ.get('ENTITY_SUMMARY_ENABLED', 'true').lower() == 'true'
         if summary_enabled:
             try:
                 from .processor.entity_summarizer import EntitySummarizer

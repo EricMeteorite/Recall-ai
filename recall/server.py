@@ -325,7 +325,7 @@ EMBEDDING_RATE_WINDOW=60
 # ----------------------------------------------------------------------------
 # 是否启用 LLM 伏笔分析 (true/false)
 # Enable LLM-based foreshadowing analysis
-FORESHADOWING_LLM_ENABLED=false
+FORESHADOWING_LLM_ENABLED=true
 
 # 分析触发间隔（每N轮对话触发一次分析，最小1）
 # Analysis trigger interval (trigger analysis every N turns, minimum 1)
@@ -540,7 +540,7 @@ DEDUP_LLM_ENABLED=false
 # ----------------------------------------------------------------------------
 # 是否启用十一层检索器（替代默认的八层检索器）
 # Enable eleven-layer retriever (replaces default eight-layer)
-ELEVEN_LAYER_RETRIEVER_ENABLED=false
+ELEVEN_LAYER_RETRIEVER_ENABLED=true
 
 # ----------------------------------------------------------------------------
 # 层开关配置
@@ -574,10 +574,10 @@ RETRIEVAL_L8_VECTOR_FINE_ENABLED=true
 RETRIEVAL_L9_RERANK_ENABLED=true
 
 # L10: CrossEncoder 精排（深度语义匹配，需要 sentence-transformers）
-RETRIEVAL_L10_CROSS_ENCODER_ENABLED=false
+RETRIEVAL_L10_CROSS_ENCODER_ENABLED=true
 
 # L11: LLM 过滤（大模型最终确认，消耗 API）
-RETRIEVAL_L11_LLM_ENABLED=false
+RETRIEVAL_L11_LLM_ENABLED=true
 
 # ----------------------------------------------------------------------------
 # Top-K 配置（每层返回的候选数量）
@@ -651,7 +651,7 @@ RETRIEVAL_WEIGHT_TEMPORAL=0.5
 # ----------------------------------------------------------------------------
 # 是否启用图查询规划器（优化多跳图查询）
 # Enable query planner (optimizes multi-hop graph queries)
-QUERY_PLANNER_ENABLED=false
+QUERY_PLANNER_ENABLED=true
 
 # 路径缓存大小（条）
 # Path cache size (entries)
@@ -756,7 +756,7 @@ FALLBACK_MAX_RESULTS=50
 # ----------------------------------------------------------------------------
 # 模式: rules（纯规则，默认）/ adaptive（自适应）/ llm（纯LLM）
 # Mode: rules (pure rules, default) / adaptive / llm
-LLM_RELATION_MODE=rules
+LLM_RELATION_MODE=llm
 
 # 自适应模式下触发 LLM 的复杂度阈值 (0.0-1.0)
 # Complexity threshold to trigger LLM in adaptive mode
@@ -776,7 +776,7 @@ LLM_RELATION_ENABLE_FACT_DESCRIPTION=true
 # ----------------------------------------------------------------------------
 # 是否启用实体摘要生成
 # Enable entity summary generation
-ENTITY_SUMMARY_ENABLED=false
+ENTITY_SUMMARY_ENABLED=true
 
 # 触发 LLM 摘要的最小事实数
 # Minimum facts to trigger LLM summary
@@ -1132,7 +1132,7 @@ def _build_foreshadowing_config():
         ForeshadowingAnalyzerConfig 或 None
     """
     llm_api_key = os.environ.get('LLM_API_KEY')
-    llm_enabled_str = os.environ.get('FORESHADOWING_LLM_ENABLED', 'false').lower()
+    llm_enabled_str = os.environ.get('FORESHADOWING_LLM_ENABLED', 'true').lower()
     llm_enabled = llm_enabled_str in ('true', '1', 'yes')
     
     if llm_api_key and llm_enabled:
@@ -3587,7 +3587,7 @@ async def get_v41_config():
     return {
         "llm_relation_extractor": {
             "enabled": engine._llm_relation_extractor is not None,
-            "mode": os.environ.get('LLM_RELATION_MODE', 'rules')
+            "mode": os.environ.get('LLM_RELATION_MODE', 'llm')
         },
         "entity_schema_registry": {
             "enabled": engine.entity_schema_registry is not None,

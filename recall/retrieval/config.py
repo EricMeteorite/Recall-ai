@@ -201,8 +201,8 @@ class RetrievalConfig:
             l7_enabled=get_bool('RETRIEVAL_L7_VECTOR_COARSE_ENABLED', True),
             l8_enabled=get_bool('RETRIEVAL_L8_VECTOR_FINE_ENABLED', True),
             l9_enabled=get_bool('RETRIEVAL_L9_RERANK_ENABLED', True),
-            l10_enabled=get_bool('RETRIEVAL_L10_CROSS_ENCODER_ENABLED', False),
-            l11_enabled=get_bool('RETRIEVAL_L11_LLM_ENABLED', False),
+            l10_enabled=get_bool('RETRIEVAL_L10_CROSS_ENCODER_ENABLED', True),
+            l11_enabled=get_bool('RETRIEVAL_L11_LLM_ENABLED', True),
             # Top-K 配置
             l2_temporal_top_k=get_int('RETRIEVAL_L2_TEMPORAL_TOP_K', 500),
             l3_inverted_top_k=get_int('RETRIEVAL_L3_INVERTED_TOP_K', 100),
