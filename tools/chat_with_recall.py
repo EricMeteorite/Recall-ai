@@ -517,8 +517,8 @@ class RecallChatApp:
         api_base = config.get("LLM_API_BASE") or os.environ.get("LLM_API_BASE") or "https://api.openai.com/v1"
         model = config.get("LLM_MODEL") or os.environ.get("LLM_MODEL") or "gpt-4o-mini"
         
-        # 从配置读取 max_tokens，默认 4000
-        max_tokens_str = config.get("CHAT_MAX_TOKENS") or os.environ.get("CHAT_MAX_TOKENS") or "4000"
+        # 从 api_keys.env 读取 LLM_DEFAULT_MAX_TOKENS，聊天场景默认 4000
+        max_tokens_str = config.get("LLM_DEFAULT_MAX_TOKENS") or os.environ.get("LLM_DEFAULT_MAX_TOKENS") or "4000"
         try:
             max_tokens = int(max_tokens_str)
         except ValueError:
