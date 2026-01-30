@@ -1494,9 +1494,7 @@ async def clear_memories(
     count = engine.count_memories(user_id=user_id)
     _safe_print(f"[Recall][Memory] 🗑️ 清空请求: user={user_id}, 后端计数={count}")
     
-    if count == 0:
-        return {"success": True, "message": "该角色没有记忆数据", "deleted_count": 0}
-    
+    # 注意：即使记忆数为0，也要调用 clear() 清理其他数据（伏笔、持久条件等）
     # 清空
     success = engine.clear(user_id=user_id)
     _safe_print(f"[Recall][Memory] {'✅' if success else '❌'} 清空完成: user={user_id}, success={success}")

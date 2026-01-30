@@ -756,6 +756,46 @@ Important:
         if cache_key in self._turn_counters:
             self._turn_counters[cache_key] = 0
     
+    def clear_user(self, user_id: str, all_characters: bool = False) -> bool:
+        """清空指定用户的分析器状态数据
+        
+        Args:
+            user_id: 用户ID
+            all_characters: 如果为 True，清空该用户的所有角色数据
+            
+        Returns:
+            bool: 是否成功
+        """
+        try:
+            if all_characters:
+                # 清空该用户所有角色的缓冲区和计数器
+                keys_to_delete = [k for k in self._buffers.keys() if k.startswith(f"{user_id}/")]
+                for key in keys_to_delete:
+                    del self._buffers[key]
+                keys_to_delete = [k for k in self._turn_counters.keys() if k.startswith(f"{user_id}/")]
+                for key in keys_to_delete:
+                    del self._turn_counters[key]
+                keys_to_delete = [k for k in self._analysis_locks.keys() if k.startswith(f"{user_id}/")]
+                for key in keys_to_delete:
+                    del self._analysis_locks[key]
+                
+                # 清空分析标记（analysis_markers 只按 user_id 索引，不含 character_id）
+                if user_id in self._analysis_markers:
+                    del self._analysis_markers[user_id]
+                    self._save_analysis_markers()
+            else:
+                # 清空特定角色的数据（不常用，保持兼容）
+                cache_key = f"{user_id}/default"
+                if cache_key in self._buffers:
+                    del self._buffers[cache_key]
+                if cache_key in self._turn_counters:
+                    del self._turn_counters[cache_key]
+            
+            return True
+        except Exception as e:
+            _safe_print(f"[Recall] 清空分析器用户数据失败: {e}")
+            return False
+
     def update_config(
         self,
         trigger_interval: Optional[int] = None,

@@ -1002,9 +1002,11 @@ do_clear_data() {
     local cache_dir="$data_path/cache"
     local logs_dir="$data_path/logs"
     local temp_dir="$data_path/temp"
-    local indexes_dir="$data_path/indexes"
+    local index_dir="$data_path/index"        # ngram, fulltext indexes
+    local indexes_dir="$data_path/indexes"     # legacy indexes
     local l1_dir="$data_path/L1_consolidated"
     local kg_file="$data_path/knowledge_graph.json"
+    local kg_file_in_data="$data_path/data/knowledge_graph.json"
     
     local to_delete=()
     
@@ -1012,6 +1014,12 @@ do_clear_data() {
         local size=$(du -sh "$data_dir" 2>/dev/null | cut -f1 || echo "0")
         echo -e "    ${RED}[x] data/           - 所有用户记忆 ($size)${NC}"
         to_delete+=("$data_dir")
+    fi
+    
+    if [[ -d "$index_dir" ]]; then
+        local size=$(du -sh "$index_dir" 2>/dev/null | cut -f1 || echo "0")
+        echo -e "    ${RED}[x] index/          - N-gram 和全文索引 ($size)${NC}"
+        to_delete+=("$index_dir")
     fi
     
     if [[ -d "$indexes_dir" ]]; then
@@ -1026,10 +1034,17 @@ do_clear_data() {
         to_delete+=("$l1_dir")
     fi
     
+    # Check knowledge_graph.json in both root and data/ directory
     if [[ -f "$kg_file" ]]; then
         local size=$(du -sh "$kg_file" 2>/dev/null | cut -f1 || echo "0")
         echo -e "    ${RED}[x] knowledge_graph.json - 知识图谱 ($size)${NC}"
         to_delete+=("$kg_file")
+    fi
+    
+    if [[ -f "$kg_file_in_data" ]]; then
+        local size=$(du -sh "$kg_file_in_data" 2>/dev/null | cut -f1 || echo "0")
+        echo -e "    ${RED}[x] data/knowledge_graph.json - 知识图谱 ($size)${NC}"
+        to_delete+=("$kg_file_in_data")
     fi
     
     if [[ -d "$cache_dir" ]]; then

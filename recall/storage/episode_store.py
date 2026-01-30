@@ -129,3 +129,41 @@ class EpisodeStore:
             reverse=True
         )
         return episodes[:limit]
+
+    def clear(self) -> bool:
+        """清空所有 Episode
+        
+        Returns:
+            bool: 是否成功
+        """
+        try:
+            self._episodes.clear()
+            if os.path.exists(self.episodes_file):
+                os.remove(self.episodes_file)
+            return True
+        except Exception as e:
+            print(f"[EpisodeStore] 清空失败: {e}")
+            return False
+
+    def clear_user(self, user_id: str) -> int:
+        """清空指定用户的 Episode
+        
+        Args:
+            user_id: 用户ID
+            
+        Returns:
+            int: 删除的 Episode 数量
+        """
+        try:
+            to_delete = [uuid for uuid, ep in self._episodes.items() 
+                         if ep.user_id == user_id]
+            for uuid in to_delete:
+                del self._episodes[uuid]
+            
+            if to_delete:
+                self._rewrite_all()
+            
+            return len(to_delete)
+        except Exception as e:
+            print(f"[EpisodeStore] 清空用户数据失败: {e}")
+            return 0

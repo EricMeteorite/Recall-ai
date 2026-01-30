@@ -1964,18 +1964,31 @@ class RecallEngine:
                     if removed_fulltext > 0:
                         _safe_print(f"[Recall] 清理了 {removed_fulltext} 个全文索引文档")
             
-            # 10. 清理伏笔追踪器中的用户数据
+            # 10. 清理伏笔追踪器中的用户数据（所有角色）
             if self.foreshadowing_tracker is not None:
                 if hasattr(self.foreshadowing_tracker, 'clear_user'):
-                    self.foreshadowing_tracker.clear_user(user_id)
+                    self.foreshadowing_tracker.clear_user(user_id, all_characters=True)
             
-            # 11. 清理上下文系统中的用户数据
+            # 11. 清理上下文系统中的用户数据（所有角色）
             if self.context_tracker is not None:
                 if hasattr(self.context_tracker, 'clear_user'):
-                    self.context_tracker.clear_user(user_id)
+                    self.context_tracker.clear_user(user_id, all_characters=True)
+            
+            # 12. 清理伏笔分析器中的用户状态（缓冲区、计数器、分析标记）
+            if self.foreshadowing_analyzer is not None:
+                if hasattr(self.foreshadowing_analyzer, 'clear_user'):
+                    self.foreshadowing_analyzer.clear_user(user_id, all_characters=True)
+            
+            # 13. 清理 Episode 存储中的用户数据
+            if self.episode_store is not None:
+                if hasattr(self.episode_store, 'clear_user'):
+                    deleted_episodes = self.episode_store.clear_user(user_id)
+                    if deleted_episodes > 0:
+                        _safe_print(f"[Recall] 清理了 {deleted_episodes} 个 Episode")
             
             # 注意：以下全局索引不支持按用户精确清理
             # - knowledge_graph: 旧版知识图谱，结构不支持用户隔离
+            # - volume_manager: L3 存档是全局的，不支持按用户删除
             # 
             # 如需完全清空所有数据，请使用 clear_all() 方法
             
@@ -2042,6 +2055,22 @@ class RecallEngine:
             # 11. 清空上下文系统
             if self.context_tracker is not None and hasattr(self.context_tracker, 'clear'):
                 self.context_tracker.clear()
+            
+            # 12. 清空伏笔分析器（缓冲区、计数器、分析标记）
+            if self.foreshadowing_analyzer is not None:
+                # 清空所有用户的缓冲区和计数器
+                self.foreshadowing_analyzer._buffers.clear()
+                self.foreshadowing_analyzer._turn_counters.clear()
+                self.foreshadowing_analyzer._analysis_markers.clear()
+                self.foreshadowing_analyzer._save_analysis_markers()
+            
+            # 13. 清空 Episode 存储
+            if self.episode_store is not None and hasattr(self.episode_store, 'clear'):
+                self.episode_store.clear()
+            
+            # 14. 清空 L3 存档（VolumeManager）
+            if self.volume_manager is not None and hasattr(self.volume_manager, 'clear'):
+                self.volume_manager.clear()
             
             _safe_print("[Recall] ✅ 已清空所有数据")
             return True

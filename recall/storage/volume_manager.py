@@ -255,6 +255,37 @@ class VolumeManager:
         for volume in self.loaded_volumes.values():
             volume._persist()
         self._save_manifest()
+
+    def clear(self) -> bool:
+        """清空所有分卷数据
+        
+        Returns:
+            bool: 是否成功
+        """
+        import shutil
+        
+        try:
+            # 清空内存中的卷
+            self.loaded_volumes.clear()
+            
+            # 删除 L3_archive 目录
+            archive_path = os.path.join(self.data_path, "L3_archive")
+            if os.path.exists(archive_path):
+                shutil.rmtree(archive_path)
+            os.makedirs(archive_path, exist_ok=True)
+            
+            # 重置 manifest
+            self.manifest = {
+                'total_turns': 0,
+                'latest_volume': 0,
+                'created_at': datetime.now().isoformat()
+            }
+            self._save_manifest()
+            
+            return True
+        except Exception as e:
+            print(f"[VolumeManager] 清空失败: {e}")
+            return False
     
     def __del__(self):
         """析构时自动保存"""

@@ -747,13 +747,15 @@ class ForeshadowingTracker:
     def clear_user(
         self,
         user_id: str = "default",
-        character_id: str = "default"
+        character_id: str = "default",
+        all_characters: bool = False
     ) -> bool:
         """清空指定用户的所有伏笔数据
         
         Args:
             user_id: 用户ID
-            character_id: 角色ID（如果为空则清空该用户所有角色）
+            character_id: 角色ID
+            all_characters: 如果为 True，清空该用户的所有角色数据
             
         Returns:
             bool: 是否成功
@@ -763,20 +765,34 @@ class ForeshadowingTracker:
         logger = logging.getLogger(__name__)
         
         try:
-            # 清空内存中的数据
-            cache_key = f"{user_id}/{character_id}"
-            if cache_key in self._user_data:
-                del self._user_data[cache_key]
+            safe_user_id = self._sanitize_path_component(user_id)
             
-            # 清空磁盘数据
-            if self.base_path:
-                safe_user_id = self._sanitize_path_component(user_id)
-                safe_char_id = self._sanitize_path_component(character_id)
-                user_path = os.path.join(self.base_path, safe_user_id, safe_char_id)
+            if all_characters:
+                # 清空该用户所有角色的内存数据
+                keys_to_delete = [k for k in self._user_data.keys() if k.startswith(f"{user_id}/")]
+                for key in keys_to_delete:
+                    del self._user_data[key]
                 
-                if os.path.exists(user_path):
-                    shutil.rmtree(user_path)
-                    logger.info(f"[ForeshadowingTracker] 已清空用户数据: {user_id}/{character_id}")
+                # 清空该用户目录下所有角色的磁盘数据
+                if self.base_path:
+                    user_path = os.path.join(self.base_path, safe_user_id)
+                    if os.path.exists(user_path):
+                        shutil.rmtree(user_path)
+                        logger.info(f"[ForeshadowingTracker] 已清空用户所有角色数据: {user_id}")
+            else:
+                # 清空内存中的数据
+                cache_key = f"{user_id}/{character_id}"
+                if cache_key in self._user_data:
+                    del self._user_data[cache_key]
+                
+                # 清空磁盘数据
+                if self.base_path:
+                    safe_char_id = self._sanitize_path_component(character_id)
+                    user_path = os.path.join(self.base_path, safe_user_id, safe_char_id)
+                    
+                    if os.path.exists(user_path):
+                        shutil.rmtree(user_path)
+                        logger.info(f"[ForeshadowingTracker] 已清空用户数据: {user_id}/{character_id}")
             
             return True
         except Exception as e:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Recall 交互式聊天测试工具
+"""Recall 交互式聊天测试工具 v2.0
 
 模拟完整的用户体验：
 1. 用户输入消息
@@ -10,19 +10,53 @@
 6. 详细日志记录每一步
 
 使用方法:
-    python tools/chat_with_recall.py
+    python tools/chat_with_recall.py              # 交互模式
     python tools/chat_with_recall.py --user 角色名
-    python tools/chat_with_recall.py --debug  # 更详细的日志
+    python tools/chat_with_recall.py --debug      # 更详细的日志
+    python tools/chat_with_recall.py --auto-test  # 自动化功能测试
+    python tools/chat_with_recall.py --character Alice  # 设置角色
 
 命令:
+    === 基础功能 ===
     /entities  - 查看所有实体
     /relations - 查看实体关系
     /search 关键词 - 搜索记忆
+    /hsearch 关键词 - 混合搜索 (向量+关键词)
     /context - 查看当前上下文
     /memories - 查看所有记忆
     /stats - 查看统计信息
+    
+    === 图谱功能 ===
     /graph - 查看图谱概览
+    /neighbors 实体名 - 查看实体邻居
+    /traverse 实体名 - 图遍历
+    /communities - 查看社区
+    
+    === 伏笔系统 ===
+    /foreshadowing - 查看活跃伏笔
+    /plant 内容 - 埋下新伏笔
+    /resolve 伏笔ID 原因 - 解决伏笔
+    /hint 伏笔ID 线索 - 添加伏笔线索
+    /analyze - 触发伏笔分析
+    
+    === 时间查询 ===
+    /timeline 实体名 - 查看实体时间线
+    /temporal 时间描述 - 按时间查询
+    
+    === Recall 4.1 ===
+    /episodes - 查看 Episode 追踪
+    /contradictions - 查看矛盾检测
+    /conditions - 查看持久条件
+    /summary 实体名 - 查看实体摘要
+    /v41 - 查看 4.1 功能状态
+    /retrieval - 查看检索配置
+    
+    === 管理 ===
+    /switch 角色名 - 切换角色
+    /users - 查看所有用户
     /clear - 清空当前用户记忆
+    /test - 运行自动化功能测试
+    /debug - 切换调试模式
     /help - 显示帮助
     /quit - 退出
 
@@ -285,6 +319,102 @@ class RecallAPIClient:
     def get_v41_config(self) -> Dict:
         """获取 Recall 4.1 配置状态"""
         return self._request("GET", "/v1/config/v41")
+    
+    # === 伏笔系统扩展 API ===
+    
+    def plant_foreshadowing(self, content: str, user_id: str, importance: float = 0.5) -> Dict:
+        """埋下伏笔"""
+        return self._request("POST", "/v1/foreshadowing", {
+            "content": content,
+            "user_id": user_id,
+            "character_id": user_id,
+            "importance": importance
+        })
+    
+    def resolve_foreshadowing(self, foreshadowing_id: str, user_id: str, resolution: str = None) -> Dict:
+        """解决伏笔"""
+        url = f"/v1/foreshadowing/{foreshadowing_id}/resolve?user_id={user_id}&character_id={user_id}"
+        if resolution:
+            url += f"&resolution={urllib.parse.quote(resolution)}"
+        return self._request("POST", url)
+    
+    def add_foreshadowing_hint(self, foreshadowing_id: str, user_id: str, hint: str) -> Dict:
+        """添加伏笔线索"""
+        return self._request("POST", f"/v1/foreshadowing/{foreshadowing_id}/hint?user_id={user_id}&character_id={user_id}", {
+            "hint": hint
+        })
+    
+    def trigger_foreshadowing_analysis(self, user_id: str) -> Dict:
+        """触发伏笔分析"""
+        return self._request("POST", f"/v1/foreshadowing/analyze/trigger?user_id={user_id}&character_id={user_id}")
+    
+    # === 时间查询 API ===
+    
+    def query_temporal_at(self, time_point: str, user_id: str) -> Dict:
+        """按时间点查询"""
+        return self._request("POST", "/v1/temporal/at", {
+            "time_point": time_point,
+            "user_id": user_id
+        })
+    
+    def get_entity_timeline(self, entity_name: str, user_id: str = None) -> Dict:
+        """获取实体时间线"""
+        url = f"/v1/temporal/timeline/{urllib.parse.quote(entity_name)}"
+        if user_id:
+            url += f"?user_id={user_id}"
+        return self._request("GET", url)
+    
+    # === 搜索扩展 API ===
+    
+    def hybrid_search(self, query: str, user_id: str, top_k: int = 10) -> Dict:
+        """混合搜索"""
+        return self._request("POST", "/v1/search/hybrid", {
+            "query": query,
+            "user_id": user_id,
+            "top_k": top_k
+        })
+    
+    def fulltext_search(self, query: str, user_id: str, top_k: int = 10) -> Dict:
+        """全文搜索"""
+        return self._request("POST", "/v1/search/fulltext", {
+            "query": query,
+            "user_id": user_id,
+            "top_k": top_k
+        })
+    
+    def get_retrieval_config(self) -> Dict:
+        """获取检索配置"""
+        return self._request("GET", "/v1/search/config")
+    
+    # === 图谱扩展 API ===
+    
+    def get_entity_neighbors(self, entity_name: str, depth: int = 1) -> Dict:
+        """获取实体邻居"""
+        return self._request("GET", f"/v1/graph/entity/{urllib.parse.quote(entity_name)}/neighbors?depth={depth}")
+    
+    def graph_traverse(self, start_entity: str, relation_types: List[str] = None, max_depth: int = 2) -> Dict:
+        """图遍历"""
+        data = {
+            "start_entity": start_entity,
+            "max_depth": max_depth
+        }
+        if relation_types:
+            data["relation_types"] = relation_types
+        return self._request("POST", "/v1/graph/traverse", data)
+    
+    def get_communities(self) -> Dict:
+        """获取社区"""
+        return self._request("GET", "/v1/graph/communities")
+    
+    # === 管理 API ===
+    
+    def get_users(self) -> List[Dict]:
+        """获取用户列表"""
+        return self._request("GET", "/v1/users")
+    
+    def generate_entity_summary(self, entity_name: str) -> Dict:
+        """生成实体摘要"""
+        return self._request("POST", f"/v1/entities/{urllib.parse.quote(entity_name)}/generate-summary")
 
 
 class LLMClient:
@@ -336,8 +466,9 @@ class LLMClient:
 class RecallChatApp:
     """Recall 交互式聊天应用"""
     
-    def __init__(self, user_id: str, debug: bool = False):
+    def __init__(self, user_id: str, character_id: str = None, debug: bool = False):
         self.user_id = user_id
+        self.character_id = character_id or user_id
         self.debug = debug
         self.turn_count = 0
         
@@ -386,13 +517,15 @@ class RecallChatApp:
     def _print_header(self):
         """打印欢迎信息"""
         print(f"\n{Colors.CYAN}{'='*60}{Colors.RESET}")
-        print(f"{Colors.BOLD}{Colors.CYAN}  Recall 交互式聊天测试工具{Colors.RESET}")
+        print(f"{Colors.BOLD}{Colors.CYAN}  Recall 交互式聊天测试工具 v2.0{Colors.RESET}")
         print(f"{Colors.CYAN}{'='*60}{Colors.RESET}")
         print(f"  用户ID: {Colors.GREEN}{self.user_id}{Colors.RESET}")
+        print(f"  角色ID: {Colors.GREEN}{self.character_id}{Colors.RESET}")
         print(f"  调试模式: {Colors.YELLOW}{'开启' if self.debug else '关闭'}{Colors.RESET}")
         print(f"  LLM: {Colors.GREEN if self.llm else Colors.RED}{'已配置' if self.llm else '未配置'}{Colors.RESET}")
         print(f"{Colors.CYAN}{'='*60}{Colors.RESET}")
         print(f"  输入 {Colors.YELLOW}/help{Colors.RESET} 查看命令，{Colors.YELLOW}/quit{Colors.RESET} 退出")
+        print(f"  输入 {Colors.YELLOW}/test{Colors.RESET} 运行自动化功能测试")
         print(f"{Colors.CYAN}{'='*60}{Colors.RESET}\n")
     
     def _print_entities(self, entities: List[str]):
@@ -408,24 +541,48 @@ class RecallChatApp:
     def cmd_help(self):
         """显示帮助"""
         print(f"""
-{Colors.CYAN}可用命令:{Colors.RESET}
-  {Colors.YELLOW}/entities{Colors.RESET}      - 查看所有提取的实体
-  {Colors.YELLOW}/summary <名>{Colors.RESET}  - 查看实体摘要 (v4.1)
-  {Colors.YELLOW}/relations{Colors.RESET}     - 查看实体关系图谱
-  {Colors.YELLOW}/search <词>{Colors.RESET}   - 搜索记忆
-  {Colors.YELLOW}/context{Colors.RESET}       - 查看当前构建的上下文
-  {Colors.YELLOW}/memories{Colors.RESET}      - 查看所有记忆
-  {Colors.YELLOW}/stats{Colors.RESET}         - 查看统计信息
-  {Colors.YELLOW}/graph{Colors.RESET}         - 查看图谱概览（实体+关系）
-  {Colors.YELLOW}/foreshadowing{Colors.RESET} - 查看伏笔
-  {Colors.YELLOW}/episodes{Colors.RESET}      - 查看 Episode 追踪 (v4.1)
-  {Colors.YELLOW}/contradictions{Colors.RESET}- 查看矛盾检测结果
-  {Colors.YELLOW}/conditions{Colors.RESET}    - 查看持久条件
-  {Colors.YELLOW}/v41{Colors.RESET}           - 查看 Recall 4.1 功能状态
-  {Colors.YELLOW}/clear{Colors.RESET}         - 清空当前用户记忆（需确认）
-  {Colors.YELLOW}/debug{Colors.RESET}         - 切换调试模式
-  {Colors.YELLOW}/help{Colors.RESET}          - 显示此帮助
-  {Colors.YELLOW}/quit{Colors.RESET}          - 退出
+{Colors.CYAN}=== 基础功能 ==={Colors.RESET}
+  {Colors.YELLOW}/entities{Colors.RESET}       - 查看所有提取的实体
+  {Colors.YELLOW}/relations{Colors.RESET}      - 查看实体关系图谱
+  {Colors.YELLOW}/search <词>{Colors.RESET}    - 语义搜索记忆
+  {Colors.YELLOW}/hsearch <词>{Colors.RESET}   - 混合搜索 (向量+关键词)
+  {Colors.YELLOW}/context{Colors.RESET}        - 查看构建的上下文
+  {Colors.YELLOW}/memories{Colors.RESET}       - 查看所有记忆
+  {Colors.YELLOW}/stats{Colors.RESET}          - 查看统计信息
+
+{Colors.CYAN}=== 图谱功能 ==={Colors.RESET}
+  {Colors.YELLOW}/graph{Colors.RESET}          - 查看图谱概览
+  {Colors.YELLOW}/neighbors <名>{Colors.RESET} - 查看实体邻居
+  {Colors.YELLOW}/traverse <名>{Colors.RESET}  - 从实体开始图遍历
+  {Colors.YELLOW}/communities{Colors.RESET}    - 查看社区检测结果
+
+{Colors.CYAN}=== 伏笔系统 ==={Colors.RESET}
+  {Colors.YELLOW}/foreshadowing{Colors.RESET}  - 查看活跃伏笔
+  {Colors.YELLOW}/plant <内容>{Colors.RESET}   - 埋下新伏笔
+  {Colors.YELLOW}/resolve <ID> [原因]{Colors.RESET} - 解决伏笔
+  {Colors.YELLOW}/hint <ID> <线索>{Colors.RESET} - 添加伏笔线索
+  {Colors.YELLOW}/analyze{Colors.RESET}        - 触发伏笔分析
+
+{Colors.CYAN}=== 时间查询 ==={Colors.RESET}
+  {Colors.YELLOW}/timeline <实体名>{Colors.RESET} - 查看实体时间线
+  {Colors.YELLOW}/temporal <时间描述>{Colors.RESET} - 按时间点查询
+
+{Colors.CYAN}=== Recall 4.1 ==={Colors.RESET}
+  {Colors.YELLOW}/episodes{Colors.RESET}       - 查看 Episode 追踪
+  {Colors.YELLOW}/contradictions{Colors.RESET} - 查看矛盾检测结果
+  {Colors.YELLOW}/conditions{Colors.RESET}     - 查看持久条件
+  {Colors.YELLOW}/summary <名>{Colors.RESET}   - 查看实体摘要
+  {Colors.YELLOW}/v41{Colors.RESET}            - 查看 4.1 功能状态
+  {Colors.YELLOW}/retrieval{Colors.RESET}      - 查看11层检索配置
+
+{Colors.CYAN}=== 管理功能 ==={Colors.RESET}
+  {Colors.YELLOW}/switch <角色>{Colors.RESET}  - 切换角色
+  {Colors.YELLOW}/users{Colors.RESET}          - 查看所有用户
+  {Colors.YELLOW}/clear{Colors.RESET}          - 清空当前用户记忆
+  {Colors.YELLOW}/test{Colors.RESET}           - 运行自动化功能测试
+  {Colors.YELLOW}/debug{Colors.RESET}          - 切换调试模式
+  {Colors.YELLOW}/help{Colors.RESET}           - 显示此帮助
+  {Colors.YELLOW}/quit{Colors.RESET}           - 退出
 """)
     
     def cmd_entities(self):
@@ -581,26 +738,46 @@ class RecallChatApp:
             foreshadowings = self.recall.get_foreshadowings(self.user_id)
             
             if not foreshadowings:
-                print(f"  {Colors.YELLOW}暂无伏笔{Colors.RESET}")
+                print(f"  {Colors.YELLOW}暂无活跃伏笔{Colors.RESET}")
+                print(f"  {Colors.DIM}使用 /plant <内容> 埋下新伏笔{Colors.RESET}")
                 return
             
-            print(f"\n{Colors.CYAN}伏笔列表 ({len(foreshadowings)}条):{Colors.RESET}")
+            print(f"\n{Colors.CYAN}活跃伏笔 ({len(foreshadowings)}条):{Colors.RESET}")
             for f in foreshadowings:
+                fsh_id = f.get("id", "?")[:8]
                 content = f.get("content", "")[:50]
-                status = f.get("status", "?")
-                print(f"  • [{status}] {content}...")
+                status = f.get("status", "active")
+                importance = f.get("importance", 0.5)
+                hints = f.get("hints", [])
+                
+                status_color = Colors.GREEN if status == "active" else Colors.BLUE
+                print(f"  • [{status_color}{status}{Colors.RESET}] {Colors.DIM}[{fsh_id}...]{Colors.RESET} {content}...")
+                print(f"    {Colors.DIM}重要性: {importance:.0%}, 线索: {len(hints)}条{Colors.RESET}")
+            
+            print(f"\n  {Colors.DIM}命令: /plant /resolve /hint /analyze{Colors.RESET}")
         except Exception as e:
             self.logger.error(f"获取伏笔失败: {e}")
     
     def cmd_clear(self):
         """清空记忆"""
-        confirm = input(f"  {Colors.RED}确定要清空用户 {self.user_id} 的所有记忆吗？(yes/no): {Colors.RESET}")
+        print(f"\n{Colors.YELLOW}将删除以下数据:{Colors.RESET}")
+        print(f"  • 所有记忆")
+        print(f"  • 实体和关系")
+        print(f"  • 伏笔数据")
+        print(f"  • 持久条件")
+        print(f"  • 向量索引")
+        print(f"  • 时态知识图谱")
+        print(f"\n{Colors.GREEN}配置文件会保留{Colors.RESET}")
+        print()
+        
+        confirm = input(f"  {Colors.RED}确定要清空用户 {self.user_id} 的所有数据吗？输入 'yes' 确认: {Colors.RESET}")
         if confirm.lower() == "yes":
             try:
-                self.recall.clear_memories(self.user_id)
+                result = self.recall.clear_memories(self.user_id)
+                deleted_count = result.get("deleted_count", 0)
                 self.conversation_history.clear()
                 self.turn_count = 0
-                self.logger.success(f"已清空用户 {self.user_id} 的记忆")
+                self.logger.success(f"已清空用户 {self.user_id} 的所有数据 (记忆: {deleted_count}条)")
             except Exception as e:
                 self.logger.error(f"清空失败: {e}")
         else:
@@ -737,6 +914,267 @@ class RecallChatApp:
         except Exception as e:
             self.logger.error(f"获取 v4.1 配置失败: {e}")
 
+    # === 新增命令：伏笔系统扩展 ===
+    
+    def cmd_plant(self, content: str):
+        """埋下新伏笔"""
+        if not content:
+            print(f"  {Colors.YELLOW}请指定伏笔内容: /plant <内容>{Colors.RESET}")
+            return
+        
+        try:
+            result = self.recall.plant_foreshadowing(content, self.user_id)
+            fsh_id = result.get("id", "?")[:8]
+            print(f"  {Colors.GREEN}✓ 伏笔已埋下: [{fsh_id}...] {content[:40]}...{Colors.RESET}")
+        except Exception as e:
+            self.logger.error(f"埋下伏笔失败: {e}")
+    
+    def cmd_resolve(self, args: str):
+        """解决伏笔"""
+        parts = args.split(maxsplit=1)
+        if not parts:
+            print(f"  {Colors.YELLOW}用法: /resolve <伏笔ID> [解决原因]{Colors.RESET}")
+            return
+        
+        fsh_id = parts[0]
+        resolution = parts[1] if len(parts) > 1 else None
+        
+        try:
+            self.recall.resolve_foreshadowing(fsh_id, self.user_id, resolution)
+            print(f"  {Colors.GREEN}✓ 伏笔已解决: {fsh_id}{Colors.RESET}")
+        except Exception as e:
+            self.logger.error(f"解决伏笔失败: {e}")
+    
+    def cmd_hint(self, args: str):
+        """添加伏笔线索"""
+        parts = args.split(maxsplit=1)
+        if len(parts) < 2:
+            print(f"  {Colors.YELLOW}用法: /hint <伏笔ID> <线索内容>{Colors.RESET}")
+            return
+        
+        fsh_id, hint = parts
+        
+        try:
+            self.recall.add_foreshadowing_hint(fsh_id, self.user_id, hint)
+            print(f"  {Colors.GREEN}✓ 线索已添加: {hint[:40]}...{Colors.RESET}")
+        except Exception as e:
+            self.logger.error(f"添加线索失败: {e}")
+    
+    def cmd_analyze(self):
+        """触发伏笔分析"""
+        try:
+            result = self.recall.trigger_foreshadowing_analysis(self.user_id)
+            new_fsh = result.get("new_foreshadowings", [])
+            resolved = result.get("resolved_foreshadowings", [])
+            
+            print(f"\n{Colors.CYAN}伏笔分析结果:{Colors.RESET}")
+            if new_fsh:
+                print(f"  {Colors.GREEN}发现 {len(new_fsh)} 个新伏笔{Colors.RESET}")
+                for f in new_fsh[:5]:
+                    print(f"    • {f.get('content', '')[:40]}...")
+            if resolved:
+                print(f"  {Colors.BLUE}解决 {len(resolved)} 个伏笔{Colors.RESET}")
+            if not new_fsh and not resolved:
+                print(f"  {Colors.DIM}未发现新伏笔或解决{Colors.RESET}")
+        except Exception as e:
+            self.logger.error(f"伏笔分析失败: {e}")
+    
+    # === 新增命令：时间查询 ===
+    
+    def cmd_timeline(self, entity_name: str):
+        """查看实体时间线"""
+        if not entity_name:
+            print(f"  {Colors.YELLOW}请指定实体名: /timeline <实体名>{Colors.RESET}")
+            return
+        
+        try:
+            result = self.recall.get_entity_timeline(entity_name, self.user_id)
+            events = result.get("events", result.get("timeline", []))
+            
+            print(f"\n{Colors.CYAN}实体时间线: {entity_name}{Colors.RESET}")
+            if not events:
+                print(f"  {Colors.YELLOW}暂无时间线事件{Colors.RESET}")
+                return
+            
+            for event in events[:15]:
+                time_str = event.get("time", event.get("timestamp", "?"))
+                content = event.get("content", event.get("description", ""))[:50]
+                print(f"  • [{time_str}] {content}...")
+        except Exception as e:
+            self.logger.error(f"获取时间线失败: {e}")
+    
+    def cmd_temporal(self, time_query: str):
+        """按时间点查询"""
+        if not time_query:
+            print(f"  {Colors.YELLOW}请指定时间描述: /temporal <时间描述>{Colors.RESET}")
+            print(f"  {Colors.DIM}例如: /temporal 昨天 或 /temporal 2025年1月{Colors.RESET}")
+            return
+        
+        try:
+            result = self.recall.query_temporal_at(time_query, self.user_id)
+            memories = result.get("memories", result.get("results", []))
+            
+            print(f"\n{Colors.CYAN}时间查询: {time_query}{Colors.RESET}")
+            if not memories:
+                print(f"  {Colors.YELLOW}未找到相关记忆{Colors.RESET}")
+                return
+            
+            for m in memories[:10]:
+                content = m.get("content", "")[:50]
+                print(f"  • {content}...")
+        except Exception as e:
+            self.logger.error(f"时间查询失败: {e}")
+    
+    # === 新增命令：搜索扩展 ===
+    
+    def cmd_hsearch(self, query: str):
+        """混合搜索"""
+        if not query:
+            print(f"  {Colors.YELLOW}请指定搜索词: /hsearch <关键词>{Colors.RESET}")
+            return
+        
+        try:
+            result = self.recall.hybrid_search(query, self.user_id, top_k=10)
+            results = result.get("results", result) if isinstance(result, dict) else result
+            
+            if not results:
+                print(f"  {Colors.YELLOW}未找到相关记忆{Colors.RESET}")
+                return
+            
+            print(f"\n{Colors.CYAN}混合搜索 \"{query}\" ({len(results)}条):{Colors.RESET}")
+            for i, r in enumerate(results[:10], 1):
+                content = r.get("content", "")[:60]
+                score = r.get("score", r.get("combined_score", 0))
+                print(f"  {i}. [{score:.3f}] {content}...")
+        except Exception as e:
+            self.logger.error(f"混合搜索失败: {e}")
+    
+    # === 新增命令：图谱扩展 ===
+    
+    def cmd_neighbors(self, entity_name: str):
+        """查看实体邻居"""
+        if not entity_name:
+            print(f"  {Colors.YELLOW}请指定实体名: /neighbors <实体名>{Colors.RESET}")
+            return
+        
+        try:
+            result = self.recall.get_entity_neighbors(entity_name)
+            neighbors = result.get("neighbors", [])
+            
+            print(f"\n{Colors.CYAN}实体邻居: {entity_name}{Colors.RESET}")
+            if not neighbors:
+                print(f"  {Colors.YELLOW}暂无邻居{Colors.RESET}")
+                return
+            
+            for n in neighbors[:20]:
+                name = n.get("name", "?")
+                relation = n.get("relation_type", n.get("relation", "?"))
+                direction = n.get("direction", "->")
+                print(f"  • {direction} [{relation}] {Colors.MAGENTA}{name}{Colors.RESET}")
+        except Exception as e:
+            self.logger.error(f"获取邻居失败: {e}")
+    
+    def cmd_traverse(self, entity_name: str):
+        """图遍历"""
+        if not entity_name:
+            print(f"  {Colors.YELLOW}请指定起始实体: /traverse <实体名>{Colors.RESET}")
+            return
+        
+        try:
+            result = self.recall.graph_traverse(entity_name)
+            nodes = result.get("nodes", [])
+            edges = result.get("edges", result.get("relations", []))
+            
+            print(f"\n{Colors.CYAN}图遍历: {entity_name} (深度=2){Colors.RESET}")
+            print(f"  节点: {len(nodes)}, 边: {len(edges)}")
+            
+            if nodes:
+                print(f"\n  {Colors.DIM}发现的节点:{Colors.RESET}")
+                for n in nodes[:15]:
+                    name = n.get("name", n) if isinstance(n, dict) else n
+                    print(f"    • {Colors.MAGENTA}{name}{Colors.RESET}")
+        except Exception as e:
+            self.logger.error(f"图遍历失败: {e}")
+    
+    def cmd_communities(self):
+        """查看社区检测结果"""
+        try:
+            result = self.recall.get_communities()
+            
+            if not result.get("enabled", True):
+                print(f"  {Colors.YELLOW}社区检测未启用{Colors.RESET}")
+                print(f"  {Colors.DIM}设置 COMMUNITY_DETECTION_ENABLED=true 启用{Colors.RESET}")
+                return
+            
+            communities = result.get("communities", [])
+            print(f"\n{Colors.CYAN}社区检测结果 ({len(communities)}个社区):{Colors.RESET}")
+            
+            for i, comm in enumerate(communities[:10], 1):
+                members = comm.get("members", comm.get("entities", []))
+                label = comm.get("label", comm.get("name", f"社区{i}"))
+                print(f"  {i}. {label} ({len(members)}个成员)")
+                member_str = ", ".join(str(m)[:10] for m in members[:5])
+                if len(members) > 5:
+                    member_str += f" ... +{len(members)-5}"
+                print(f"     {Colors.DIM}{member_str}{Colors.RESET}")
+        except Exception as e:
+            self.logger.error(f"获取社区失败: {e}")
+    
+    # === 新增命令：检索配置 ===
+    
+    def cmd_retrieval(self):
+        """查看检索配置"""
+        try:
+            config = self.recall.get_retrieval_config()
+            
+            print(f"\n{Colors.CYAN}11层检索器配置:{Colors.RESET}")
+            
+            layers = config.get("layers", config.get("config", {}))
+            if isinstance(layers, dict):
+                for layer_name, layer_config in layers.items():
+                    enabled = layer_config.get("enabled", True)
+                    status = Colors.GREEN + "✓" if enabled else Colors.RED + "✗"
+                    weight = layer_config.get("weight", 1.0)
+                    print(f"  {status}{Colors.RESET} {layer_name}: weight={weight}")
+            else:
+                print(f"  {Colors.DIM}配置: {config}{Colors.RESET}")
+        except Exception as e:
+            self.logger.error(f"获取检索配置失败: {e}")
+    
+    # === 新增命令：管理功能 ===
+    
+    def cmd_switch(self, character: str):
+        """切换角色"""
+        if not character:
+            print(f"  {Colors.YELLOW}请指定角色名: /switch <角色名>{Colors.RESET}")
+            return
+        
+        self.character_id = character
+        self.conversation_history.clear()
+        self.turn_count = 0
+        print(f"  {Colors.GREEN}✓ 已切换到角色: {character}{Colors.RESET}")
+    
+    def cmd_users(self):
+        """查看所有用户"""
+        try:
+            users = self.recall.get_users()
+            users_list = users.get("users", users) if isinstance(users, dict) else users
+            
+            print(f"\n{Colors.CYAN}用户列表:{Colors.RESET}")
+            if not users_list:
+                print(f"  {Colors.YELLOW}暂无用户{Colors.RESET}")
+                return
+            
+            for u in users_list[:20]:
+                if isinstance(u, dict):
+                    uid = u.get("user_id", u.get("id", "?"))
+                    count = u.get("memory_count", "?")
+                    print(f"  • {uid} ({count} 条记忆)")
+                else:
+                    print(f"  • {u}")
+        except Exception as e:
+            self.logger.error(f"获取用户列表失败: {e}")
+
     def process_user_message(self, message: str):
         """处理用户消息"""
         self.turn_count += 1
@@ -816,6 +1254,224 @@ class RecallChatApp:
             self._print_separator()
             print(f"{Colors.YELLOW}[未配置 LLM，仅记录记忆]{Colors.RESET}")
     
+    def run_auto_test(self):
+        """运行自动化功能测试"""
+        print(f"\n{Colors.CYAN}{'='*60}{Colors.RESET}")
+        print(f"{Colors.BOLD}{Colors.CYAN}  Recall 自动化功能测试{Colors.RESET}")
+        print(f"{Colors.CYAN}{'='*60}{Colors.RESET}\n")
+        
+        # 健康检查
+        if not self.recall.health_check():
+            print(f"{Colors.RED}✗ 健康检查失败，无法连接到服务{Colors.RESET}")
+            return False
+        print(f"{Colors.GREEN}✓ 健康检查通过{Colors.RESET}")
+        
+        test_results = []
+        test_user = f"auto_test_{int(time.time())}"
+        
+        # === 测试 1: 记忆基础功能 ===
+        print(f"\n{Colors.CYAN}[1/10] 测试记忆基础功能...{Colors.RESET}")
+        try:
+            # 添加记忆
+            result = self.recall.add_memory("我叫张三，今年25岁，住在北京海淀区。我喜欢编程和读书。", test_user)
+            mem_id = result.get("id")
+            entities = result.get("entities", [])
+            
+            if mem_id:
+                print(f"  {Colors.GREEN}✓ 添加记忆成功: {mem_id[:12]}...{Colors.RESET}")
+                if entities:
+                    print(f"    提取实体: {entities}")
+                test_results.append(("记忆存储", True))
+            else:
+                test_results.append(("记忆存储", False))
+            
+            # 搜索记忆
+            results = self.recall.search_memories("张三在哪里", test_user)
+            if results:
+                print(f"  {Colors.GREEN}✓ 搜索记忆成功: 找到 {len(results)} 条{Colors.RESET}")
+                test_results.append(("记忆搜索", True))
+            else:
+                test_results.append(("记忆搜索", False))
+            
+            # 获取记忆列表
+            memories = self.recall.get_memories(test_user)
+            print(f"  {Colors.GREEN}✓ 获取记忆列表: {len(memories)} 条{Colors.RESET}")
+            test_results.append(("记忆列表", True))
+        except Exception as e:
+            print(f"  {Colors.RED}✗ 记忆基础功能测试失败: {e}{Colors.RESET}")
+            test_results.append(("记忆基础", False))
+        
+        # === 测试 2: 实体和关系 ===
+        print(f"\n{Colors.CYAN}[2/10] 测试实体和关系...{Colors.RESET}")
+        try:
+            # 添加更多记忆以建立关系
+            self.recall.add_memory("张三的女朋友叫李四，他们在大学认识的。", test_user)
+            self.recall.add_memory("李四是一名设计师，在阿里巴巴工作。", test_user)
+            
+            entities = self.recall.get_entities(test_user)
+            print(f"  {Colors.GREEN}✓ 获取实体: {len(entities)} 个{Colors.RESET}")
+            if entities:
+                entity_names = [e.get("name", "") for e in entities[:5]]
+                print(f"    实体: {entity_names}")
+            test_results.append(("实体提取", len(entities) > 0))
+            
+            # 获取关系
+            if entities:
+                first_entity = entities[0].get("name", "")
+                if first_entity:
+                    related = self.recall.get_related_entities(first_entity)
+                    relations = related.get("related", []) if isinstance(related, dict) else related
+                    print(f"  {Colors.GREEN}✓ 实体关系: {first_entity} 有 {len(relations)} 个关系{Colors.RESET}")
+                    test_results.append(("关系图谱", True))
+        except Exception as e:
+            print(f"  {Colors.RED}✗ 实体关系测试失败: {e}{Colors.RESET}")
+            test_results.append(("实体关系", False))
+        
+        # === 测试 3: 上下文构建 ===
+        print(f"\n{Colors.CYAN}[3/10] 测试上下文构建...{Colors.RESET}")
+        try:
+            context = self.recall.build_context("告诉我关于张三的信息", test_user)
+            if context:
+                print(f"  {Colors.GREEN}✓ 上下文构建成功: {len(context)} 字符{Colors.RESET}")
+                test_results.append(("上下文构建", True))
+            else:
+                print(f"  {Colors.YELLOW}⚠ 上下文为空{Colors.RESET}")
+                test_results.append(("上下文构建", False))
+        except Exception as e:
+            print(f"  {Colors.RED}✗ 上下文构建失败: {e}{Colors.RESET}")
+            test_results.append(("上下文构建", False))
+        
+        # === 测试 4: 伏笔系统 ===
+        print(f"\n{Colors.CYAN}[4/10] 测试伏笔系统...{Colors.RESET}")
+        try:
+            # 埋下伏笔
+            fsh = self.recall.plant_foreshadowing("张三计划明年去日本旅行", test_user)
+            fsh_id = fsh.get("id")
+            if fsh_id:
+                print(f"  {Colors.GREEN}✓ 埋下伏笔成功: {fsh_id[:12]}...{Colors.RESET}")
+                test_results.append(("伏笔埋下", True))
+                
+                # 获取伏笔列表
+                foreshadowings = self.recall.get_foreshadowings(test_user)
+                print(f"  {Colors.GREEN}✓ 获取伏笔: {len(foreshadowings)} 条{Colors.RESET}")
+                test_results.append(("伏笔列表", True))
+            else:
+                test_results.append(("伏笔系统", False))
+        except Exception as e:
+            print(f"  {Colors.RED}✗ 伏笔系统测试失败: {e}{Colors.RESET}")
+            test_results.append(("伏笔系统", False))
+        
+        # === 测试 5: 混合搜索 ===
+        print(f"\n{Colors.CYAN}[5/10] 测试混合搜索...{Colors.RESET}")
+        try:
+            result = self.recall.hybrid_search("北京 编程", test_user)
+            results = result.get("results", result) if isinstance(result, dict) else result
+            if results:
+                print(f"  {Colors.GREEN}✓ 混合搜索成功: {len(results)} 条结果{Colors.RESET}")
+                test_results.append(("混合搜索", True))
+            else:
+                print(f"  {Colors.YELLOW}⚠ 混合搜索无结果{Colors.RESET}")
+                test_results.append(("混合搜索", False))
+        except Exception as e:
+            print(f"  {Colors.RED}✗ 混合搜索测试失败: {e}{Colors.RESET}")
+            test_results.append(("混合搜索", False))
+        
+        # === 测试 6: 持久条件 ===
+        print(f"\n{Colors.CYAN}[6/10] 测试持久条件...{Colors.RESET}")
+        try:
+            contexts = self.recall.get_persistent_contexts(test_user)
+            print(f"  {Colors.GREEN}✓ 获取持久条件: {len(contexts)} 条{Colors.RESET}")
+            test_results.append(("持久条件", True))
+        except Exception as e:
+            print(f"  {Colors.RED}✗ 持久条件测试失败: {e}{Colors.RESET}")
+            test_results.append(("持久条件", False))
+        
+        # === 测试 7: Episode 追踪 ===
+        print(f"\n{Colors.CYAN}[7/10] 测试 Episode 追踪...{Colors.RESET}")
+        try:
+            result = self.recall.get_episodes(test_user)
+            enabled = result.get("enabled", False)
+            episodes = result.get("episodes", [])
+            if enabled:
+                print(f"  {Colors.GREEN}✓ Episode 追踪已启用: {len(episodes)} 个 Episode{Colors.RESET}")
+            else:
+                print(f"  {Colors.YELLOW}⚠ Episode 追踪未启用{Colors.RESET}")
+            test_results.append(("Episode追踪", True))
+        except Exception as e:
+            print(f"  {Colors.RED}✗ Episode 追踪测试失败: {e}{Colors.RESET}")
+            test_results.append(("Episode追踪", False))
+        
+        # === 测试 8: 矛盾检测 ===
+        print(f"\n{Colors.CYAN}[8/10] 测试矛盾检测...{Colors.RESET}")
+        try:
+            # 添加矛盾信息
+            self.recall.add_memory("张三今年25岁", test_user)
+            self.recall.add_memory("张三今年30岁了", test_user)
+            
+            result = self.recall.get_contradictions("all")
+            contradictions = result.get("contradictions", [])
+            print(f"  {Colors.GREEN}✓ 矛盾检测: {len(contradictions)} 条{Colors.RESET}")
+            test_results.append(("矛盾检测", True))
+        except Exception as e:
+            print(f"  {Colors.RED}✗ 矛盾检测测试失败: {e}{Colors.RESET}")
+            test_results.append(("矛盾检测", False))
+        
+        # === 测试 9: 检索配置 ===
+        print(f"\n{Colors.CYAN}[9/10] 测试检索配置...{Colors.RESET}")
+        try:
+            config = self.recall.get_retrieval_config()
+            print(f"  {Colors.GREEN}✓ 获取检索配置成功{Colors.RESET}")
+            test_results.append(("检索配置", True))
+        except Exception as e:
+            print(f"  {Colors.RED}✗ 检索配置测试失败: {e}{Colors.RESET}")
+            test_results.append(("检索配置", False))
+        
+        # === 测试 10: v4.1 功能状态 ===
+        print(f"\n{Colors.CYAN}[10/10] 测试 v4.1 功能状态...{Colors.RESET}")
+        try:
+            config = self.recall.get_v41_config()
+            print(f"  {Colors.GREEN}✓ 获取 v4.1 配置成功{Colors.RESET}")
+            
+            # 显示各功能状态
+            llm_rel = config.get("llm_relation_extractor", {})
+            summary = config.get("entity_summary", {})
+            episode = config.get("episode_tracking", {})
+            
+            print(f"    - LLM关系提取: {'启用' if llm_rel.get('enabled') else '禁用'}")
+            print(f"    - 实体摘要: {'启用' if summary.get('enabled') else '禁用'}")
+            print(f"    - Episode追踪: {'启用' if episode.get('enabled') else '禁用'}")
+            test_results.append(("v4.1功能", True))
+        except Exception as e:
+            print(f"  {Colors.RED}✗ v4.1 功能测试失败: {e}{Colors.RESET}")
+            test_results.append(("v4.1功能", False))
+        
+        # === 清理测试数据 ===
+        print(f"\n{Colors.CYAN}清理测试数据...{Colors.RESET}")
+        try:
+            self.recall.clear_memories(test_user)
+            print(f"  {Colors.GREEN}✓ 测试数据已清理{Colors.RESET}")
+        except Exception as e:
+            print(f"  {Colors.YELLOW}⚠ 清理失败: {e}{Colors.RESET}")
+        
+        # === 测试结果汇总 ===
+        print(f"\n{Colors.CYAN}{'='*60}{Colors.RESET}")
+        print(f"{Colors.BOLD}{Colors.CYAN}  测试结果汇总{Colors.RESET}")
+        print(f"{Colors.CYAN}{'='*60}{Colors.RESET}")
+        
+        passed = sum(1 for _, result in test_results if result)
+        total = len(test_results)
+        
+        for name, result in test_results:
+            status = Colors.GREEN + "✓ PASS" if result else Colors.RED + "✗ FAIL"
+            print(f"  {status}{Colors.RESET} {name}")
+        
+        print(f"\n{Colors.CYAN}{'─'*60}{Colors.RESET}")
+        color = Colors.GREEN if passed == total else Colors.YELLOW
+        print(f"  {color}通过率: {passed}/{total} ({passed/total*100:.0f}%){Colors.RESET}")
+        print(f"{Colors.CYAN}{'='*60}{Colors.RESET}\n")
+        
+        return passed == total
+    
     def run(self):
         """运行主循环"""
         # 健康检查
@@ -867,6 +1523,39 @@ class RecallChatApp:
                         self.cmd_clear()
                     elif cmd == "debug":
                         self.cmd_debug()
+                    # === 伏笔系统扩展 ===
+                    elif cmd == "plant":
+                        self.cmd_plant(arg)
+                    elif cmd == "resolve":
+                        self.cmd_resolve(arg)
+                    elif cmd == "hint":
+                        self.cmd_hint(arg)
+                    elif cmd == "analyze":
+                        self.cmd_analyze()
+                    # === 时间查询 ===
+                    elif cmd == "timeline":
+                        self.cmd_timeline(arg)
+                    elif cmd == "temporal":
+                        self.cmd_temporal(arg)
+                    # === 搜索扩展 ===
+                    elif cmd == "hsearch":
+                        self.cmd_hsearch(arg)
+                    # === 图谱扩展 ===
+                    elif cmd == "neighbors":
+                        self.cmd_neighbors(arg)
+                    elif cmd == "traverse":
+                        self.cmd_traverse(arg)
+                    elif cmd == "communities":
+                        self.cmd_communities()
+                    # === 管理功能 ===
+                    elif cmd == "switch":
+                        self.cmd_switch(arg)
+                    elif cmd == "users":
+                        self.cmd_users()
+                    elif cmd == "retrieval":
+                        self.cmd_retrieval()
+                    elif cmd == "test":
+                        self.run_auto_test()
                     # === Recall 4.1 新增命令 ===
                     elif cmd == "episodes":
                         self.cmd_episodes()
@@ -900,16 +1589,26 @@ class RecallChatApp:
 def main():
     parser = argparse.ArgumentParser(description="Recall 交互式聊天测试工具")
     parser.add_argument("--user", "-u", default="chat_test", help="用户ID")
+    parser.add_argument("--character", "-c", default=None, help="角色ID (默认与用户ID相同)")
     parser.add_argument("--debug", "-d", action="store_true", help="开启调试模式")
     parser.add_argument("--api", default="http://localhost:18888", help="Recall API 地址")
+    parser.add_argument("--auto-test", action="store_true", help="运行自动化功能测试")
     
     args = parser.parse_args()
     
     global RECALL_API_BASE
     RECALL_API_BASE = args.api
     
-    app = RecallChatApp(user_id=args.user, debug=args.debug)
-    app.run()
+    app = RecallChatApp(
+        user_id=args.user, 
+        character_id=args.character or args.user,
+        debug=args.debug
+    )
+    
+    if args.auto_test:
+        app.run_auto_test()
+    else:
+        app.run()
 
 
 if __name__ == "__main__":

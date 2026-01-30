@@ -1010,7 +1010,8 @@ function Do-ClearData {
     $cacheDir = Join-Path $dataPath "cache"
     $logsDir = Join-Path $dataPath "logs"
     $tempDir = Join-Path $dataPath "temp"
-    $indexesDir = Join-Path $dataPath "indexes"
+    $indexDir = Join-Path $dataPath "index"        # ngram, fulltext indexes
+    $indexesDir = Join-Path $dataPath "indexes"     # legacy indexes
     $l1Dir = Join-Path $dataPath "L1_consolidated"
     $kgFile = Join-Path $dataPath "knowledge_graph.json"
     $kgFileInData = Join-Path (Join-Path $dataPath "data") "knowledge_graph.json"
@@ -1022,6 +1023,13 @@ function Do-ClearData {
         $sizeStr = if ($size) { "{0:N2} MB" -f ($size / 1MB) } else { "0 MB" }
         Write-Host "    [x] data/           - All user memories ($sizeStr)" -ForegroundColor Red
         $toDelete += $dataDir
+    }
+    
+    if (Test-Path $indexDir) {
+        $size = (Get-ChildItem $indexDir -Recurse -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
+        $sizeStr = if ($size) { "{0:N2} MB" -f ($size / 1MB) } else { "0 MB" }
+        Write-Host "    [x] index/          - N-gram and fulltext indexes ($sizeStr)" -ForegroundColor Red
+        $toDelete += $indexDir
     }
     
     if (Test-Path $indexesDir) {
