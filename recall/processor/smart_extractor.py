@@ -567,9 +567,12 @@ class SmartExtractor:
         try:
             prompt = self.EXTRACTION_PROMPT.format(text=text)
             
+            # 从环境变量读取配置的最大 tokens
+            import os
+            max_tokens = int(os.environ.get('SMART_EXTRACTOR_MAX_TOKENS', '2000'))
             response = self.llm_client.complete(
                 prompt=prompt,
-                max_tokens=1000,
+                max_tokens=max_tokens,
                 temperature=0.1
             )
             

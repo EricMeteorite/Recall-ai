@@ -29,7 +29,11 @@ class BuiltContext:
 class ContextBuilder:
     """上下文构建器"""
     
-    def __init__(self, max_tokens: int = 4000):
+    def __init__(self, max_tokens: Optional[int] = None):
+        # 从环境变量读取配置的最大 tokens
+        import os
+        if max_tokens is None:
+            max_tokens = int(os.environ.get('BUILD_CONTEXT_MAX_TOKENS', '4000'))
         self.max_tokens = max_tokens
         
         # Token估算（简化：1字符约0.5token中文，1token英文）

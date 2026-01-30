@@ -594,9 +594,12 @@ class ThreeStageDeduplicator:
                     item_b=f"{candidate.name}: {candidate.content[:100]}" if candidate.content else candidate.name
                 )
                 
+                # 从环境变量读取配置的最大 tokens（去重确认通常只需要很少）
+                import os
+                dedup_llm_max_tokens = int(os.environ.get('DEDUP_LLM_MAX_TOKENS', '100'))
                 response = self.llm_client.complete(
                     prompt=prompt,
-                    max_tokens=10,
+                    max_tokens=dedup_llm_max_tokens,
                     temperature=0
                 ).strip().upper()
                 

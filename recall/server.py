@@ -244,6 +244,18 @@ SUPPORTED_CONFIG_KEYS = {
     'ENTITY_SUMMARY_MIN_FACTS',       # 触发 LLM 摘要的最小事实数
     # Episode 追溯配置
     'EPISODE_TRACKING_ENABLED',       # 是否启用 Episode 追溯
+    
+    # ====== v4.1.1 LLM Max Tokens 配置（防止输出截断）======
+    'LLM_DEFAULT_MAX_TOKENS',         # LLM 默认最大输出 tokens（通用）
+    'LLM_RELATION_MAX_TOKENS',        # 关系提取最大 tokens
+    'FORESHADOWING_MAX_TOKENS',       # 伏笔分析最大 tokens
+    'CONTEXT_EXTRACTION_MAX_TOKENS',  # 条件提取最大 tokens
+    'ENTITY_SUMMARY_MAX_TOKENS',      # 实体摘要最大 tokens
+    'SMART_EXTRACTOR_MAX_TOKENS',     # 智能抽取最大 tokens
+    'CONTRADICTION_MAX_TOKENS',       # 矛盾检测最大 tokens
+    'BUILD_CONTEXT_MAX_TOKENS',       # 上下文构建最大 tokens
+    'RETRIEVAL_LLM_MAX_TOKENS',       # 检索 LLM 过滤最大 tokens
+    'DEDUP_LLM_MAX_TOKENS',           # 去重 LLM 确认最大 tokens
 }
 
 
@@ -789,6 +801,55 @@ ENTITY_SUMMARY_MIN_FACTS=5
 # 是否启用 Episode 追溯
 # Enable episode tracking
 EPISODE_TRACKING_ENABLED=false
+
+# ----------------------------------------------------------------------------
+# LLM Max Tokens 配置 (防止输出截断)
+# LLM Max Tokens Configuration (Prevent output truncation)
+# ----------------------------------------------------------------------------
+# 说明：这些配置控制各个 LLM 调用场景的最大输出 token 数
+# 如果发现某个功能输出被截断，请增加对应的值
+# Note: These control max output tokens for each LLM call scenario
+# Increase the value if you find output being truncated
+
+# LLM 默认最大输出 tokens（通用场景）
+# Default max tokens for LLM calls
+LLM_DEFAULT_MAX_TOKENS=2000
+
+# 关系提取最大 tokens（实体多时需要更多）
+# Max tokens for relation extraction
+LLM_RELATION_MAX_TOKENS=4000
+
+# 伏笔分析最大 tokens
+# Max tokens for foreshadowing analysis
+FORESHADOWING_MAX_TOKENS=2000
+
+# 条件提取最大 tokens
+# Max tokens for context extraction
+CONTEXT_EXTRACTION_MAX_TOKENS=2000
+
+# 实体摘要最大 tokens
+# Max tokens for entity summary
+ENTITY_SUMMARY_MAX_TOKENS=2000
+
+# 智能抽取最大 tokens
+# Max tokens for smart extraction
+SMART_EXTRACTOR_MAX_TOKENS=2000
+
+# 矛盾检测最大 tokens
+# Max tokens for contradiction detection
+CONTRADICTION_MAX_TOKENS=1000
+
+# 上下文构建最大 tokens
+# Max tokens for context building
+BUILD_CONTEXT_MAX_TOKENS=4000
+
+# 检索 LLM 过滤最大 tokens（通常较小）
+# Max tokens for retrieval LLM filtering
+RETRIEVAL_LLM_MAX_TOKENS=200
+
+# 去重 LLM 确认最大 tokens（通常较小）
+# Max tokens for dedup LLM confirmation
+DEDUP_LLM_MAX_TOKENS=100
 '''
 
 

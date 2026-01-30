@@ -1154,10 +1154,13 @@ class ElevenLayerRetriever:
 只返回 JSON，不要其他内容。"""
 
         try:
+            # 从环境变量读取配置的最大 tokens
+            retrieval_llm_max_tokens = int(os.environ.get('RETRIEVAL_LLM_MAX_TOKENS', '200'))
+            
             # 支持同步和异步 LLM 客户端
             if hasattr(self.llm_client, 'complete_async'):
                 response = await asyncio.wait_for(
-                    self.llm_client.complete_async(prompt=prompt, max_tokens=200, temperature=0.0),
+                    self.llm_client.complete_async(prompt=prompt, max_tokens=retrieval_llm_max_tokens, temperature=0.0),
                     timeout=config.l11_llm_timeout
                 )
             else:
@@ -1166,7 +1169,7 @@ class ElevenLayerRetriever:
                 response = await asyncio.wait_for(
                     loop.run_in_executor(
                         None,
-                        lambda: self.llm_client.complete(prompt=prompt, max_tokens=200, temperature=0.0)
+                        lambda: self.llm_client.complete(prompt=prompt, max_tokens=retrieval_llm_max_tokens, temperature=0.0)
                     ),
                     timeout=config.l11_llm_timeout
                 )

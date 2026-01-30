@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""验证配置项一致性脚本 - Recall v4.0 完整版
+"""验证配置项一致性脚本 - Recall v4.1 完整版
 
 检查项目:
 1. server.py SUPPORTED_CONFIG_KEYS - 支持的配置键名
@@ -38,7 +38,7 @@ def main():
     warnings = 0
     
     print("=" * 60)
-    print("Recall-AI 配置一致性验证工具 v4.0")
+    print("Recall-AI 配置一致性验证工具 v4.1")
     print("=" * 60)
     print()
     

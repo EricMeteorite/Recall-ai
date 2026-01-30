@@ -131,7 +131,13 @@ class EntitySummarizer:
         
         try:
             # 使用 complete() 方法（接受字符串 prompt）
-            response = self.llm_client.complete(prompt)
+            # 从环境变量读取配置的最大 tokens，或根据内容长度动态计算
+            import os
+            config_max_tokens = int(os.environ.get('ENTITY_SUMMARY_MAX_TOKENS', '2000'))
+            content_length = len(facts_str or '') + len(relations_str or '')
+            # 动态计算，但不超过配置的上限
+            max_tokens = min(config_max_tokens, max(1000, content_length // 2))
+            response = self.llm_client.complete(prompt, max_tokens=max_tokens)
             return self._parse_response(entity_name, response, facts, relations)
         except Exception as e:
             print(f"[EntitySummarizer] LLM 失败: {e}")

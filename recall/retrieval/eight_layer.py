@@ -682,7 +682,10 @@ class EightLayerRetriever:
 请返回相关记忆的编号（用逗号分隔），如果都不相关返回"无"："""
         
         try:
-            response = self.llm_client.complete(prompt, max_tokens=50)
+            # 从环境变量读取配置的最大 tokens
+            import os
+            retrieval_llm_max_tokens = int(os.environ.get('RETRIEVAL_LLM_MAX_TOKENS', '200'))
+            response = self.llm_client.complete(prompt, max_tokens=retrieval_llm_max_tokens)
             
             if response.strip() == "无":
                 return []

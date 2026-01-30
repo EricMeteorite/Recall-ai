@@ -1597,7 +1597,9 @@ class RecallEngine:
             try:
                 # === Recall 4.1: 优先使用 LLM 关系提取器（如果启用）===
                 if self._llm_relation_extractor:
+                    _safe_print(f"[Recall][关系] 使用 LLM 关系提取器, 实体数={len(entities)}")
                     relations_v2 = self._llm_relation_extractor.extract(content, 0, entities)
+                    _safe_print(f"[Recall][关系] LLM 提取完成, 关系数={len(relations_v2)}")
                     for rel in relations_v2:
                         self.knowledge_graph.add_relation(
                             source_id=rel.source_id,
@@ -1611,9 +1613,12 @@ class RecallEngine:
                         )
                     # 转换为兼容格式供后续使用
                     relations = [rel.to_legacy_tuple() for rel in relations_v2]
+                    _safe_print(f"[Recall][关系] 已存储到知识图谱, 总关系数={sum(len(v) for v in self.knowledge_graph.outgoing.values())}")
                 else:
                     # 使用传统规则提取器
+                    _safe_print(f"[Recall][关系] 使用规则提取器, 实体数={len(entities)}")
                     relations = self.relation_extractor.extract(content, 0, entities=entities)
+                    _safe_print(f"[Recall][关系] 规则提取完成, 关系数={len(relations)}")
                     for rel in relations:
                         source_id, relation_type, target_id, source_text = rel
                         self.knowledge_graph.add_relation(
@@ -1622,8 +1627,11 @@ class RecallEngine:
                             relation_type=relation_type,
                             source_text=source_text
                         )
+                    _safe_print(f"[Recall][关系] 已存储到知识图谱, 总关系数={sum(len(v) for v in self.knowledge_graph.outgoing.values())}")
             except Exception as e:
+                import traceback
                 _safe_print(f"[Recall] 知识图谱更新失败（不影响主流程）: {e}")
+                traceback.print_exc()
                 relations = []  # 确保 relations 变量存在
             
             # 6.5 更新全文索引 BM25（Phase 1 功能）

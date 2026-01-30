@@ -1625,7 +1625,12 @@ class ContextTracker:
                 extract_content = text
             
             prompt = self.extraction_prompt.format(content=extract_content)
-            response = self.llm_client.complete(prompt, max_tokens=800)
+            # 从环境变量读取配置的最大 tokens，或根据内容长度动态计算
+            config_max_tokens = int(os.environ.get('CONTEXT_EXTRACTION_MAX_TOKENS', '2000'))
+            content_len = len(extract_content)
+            # 动态计算，但不超过配置的上限
+            max_tokens = min(config_max_tokens, max(1500, content_len // 3))
+            response = self.llm_client.complete(prompt, max_tokens=max_tokens)
             _safe_print(f"[ContextTracker]    LLM 响应: {len(response)} 字符")
             
             # 解析 JSON
@@ -1816,7 +1821,9 @@ class ContextTracker:
 
 只输出JSON数组，不要其他内容。"""
             
-            response = self.llm_client.complete(prompt, max_tokens=300)
+            # 合并输出通常较小，使用默认 max_tokens 或配置的一半
+            merge_max_tokens = int(os.environ.get('CONTEXT_EXTRACTION_MAX_TOKENS', '2000')) // 4
+            response = self.llm_client.complete(prompt, max_tokens=max(300, merge_max_tokens))
             
             # 解析结果
             json_match = re.search(r'\[[\s\S]*\]', response)

@@ -57,7 +57,7 @@ function Write-Header {
     
     Write-Host ""
     Write-Host "+============================================+" -ForegroundColor Cyan
-    Write-Host "|          Recall AI v3.0.0 Server          |" -ForegroundColor Cyan
+    Write-Host "|          Recall AI v4.1.0 Server          |" -ForegroundColor Cyan
     Write-Host "+============================================+" -ForegroundColor Cyan
     Write-Host ""
 }
@@ -205,7 +205,12 @@ function Import-ApiKeys {
         # 实体摘要配置
         'ENTITY_SUMMARY_ENABLED', 'ENTITY_SUMMARY_MIN_FACTS',
         # Episode 追溯配置
-        'EPISODE_TRACKING_ENABLED'
+        'EPISODE_TRACKING_ENABLED',
+        # ====== v4.1 LLM Max Tokens 配置 ======
+        'LLM_DEFAULT_MAX_TOKENS', 'LLM_RELATION_MAX_TOKENS', 'FORESHADOWING_MAX_TOKENS',
+        'CONTEXT_EXTRACTION_MAX_TOKENS', 'ENTITY_SUMMARY_MAX_TOKENS', 'SMART_EXTRACTOR_MAX_TOKENS',
+        'CONTRADICTION_MAX_TOKENS', 'BUILD_CONTEXT_MAX_TOKENS', 'RETRIEVAL_LLM_MAX_TOKENS',
+        'DEDUP_LLM_MAX_TOKENS'
     )
     
     if (Test-Path $configFile) {
@@ -774,6 +779,50 @@ ENTITY_SUMMARY_MIN_FACTS=5
 # 是否启用 Episode 追溯
 # Enable episode tracking
 EPISODE_TRACKING_ENABLED=false
+
+# ----------------------------------------------------------------------------
+# LLM Max Tokens 配置
+# LLM Max Tokens Configuration
+# ----------------------------------------------------------------------------
+# LLM 默认最大输出 tokens（通用默认值）
+# Default max tokens for LLM output
+LLM_DEFAULT_MAX_TOKENS=2000
+
+# 关系提取最大 tokens（实体多时需要大值）
+# Max tokens for relation extraction (need larger value for many entities)
+LLM_RELATION_MAX_TOKENS=4000
+
+# 伏笔分析最大 tokens
+# Max tokens for foreshadowing analysis
+FORESHADOWING_MAX_TOKENS=2000
+
+# 条件提取最大 tokens
+# Max tokens for context extraction
+CONTEXT_EXTRACTION_MAX_TOKENS=2000
+
+# 实体摘要最大 tokens
+# Max tokens for entity summary
+ENTITY_SUMMARY_MAX_TOKENS=2000
+
+# 智能抽取最大 tokens
+# Max tokens for smart extractor
+SMART_EXTRACTOR_MAX_TOKENS=2000
+
+# 矛盾检测最大 tokens
+# Max tokens for contradiction detection
+CONTRADICTION_MAX_TOKENS=1000
+
+# 上下文构建最大 tokens
+# Max tokens for context building
+BUILD_CONTEXT_MAX_TOKENS=4000
+
+# 检索 LLM 过滤最大 tokens（只需 yes/no，较小即可）
+# Max tokens for retrieval LLM filter (only yes/no, keep small)
+RETRIEVAL_LLM_MAX_TOKENS=200
+
+# 去重 LLM 确认最大 tokens（只需 yes/no，较小即可）
+# Max tokens for dedup LLM confirmation (only yes/no, keep small)
+DEDUP_LLM_MAX_TOKENS=100
 '@
         Set-Content -Path $configFile -Value $defaultConfig -Encoding UTF8
         Write-Host "  $([char]0x2192) 已创建配置文件: $configFile" -ForegroundColor Cyan

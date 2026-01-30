@@ -92,11 +92,20 @@ class LLMClient:
     def complete(
         self,
         prompt: str,
-        max_tokens: int = 500,
+        max_tokens: Optional[int] = None,
         temperature: float = 0.7,
         stop: Optional[List[str]] = None
     ) -> str:
-        """简单文本补全"""
+        """简单文本补全
+        
+        Args:
+            prompt: 提示词
+            max_tokens: 最大输出 token 数，默认从 LLM_DEFAULT_MAX_TOKENS 环境变量读取（默认 2000）
+            temperature: 温度参数
+            stop: 停止词
+        """
+        if max_tokens is None:
+            max_tokens = int(os.environ.get('LLM_DEFAULT_MAX_TOKENS', '2000'))
         response = self.chat(
             messages=[{"role": "user", "content": prompt}],
             max_tokens=max_tokens,
@@ -108,12 +117,14 @@ class LLMClient:
     def chat(
         self,
         messages: List[Dict[str, str]],
-        max_tokens: int = 500,
+        max_tokens: Optional[int] = None,
         temperature: float = 0.7,
         stop: Optional[List[str]] = None,
         **kwargs
     ) -> LLMResponse:
         """聊天补全 - 使用 OpenAI SDK，带速率限制处理"""
+        if max_tokens is None:
+            max_tokens = int(os.environ.get('LLM_DEFAULT_MAX_TOKENS', '2000'))
         start_time = time.time()
         
         for attempt in range(self.max_retries):
@@ -165,12 +176,19 @@ class LLMClient:
     async def achat(
         self,
         messages: List[Dict[str, str]],
-        max_tokens: int = 500,
+        max_tokens: Optional[int] = None,
         temperature: float = 0.7,
         **kwargs
     ) -> LLMResponse:
-        """异步聊天补全"""
+        """异步聊天补全
+        
+        Args:
+            max_tokens: 最大输出 token 数，默认从 LLM_DEFAULT_MAX_TOKENS 环境变量读取
+        """
         from openai import AsyncOpenAI
+        
+        if max_tokens is None:
+            max_tokens = int(os.environ.get('LLM_DEFAULT_MAX_TOKENS', '2000'))
         
         start_time = time.time()
         
@@ -233,7 +251,8 @@ class LLMClient:
 
 实体："""
         
-        response = self.complete(prompt, max_tokens=200, temperature=0)
+        # 实体提取输出相对固定，使用较小的默认值
+        response = self.complete(prompt, temperature=0)
         
         try:
             import json
@@ -249,7 +268,7 @@ class LLMClient:
 
 摘要："""
         
-        return self.complete(prompt, max_tokens=max_length, temperature=0.3)
+        return self.complete(prompt, max_tokens=max_length * 2, temperature=0.3)
     
     def check_relevance(
         self,
@@ -266,7 +285,8 @@ class LLMClient:
 
 请只返回分数，用逗号分隔："""
         
-        response = self.complete(prompt, max_tokens=50, temperature=0)
+        # 相关性评分输出很短，使用较小的默认值
+        response = self.complete(prompt, max_tokens=100, temperature=0)
         
         try:
             scores = [float(s.strip()) for s in response.split(',')]

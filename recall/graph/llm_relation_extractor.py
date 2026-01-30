@@ -216,7 +216,14 @@ class LLMRelationExtractor:
         
         try:
             # 使用 complete() 方法（接受字符串 prompt）
-            response = self.llm_client.complete(prompt)
+            # 从环境变量读取配置的最大 tokens，或根据实体数量动态计算
+            import os
+            config_max_tokens = int(os.environ.get('LLM_RELATION_MAX_TOKENS', '4000'))
+            entity_count = len(entity_names) if entity_names else 10
+            # 动态计算：每实体约80 tokens，但不超过配置的上限
+            dynamic_tokens = min(config_max_tokens, max(1000, entity_count * 80))
+            
+            response = self.llm_client.complete(prompt, max_tokens=dynamic_tokens)
             relations = self._parse_llm_response(response, text)
             
             # 记录成本（使用正确的参数格式）
@@ -304,9 +311,25 @@ class LLMRelationExtractor:
         try:
             # 尝试提取 JSON
             json_match = re.search(r'\[[\s\S]*\]', response)
+            
+            # 如果没找到完整的 JSON 数组，尝试修复被截断的 JSON
+            if not json_match:
+                # 检查是否是被截断的 JSON（以 [ 开头但没有 ]）
+                if response.strip().startswith('['):
+                    # 尝试修复：找到最后一个完整的对象，然后闭合数组
+                    truncated_json = response.strip()
+                    # 找到最后一个 }
+                    last_brace = truncated_json.rfind('}')
+                    if last_brace > 0:
+                        # 截取到最后一个完整对象，并闭合数组
+                        truncated_json = truncated_json[:last_brace + 1] + ']'
+                        print(f"[LLMRelationExtractor] JSON 被截断，尝试修复...")
+                        json_match = re.search(r'\[[\s\S]*\]', truncated_json)
+            
             if json_match:
                 data = json.loads(json_match.group())
-                return [
+                print(f"[LLMRelationExtractor] 解析成功, 原始关系数={len(data)}")
+                relations = [
                     ExtractedRelationV2(
                         source_id=item.get('source_id', ''),
                         target_id=item.get('target_id', ''),
@@ -320,8 +343,12 @@ class LLMRelationExtractor:
                     for item in data
                     if item.get('source_id') and item.get('target_id')
                 ]
+                print(f"[LLMRelationExtractor] 有效关系数={len(relations)}")
+                return relations
+            else:
+                print(f"[LLMRelationExtractor] 未找到 JSON 数组, response前200字符: {response[:200]}")
         except (json.JSONDecodeError, Exception) as e:
-            print(f"[LLMRelationExtractor] 解析失败: {e}")
+            print(f"[LLMRelationExtractor] 解析失败: {e}, response前200字符: {response[:200]}")
         
         return []
     

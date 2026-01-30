@@ -1376,9 +1376,11 @@ VIOLATION|3|内容中出现了脏话"XXX"，违反了禁止脏话的规则
 请开始检查："""
 
         try:
+            # 从环境变量读取配置的最大 tokens
+            max_tokens = int(os.environ.get('CONTRADICTION_MAX_TOKENS', '1000'))
             response = self._llm_client.complete(
                 prompt=prompt,
-                max_tokens=500,
+                max_tokens=max_tokens,
                 temperature=0.1  # 低温度保证一致性
             )
             

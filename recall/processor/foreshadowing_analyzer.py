@@ -600,10 +600,12 @@ Important:
             # 调用 LLM
             _safe_print(f"[ForeshadowAnalyzer] 🤖 调用 LLM 分析...")
             _safe_print(f"[ForeshadowAnalyzer]    用户={cache_key}, 对话数={len(conversations)}, 活跃伏笔={len(active)}")
+            import os
+            max_tokens = int(os.environ.get('FORESHADOWING_MAX_TOKENS', '2000'))
             response = self._llm_client.chat(
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.3,  # 低温度，更确定性
-                max_tokens=1000
+                max_tokens=max_tokens
             )
             _safe_print(f"[ForeshadowAnalyzer]    LLM 响应: {len(response.content)} 字符")
             
