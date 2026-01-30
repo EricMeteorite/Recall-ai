@@ -420,11 +420,12 @@ class RecallAPIClient:
 class LLMClient:
     """LLM 客户端"""
     
-    def __init__(self, api_key: str, api_base: str, model: str, logger: DetailedLogger):
+    def __init__(self, api_key: str, api_base: str, model: str, logger: DetailedLogger, max_tokens: int = 4000):
         self.api_key = api_key
         self.api_base = api_base.rstrip("/")
         self.model = model
         self.logger = logger
+        self.max_tokens = max_tokens
     
     def chat(self, messages: List[Dict], system_prompt: str = None) -> str:
         """调用 LLM 聊天"""
@@ -440,7 +441,7 @@ class LLMClient:
             "model": self.model,
             "messages": full_messages,
             "temperature": 0.7,
-            "max_tokens": 2000
+            "max_tokens": self.max_tokens
         }
         
         body = json.dumps(data).encode("utf-8")
@@ -455,7 +456,15 @@ class LLMClient:
                 elapsed = time.time() - start_time
                 
                 content = result["choices"][0]["message"]["content"]
-                self.logger.debug(f"LLM Response: {elapsed:.2f}s, {len(content)} chars")
+                finish_reason = result["choices"][0].get("finish_reason", "unknown")
+                
+                self.logger.debug(f"LLM Response: {elapsed:.2f}s, {len(content)} chars, finish_reason={finish_reason}")
+                
+                # 检查是否被截断
+                if finish_reason == "length":
+                    self.logger.warning(f"LLM 回复被截断！max_tokens={self.max_tokens} 可能不够")
+                    print(f"  {Colors.YELLOW}⚠ 回复被截断，可在 api_keys.env 增大 CHAT_MAX_TOKENS{Colors.RESET}")
+                
                 return content
         except Exception as e:
             self.logger.error(f"LLM Error: {e}")
@@ -508,9 +517,16 @@ class RecallChatApp:
         api_base = config.get("LLM_API_BASE") or os.environ.get("LLM_API_BASE") or "https://api.openai.com/v1"
         model = config.get("LLM_MODEL") or os.environ.get("LLM_MODEL") or "gpt-4o-mini"
         
+        # 从配置读取 max_tokens，默认 4000
+        max_tokens_str = config.get("CHAT_MAX_TOKENS") or os.environ.get("CHAT_MAX_TOKENS") or "4000"
+        try:
+            max_tokens = int(max_tokens_str)
+        except ValueError:
+            max_tokens = 4000
+        
         if api_key:
-            self.llm = LLMClient(api_key, api_base, model, self.logger)
-            self.logger.success(f"LLM 已配置: {model} @ {api_base}")
+            self.llm = LLMClient(api_key, api_base, model, self.logger, max_tokens)
+            self.logger.success(f"LLM 已配置: {model} @ {api_base} (max_tokens={max_tokens})")
         else:
             self.logger.warning("未配置 LLM_API_KEY，将无法生成 AI 回复")
     
