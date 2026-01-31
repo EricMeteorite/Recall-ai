@@ -491,10 +491,16 @@ function createUI() {
                 </div>
                 
                 <!-- 标签页导航 -->
-                <div class="recall-tabs">
+                <div class="recall-tabs recall-tabs-scrollable">
                     <button class="recall-tab active" data-tab="memories">📚 记忆</button>
+                    <button class="recall-tab" data-tab="entities">🏷️ 实体</button>
                     <button class="recall-tab" data-tab="contexts">📌 条件</button>
                     <button class="recall-tab" data-tab="foreshadowing">🎭 伏笔</button>
+                    <button class="recall-tab" data-tab="contradictions">⚔️ 矛盾</button>
+                    <button class="recall-tab" data-tab="temporal">⏱️ 时态</button>
+                    <button class="recall-tab" data-tab="graph">🕸️ 图谱</button>
+                    <button class="recall-tab" data-tab="episodes">📖 片段</button>
+                    <button class="recall-tab" data-tab="search">🔍 搜索</button>
                     <button class="recall-tab" data-tab="core-settings">⚠️ 规则</button>
                     <button class="recall-tab" data-tab="settings">⚙️ 设置</button>
                 </div>
@@ -539,6 +545,66 @@ function createUI() {
                             <i class="fa-solid fa-trash"></i>
                             <span>清空当前角色记忆</span>
                         </button>
+                    </div>
+                </div>
+                
+                <!-- 实体管理标签页 -->
+                <div id="recall-tab-entities" class="recall-tab-content">
+                    <div class="recall-stats-row">
+                        <span>🏷️ 实体数: <strong id="recall-entity-count">0</strong></span>
+                        <div class="recall-stats-actions">
+                            <button id="recall-refresh-entities-btn" class="recall-icon-btn" title="刷新">🔄</button>
+                        </div>
+                    </div>
+                    
+                    <div class="recall-search-bar">
+                        <input type="text" id="recall-entity-search-input" placeholder="🔍 搜索实体..." class="text_pole">
+                        <select id="recall-entity-type-filter" class="text_pole" style="width:auto;min-width:80px;">
+                            <option value="">全部类型</option>
+                            <option value="PERSON">👤 人物</option>
+                            <option value="LOCATION">📍 地点</option>
+                            <option value="ORGANIZATION">🏢 组织</option>
+                            <option value="OBJECT">📦 物品</option>
+                            <option value="EVENT">📅 事件</option>
+                            <option value="CONCEPT">💡 概念</option>
+                        </select>
+                    </div>
+                    
+                    <div id="recall-entity-list" class="recall-entity-list">
+                        <div class="recall-empty-state">
+                            <div class="recall-empty-icon">🏷️</div>
+                            <p>暂无实体</p>
+                            <small>对话时会自动提取实体</small>
+                        </div>
+                    </div>
+                    
+                    <!-- 实体详情面板（点击实体展开） -->
+                    <div id="recall-entity-detail-panel" class="recall-entity-detail-panel" style="display:none;">
+                        <div class="recall-entity-detail-header">
+                            <span id="recall-entity-detail-name">实体名称</span>
+                            <button id="recall-entity-detail-close" class="recall-icon-btn">✕</button>
+                        </div>
+                        <div class="recall-entity-detail-content">
+                            <div class="recall-entity-detail-section">
+                                <div class="recall-entity-detail-label">类型</div>
+                                <div id="recall-entity-detail-type">-</div>
+                            </div>
+                            <div class="recall-entity-detail-section">
+                                <div class="recall-entity-detail-label">摘要</div>
+                                <div id="recall-entity-detail-summary">-</div>
+                                <button id="recall-generate-entity-summary" class="menu_button" style="margin-top:5px;">
+                                    <i class="fa-solid fa-wand-magic-sparkles"></i> 生成摘要
+                                </button>
+                            </div>
+                            <div class="recall-entity-detail-section">
+                                <div class="recall-entity-detail-label">相关实体</div>
+                                <div id="recall-entity-detail-relations">-</div>
+                            </div>
+                            <div class="recall-entity-detail-section">
+                                <div class="recall-entity-detail-label">出现次数</div>
+                                <div id="recall-entity-detail-count">-</div>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 
@@ -706,6 +772,263 @@ function createUI() {
                         
                         <!-- 分页 -->
                         <div id="recall-foreshadowing-archive-pagination" class="recall-pagination"></div>
+                    </div>
+                </div>
+                
+                <!-- 矛盾检测标签页 -->
+                <div id="recall-tab-contradictions" class="recall-tab-content">
+                    <div class="recall-stats-row">
+                        <span>⚔️ 矛盾数: <strong id="recall-contradiction-count">0</strong></span>
+                        <div class="recall-stats-actions">
+                            <button id="recall-refresh-contradictions-btn" class="recall-icon-btn" title="刷新">🔄</button>
+                        </div>
+                    </div>
+                    
+                    <div class="recall-setting-hint" style="margin-bottom:10px;">
+                        系统自动检测到的事实矛盾，需要人工确认并解决。
+                    </div>
+                    
+                    <div class="recall-filter-bar">
+                        <select id="recall-contradiction-status-filter" class="text_pole" style="width:auto;">
+                            <option value="">全部状态</option>
+                            <option value="pending">⏳ 待处理</option>
+                            <option value="resolved">✅ 已解决</option>
+                            <option value="ignored">🚫 已忽略</option>
+                        </select>
+                    </div>
+                    
+                    <div id="recall-contradiction-list" class="recall-contradiction-list">
+                        <div class="recall-empty-state">
+                            <div class="recall-empty-icon">⚔️</div>
+                            <p>暂无矛盾</p>
+                            <small>系统会自动检测事实冲突</small>
+                        </div>
+                    </div>
+                    
+                    <!-- 矛盾详情面板 -->
+                    <div id="recall-contradiction-detail-panel" class="recall-contradiction-detail-panel" style="display:none;">
+                        <div class="recall-entity-detail-header">
+                            <span>矛盾详情</span>
+                            <button id="recall-contradiction-detail-close" class="recall-icon-btn">✕</button>
+                        </div>
+                        <div class="recall-contradiction-detail-content">
+                            <div class="recall-contradiction-fact">
+                                <div class="recall-contradiction-fact-label">📄 事实 A</div>
+                                <div id="recall-contradiction-fact-a">-</div>
+                            </div>
+                            <div class="recall-contradiction-vs">VS</div>
+                            <div class="recall-contradiction-fact">
+                                <div class="recall-contradiction-fact-label">📄 事实 B</div>
+                                <div id="recall-contradiction-fact-b">-</div>
+                            </div>
+                            <div class="recall-contradiction-actions">
+                                <button id="recall-resolve-keep-a" class="menu_button">保留 A</button>
+                                <button id="recall-resolve-keep-b" class="menu_button">保留 B</button>
+                                <button id="recall-resolve-keep-both" class="menu_button">保留两者</button>
+                                <button id="recall-resolve-ignore" class="menu_button">忽略</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 时态查询标签页 -->
+                <div id="recall-tab-temporal" class="recall-tab-content">
+                    <div class="recall-info-box" style="margin-bottom:10px;">
+                        <div class="recall-info-title">⏱️ 时态知识图谱</div>
+                        <p>追踪事实随时间的变化，支持按时间点/范围查询历史状态。</p>
+                    </div>
+                    
+                    <div class="recall-temporal-controls">
+                        <div class="recall-setting-group">
+                            <label class="recall-setting-title">查询实体时间线</label>
+                            <div class="recall-search-bar">
+                                <input type="text" id="recall-temporal-entity-input" placeholder="输入实体名称..." class="text_pole">
+                                <button id="recall-temporal-timeline-btn" class="menu_button" title="查询时间线">
+                                    <i class="fa-solid fa-clock-rotate-left"></i>
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div class="recall-setting-group">
+                            <label class="recall-setting-title">时间范围查询</label>
+                            <div class="recall-temporal-range">
+                                <input type="datetime-local" id="recall-temporal-start" class="text_pole">
+                                <span>至</span>
+                                <input type="datetime-local" id="recall-temporal-end" class="text_pole">
+                                <button id="recall-temporal-range-btn" class="menu_button" title="查询">
+                                    <i class="fa-solid fa-search"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="recall-stats-row" style="margin-top:10px;">
+                        <span>📊 时态统计</span>
+                        <button id="recall-temporal-stats-btn" class="recall-icon-btn" title="刷新统计">🔄</button>
+                    </div>
+                    
+                    <div id="recall-temporal-stats" class="recall-temporal-stats">
+                        <div class="recall-stat-item"><span>时态记录数:</span> <strong id="recall-temporal-record-count">-</strong></div>
+                        <div class="recall-stat-item"><span>时间跨度:</span> <strong id="recall-temporal-span">-</strong></div>
+                    </div>
+                    
+                    <div id="recall-temporal-results" class="recall-temporal-results">
+                        <div class="recall-empty-state">
+                            <div class="recall-empty-icon">⏱️</div>
+                            <p>输入实体名称查询时间线</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 知识图谱标签页 -->
+                <div id="recall-tab-graph" class="recall-tab-content">
+                    <div class="recall-info-box" style="margin-bottom:10px;">
+                        <div class="recall-info-title">🕸️ 知识图谱</div>
+                        <p>可视化实体关系网络，探索图遍历和社区结构。</p>
+                    </div>
+                    
+                    <div class="recall-graph-controls">
+                        <div class="recall-setting-group">
+                            <label class="recall-setting-title">图遍历查询</label>
+                            <div class="recall-search-bar">
+                                <input type="text" id="recall-graph-entity-input" placeholder="输入起始实体..." class="text_pole">
+                                <select id="recall-graph-depth" class="text_pole" style="width:auto;">
+                                    <option value="1">深度 1</option>
+                                    <option value="2" selected>深度 2</option>
+                                    <option value="3">深度 3</option>
+                                </select>
+                                <button id="recall-graph-traverse-btn" class="menu_button" title="遍历">
+                                    <i class="fa-solid fa-project-diagram"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="recall-stats-row" style="margin-top:10px;">
+                        <span>🏘️ 社区检测</span>
+                        <button id="recall-graph-communities-btn" class="recall-icon-btn" title="检测社区">🔍</button>
+                    </div>
+                    
+                    <div id="recall-graph-results" class="recall-graph-results">
+                        <div class="recall-empty-state">
+                            <div class="recall-empty-icon">🕸️</div>
+                            <p>输入实体名称开始图遍历</p>
+                        </div>
+                    </div>
+                    
+                    <div id="recall-communities-list" class="recall-communities-list" style="display:none;">
+                        <div class="recall-setting-title" style="margin-top:10px;">检测到的社区</div>
+                        <div id="recall-communities-content"></div>
+                    </div>
+                </div>
+                
+                <!-- Episode 片段标签页 -->
+                <div id="recall-tab-episodes" class="recall-tab-content">
+                    <div class="recall-episode-header">
+                        <span class="recall-episode-count-badge">📖 片段数: <span id="recall-episode-count">0</span></span>
+                        <button id="recall-refresh-episodes-btn" class="menu_button menu_button_icon" title="刷新">
+                            <i class="fa-solid fa-refresh"></i>
+                        </button>
+                    </div>
+                    
+                    <div class="recall-setting-hint" style="margin-bottom:10px;">
+                        对话会自动组织成有意义的片段（Episode），帮助理解对话的上下文流程
+                    </div>
+                    
+                    <div id="recall-episode-list" class="recall-episode-list">
+                        <div class="recall-empty-state">
+                            <div class="recall-empty-icon">📖</div>
+                            <p>加载中...</p>
+                        </div>
+                    </div>
+                    
+                    <!-- Episode 详情面板 -->
+                    <div id="recall-episode-detail-panel" class="recall-episode-detail-panel" style="display:none;">
+                        <div class="recall-episode-detail-header">
+                            <span class="recall-episode-detail-title">片段详情</span>
+                            <button id="recall-episode-detail-close" class="recall-icon-btn">✕</button>
+                        </div>
+                        <div class="recall-episode-detail-content">
+                            <div class="recall-episode-detail-row">
+                                <span class="recall-episode-detail-label">ID:</span>
+                                <span id="recall-episode-detail-id" class="recall-episode-detail-value">-</span>
+                            </div>
+                            <div class="recall-episode-detail-row">
+                                <span class="recall-episode-detail-label">开始:</span>
+                                <span id="recall-episode-detail-start" class="recall-episode-detail-value">-</span>
+                            </div>
+                            <div class="recall-episode-detail-row">
+                                <span class="recall-episode-detail-label">结束:</span>
+                                <span id="recall-episode-detail-end" class="recall-episode-detail-value">-</span>
+                            </div>
+                            <div class="recall-episode-detail-row">
+                                <span class="recall-episode-detail-label">记忆数:</span>
+                                <span id="recall-episode-detail-memory-count" class="recall-episode-detail-value">-</span>
+                            </div>
+                            <div style="margin-top:10px;">
+                                <div class="recall-setting-title">包含的记忆</div>
+                                <div id="recall-episode-memories" class="recall-episode-memories"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 高级搜索标签页 -->
+                <div id="recall-tab-search" class="recall-tab-content">
+                    <div class="recall-search-section">
+                        <div class="recall-setting-title">🔍 高级搜索</div>
+                        <div class="recall-setting-hint" style="margin-bottom:10px;">
+                            提供比基础语义搜索更强大的搜索能力
+                        </div>
+                        
+                        <!-- 搜索类型选择 -->
+                        <div class="recall-search-type-tabs">
+                            <button class="recall-search-type-tab active" data-type="hybrid">🔀 混合搜索</button>
+                            <button class="recall-search-type-tab" data-type="fulltext">📝 全文搜索</button>
+                            <button class="recall-search-type-tab" data-type="semantic">🧠 语义搜索</button>
+                        </div>
+                        
+                        <div class="recall-advanced-search-bar">
+                            <input type="text" id="recall-advanced-search-input" class="text_pole" 
+                                   placeholder="输入搜索内容...">
+                            <button id="recall-advanced-search-btn" class="menu_button">
+                                <i class="fa-solid fa-search"></i> 搜索
+                            </button>
+                        </div>
+                        
+                        <!-- 搜索选项 -->
+                        <div class="recall-search-options">
+                            <div class="recall-search-option">
+                                <label class="recall-setting-title">结果数量</label>
+                                <input type="number" id="recall-search-limit" class="text_pole" 
+                                       value="10" min="1" max="50" style="width:80px;">
+                            </div>
+                            <div class="recall-search-option" id="recall-hybrid-weight-option">
+                                <label class="recall-setting-title">语义权重</label>
+                                <input type="range" id="recall-hybrid-weight" min="0" max="1" step="0.1" value="0.6">
+                                <span id="recall-hybrid-weight-value">0.6</span>
+                            </div>
+                        </div>
+                        
+                        <div class="recall-search-hints">
+                            <div class="recall-setting-hint">
+                                <strong>混合搜索:</strong> 结合语义+全文，RRF融合排序，效果最好<br>
+                                <strong>全文搜索:</strong> 精确关键词匹配，适合搜索特定术语<br>
+                                <strong>语义搜索:</strong> 理解含义相似度，适合模糊查询
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="recall-search-results-section">
+                        <div class="recall-setting-title" style="margin-top:15px;">
+                            搜索结果 <span id="recall-search-result-count">(0)</span>
+                        </div>
+                        <div id="recall-advanced-search-results" class="recall-advanced-search-results">
+                            <div class="recall-empty-state">
+                                <div class="recall-empty-icon">🔍</div>
+                                <p>输入关键词开始搜索</p>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 
@@ -1037,6 +1360,83 @@ function createUI() {
                         </div>
                     </div>
                     
+                    <!-- v4.0/v4.1 高级功能配置 -->
+                    <div class="recall-settings-section recall-api-section">
+                        <div class="recall-settings-section-title">
+                            🚀 高级功能配置 (v4.0+)
+                        </div>
+                        <div class="recall-setting-hint" style="margin-top:-5px;margin-bottom:10px;">这些是服务端配置，修改后需要点击"保存到服务器"生效</div>
+                        
+                        <!-- 核心功能开关 -->
+                        <div class="recall-setting-group" style="margin-bottom:15px;">
+                            <div style="font-weight:bold;margin-bottom:8px;">🔧 核心功能</div>
+                            
+                            <div class="recall-setting-group" style="margin-bottom:8px;">
+                                <label class="recall-checkbox-label">
+                                    <input type="checkbox" id="recall-temporal-graph-enabled">
+                                    <span>时态知识图谱</span>
+                                </label>
+                                <div class="recall-setting-hint">启用时间维度的知识图谱，追踪实体随时间的变化</div>
+                            </div>
+                            
+                            <div class="recall-setting-group" style="margin-bottom:8px;">
+                                <label class="recall-checkbox-label">
+                                    <input type="checkbox" id="recall-contradiction-detection-enabled">
+                                    <span>矛盾检测</span>
+                                </label>
+                                <div class="recall-setting-hint">自动检测记忆中的事实冲突</div>
+                            </div>
+                            
+                            <div class="recall-setting-group" style="margin-bottom:8px;">
+                                <label class="recall-checkbox-label">
+                                    <input type="checkbox" id="recall-entity-summary-enabled">
+                                    <span>实体摘要生成</span>
+                                </label>
+                                <div class="recall-setting-hint">允许 LLM 为实体生成描述摘要</div>
+                            </div>
+                        </div>
+                        
+                        <!-- 检索层配置 -->
+                        <div class="recall-setting-group" style="margin-bottom:15px;">
+                            <div style="font-weight:bold;margin-bottom:8px;">🔍 检索层配置 (11层检索系统)</div>
+                            
+                            <div class="recall-setting-group" style="margin-bottom:8px;">
+                                <label class="recall-checkbox-label">
+                                    <input type="checkbox" id="recall-retrieval-l2-temporal">
+                                    <span>L2 时态过滤</span>
+                                </label>
+                                <div class="recall-setting-hint">根据时间范围筛选记忆</div>
+                            </div>
+                            
+                            <div class="recall-setting-group" style="margin-bottom:8px;">
+                                <label class="recall-checkbox-label">
+                                    <input type="checkbox" id="recall-retrieval-l4-entity">
+                                    <span>L4 实体聚焦</span>
+                                </label>
+                                <div class="recall-setting-hint">基于实体相关性提升检索效果</div>
+                            </div>
+                            
+                            <div class="recall-setting-group" style="margin-bottom:8px;">
+                                <label class="recall-checkbox-label">
+                                    <input type="checkbox" id="recall-retrieval-l5-graph">
+                                    <span>L5 知识图谱扩展</span>
+                                </label>
+                                <div class="recall-setting-hint">通过实体关系图扩展检索范围</div>
+                            </div>
+                        </div>
+                        
+                        <div class="recall-setting-actions">
+                            <button id="recall-load-advanced-config" class="menu_button">
+                                <i class="fa-solid fa-refresh"></i>
+                                <span>刷新配置</span>
+                            </button>
+                            <button id="recall-save-advanced-config" class="menu_button menu_button_icon">
+                                <i class="fa-solid fa-save"></i>
+                                <span>保存到服务器</span>
+                            </button>
+                        </div>
+                    </div>
+                    
                     <!-- 容量限制配置 -->
                     <div class="recall-settings-section recall-api-section">
                         <div class="recall-settings-section-title">
@@ -1256,6 +1656,18 @@ function createUI() {
                 loadForeshadowings();
             } else if (tabName === 'core-settings' && isConnected) {
                 loadCoreSettings();
+            } else if (tabName === 'entities' && isConnected) {
+                loadEntities();
+            } else if (tabName === 'contradictions' && isConnected) {
+                loadContradictions();
+            } else if (tabName === 'temporal' && isConnected) {
+                loadTemporalStats();
+            } else if (tabName === 'graph' && isConnected) {
+                // 图谱标签页初始不加载，等用户输入查询
+            } else if (tabName === 'episodes' && isConnected) {
+                loadEpisodes();
+            } else if (tabName === 'search' && isConnected) {
+                // 搜索标签页初始不加载，等用户输入查询
             }
         });
     });
@@ -1400,6 +1812,75 @@ function createUI() {
     bindModelSelectEvents('recall-embedding-model', 'recall-embedding-model-custom', 'recall-embedding-dimension');
     bindModelSelectEvents('recall-llm-model', 'recall-llm-model-custom', null);
     
+    // ========== v4.0/v4.1 新功能事件绑定 ==========
+    
+    // 实体管理事件绑定
+    document.getElementById('recall-refresh-entities-btn')?.addEventListener('click', safeExecute(loadEntities, '刷新实体失败'));
+    document.getElementById('recall-entity-search-input')?.addEventListener('input', debounce(() => loadEntities(), 500));
+    document.getElementById('recall-entity-type-filter')?.addEventListener('change', () => loadEntities());
+    document.getElementById('recall-entity-detail-close')?.addEventListener('click', () => {
+        document.getElementById('recall-entity-detail-panel').style.display = 'none';
+    });
+    document.getElementById('recall-generate-entity-summary')?.addEventListener('click', safeExecute(generateEntitySummary, '生成摘要失败'));
+    
+    // 矛盾检测事件绑定
+    document.getElementById('recall-refresh-contradictions-btn')?.addEventListener('click', safeExecute(loadContradictions, '刷新矛盾失败'));
+    document.getElementById('recall-contradiction-status-filter')?.addEventListener('change', () => loadContradictions());
+    document.getElementById('recall-contradiction-detail-close')?.addEventListener('click', () => {
+        document.getElementById('recall-contradiction-detail-panel').style.display = 'none';
+    });
+    document.getElementById('recall-resolve-keep-a')?.addEventListener('click', () => resolveContradiction('keep_first'));
+    document.getElementById('recall-resolve-keep-b')?.addEventListener('click', () => resolveContradiction('keep_second'));
+    document.getElementById('recall-resolve-keep-both')?.addEventListener('click', () => resolveContradiction('keep_both'));
+    document.getElementById('recall-resolve-ignore')?.addEventListener('click', () => resolveContradiction('ignore'));
+    
+    // 时态查询事件绑定
+    document.getElementById('recall-temporal-timeline-btn')?.addEventListener('click', safeExecute(queryEntityTimeline, '查询时间线失败'));
+    document.getElementById('recall-temporal-range-btn')?.addEventListener('click', safeExecute(queryTemporalRange, '时间范围查询失败'));
+    document.getElementById('recall-temporal-stats-btn')?.addEventListener('click', safeExecute(loadTemporalStats, '加载时态统计失败'));
+    document.getElementById('recall-temporal-entity-input')?.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') queryEntityTimeline();
+    });
+    
+    // 知识图谱事件绑定
+    document.getElementById('recall-graph-traverse-btn')?.addEventListener('click', safeExecute(traverseGraph, '图遍历失败'));
+    document.getElementById('recall-graph-communities-btn')?.addEventListener('click', safeExecute(loadCommunities, '社区检测失败'));
+    document.getElementById('recall-graph-entity-input')?.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') traverseGraph();
+    });
+    
+    // 高级功能配置事件绑定
+    document.getElementById('recall-load-advanced-config')?.addEventListener('click', safeExecute(loadAdvancedConfig, '加载高级配置失败'));
+    document.getElementById('recall-save-advanced-config')?.addEventListener('click', safeExecute(saveAdvancedConfig, '保存高级配置失败'));
+    
+    // Episode 片段事件绑定
+    document.getElementById('recall-refresh-episodes-btn')?.addEventListener('click', safeExecute(loadEpisodes, '刷新片段失败'));
+    document.getElementById('recall-episode-detail-close')?.addEventListener('click', () => {
+        document.getElementById('recall-episode-detail-panel').style.display = 'none';
+    });
+    
+    // 高级搜索事件绑定
+    document.getElementById('recall-advanced-search-btn')?.addEventListener('click', safeExecute(performAdvancedSearch, '搜索失败'));
+    document.getElementById('recall-advanced-search-input')?.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') performAdvancedSearch();
+    });
+    document.getElementById('recall-hybrid-weight')?.addEventListener('input', (e) => {
+        document.getElementById('recall-hybrid-weight-value').textContent = e.target.value;
+    });
+    
+    // 搜索类型切换
+    document.querySelectorAll('.recall-search-type-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            document.querySelectorAll('.recall-search-type-tab').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            // 混合搜索时显示权重选项
+            const weightOption = document.getElementById('recall-hybrid-weight-option');
+            if (weightOption) {
+                weightOption.style.display = tab.dataset.type === 'hybrid' ? 'block' : 'none';
+            }
+        });
+    });
+    
     // 注意：API 配置加载移到 checkConnection 成功后执行
     // 避免在 API 未就绪时静默失败
     
@@ -1467,6 +1948,24 @@ async function loadApiConfig() {
             updateLLMStatus(llm.api_key_status);
         }
         
+        // 加载高级功能配置 (v4.0/v4.1)
+        const temporalGraphEl = document.getElementById('recall-temporal-graph-enabled');
+        const contradictionEl = document.getElementById('recall-contradiction-detection-enabled');
+        const entitySummaryEl = document.getElementById('recall-entity-summary-enabled');
+        
+        if (temporalGraphEl) temporalGraphEl.checked = config.TEMPORAL_GRAPH_ENABLED ?? true;
+        if (contradictionEl) contradictionEl.checked = config.CONTRADICTION_DETECTION_ENABLED ?? true;
+        if (entitySummaryEl) entitySummaryEl.checked = config.ENTITY_SUMMARY_ENABLED ?? true;
+        
+        // 检索层配置
+        const l2El = document.getElementById('recall-retrieval-l2-temporal');
+        const l4El = document.getElementById('recall-retrieval-l4-entity');
+        const l5El = document.getElementById('recall-retrieval-l5-graph');
+        
+        if (l2El) l2El.checked = config.RETRIEVAL_L2_TEMPORAL_ENABLED ?? true;
+        if (l4El) l4El.checked = config.RETRIEVAL_L4_ENTITY_ENABLED ?? true;
+        if (l5El) l5El.checked = config.RETRIEVAL_L5_GRAPH_ENABLED ?? true;
+        
         console.log('[Recall] API 配置加载完成');
         taskTracker.complete(taskId, true);
     } catch (e) {
@@ -1489,33 +1988,49 @@ async function loadCapacityConfig() {
             
             // 持久条件配置
             if (limits.context) {
-                document.getElementById('recall-context-trigger-interval').value = limits.context.trigger_interval || 5;
-                document.getElementById('recall-context-max-per-type').value = limits.context.max_per_type || 30;
-                document.getElementById('recall-context-max-total').value = limits.context.max_total || 100;
-                document.getElementById('recall-context-decay-days').value = limits.context.decay_days || 7;
-                document.getElementById('recall-context-decay-rate').value = limits.context.decay_rate || 0.1;
-                document.getElementById('recall-context-min-confidence').value = limits.context.min_confidence || 0.3;
+                const triggerIntervalEl = document.getElementById('recall-context-trigger-interval');
+                const maxPerTypeEl = document.getElementById('recall-context-max-per-type');
+                const maxTotalEl = document.getElementById('recall-context-max-total');
+                const decayDaysEl = document.getElementById('recall-context-decay-days');
+                const decayRateEl = document.getElementById('recall-context-decay-rate');
+                const minConfidenceEl = document.getElementById('recall-context-min-confidence');
+                
+                if (triggerIntervalEl) triggerIntervalEl.value = limits.context.trigger_interval || 5;
+                if (maxPerTypeEl) maxPerTypeEl.value = limits.context.max_per_type || 30;
+                if (maxTotalEl) maxTotalEl.value = limits.context.max_total || 100;
+                if (decayDaysEl) decayDaysEl.value = limits.context.decay_days || 7;
+                if (decayRateEl) decayRateEl.value = limits.context.decay_rate || 0.1;
+                if (minConfidenceEl) minConfidenceEl.value = limits.context.min_confidence || 0.3;
             }
             
             // 伏笔配置
             if (limits.foreshadowing) {
-                document.getElementById('recall-foreshadowing-max-return').value = limits.foreshadowing.max_return || 5;
-                document.getElementById('recall-foreshadowing-max-active').value = limits.foreshadowing.max_active || 50;
+                const maxReturnEl = document.getElementById('recall-foreshadowing-max-return');
+                const maxActiveEl = document.getElementById('recall-foreshadowing-max-active');
+                if (maxReturnEl) maxReturnEl.value = limits.foreshadowing.max_return || 5;
+                if (maxActiveEl) maxActiveEl.value = limits.foreshadowing.max_active || 50;
             }
             
             // 去重配置
             if (limits.dedup) {
-                document.getElementById('recall-dedup-embedding-enabled').checked = limits.dedup.embedding_enabled !== false;
-                document.getElementById('recall-dedup-high-threshold').value = limits.dedup.high_threshold || 0.92;
-                document.getElementById('recall-dedup-low-threshold').value = limits.dedup.low_threshold || 0.75;
+                const dedupEmbeddingEl = document.getElementById('recall-dedup-embedding-enabled');
+                const highThresholdEl = document.getElementById('recall-dedup-high-threshold');
+                const lowThresholdEl = document.getElementById('recall-dedup-low-threshold');
+                if (dedupEmbeddingEl) dedupEmbeddingEl.checked = limits.dedup.embedding_enabled !== false;
+                if (highThresholdEl) highThresholdEl.value = limits.dedup.high_threshold || 0.92;
+                if (lowThresholdEl) lowThresholdEl.value = limits.dedup.low_threshold || 0.75;
             }
             
             // 上下文构建配置（100%不遗忘保证）
             if (limits.build_context) {
-                document.getElementById('recall-context-max-context-turns').value = limits.build_context.max_context_turns || 20;
-                document.getElementById('recall-build-context-include-recent').value = limits.build_context.include_recent || 10;
-                document.getElementById('recall-proactive-reminder-enabled').checked = limits.build_context.proactive_reminder_enabled !== false;
-                document.getElementById('recall-proactive-reminder-turns').value = limits.build_context.proactive_reminder_turns || 50;
+                const maxContextTurnsEl = document.getElementById('recall-context-max-context-turns');
+                const includeRecentEl = document.getElementById('recall-build-context-include-recent');
+                const proactiveReminderEl = document.getElementById('recall-proactive-reminder-enabled');
+                const reminderTurnsEl = document.getElementById('recall-proactive-reminder-turns');
+                if (maxContextTurnsEl) maxContextTurnsEl.value = limits.build_context.max_context_turns || 20;
+                if (includeRecentEl) includeRecentEl.value = limits.build_context.include_recent || 10;
+                if (proactiveReminderEl) proactiveReminderEl.checked = limits.build_context.proactive_reminder_enabled !== false;
+                if (reminderTurnsEl) reminderTurnsEl.value = limits.build_context.proactive_reminder_turns || 50;
             }
         }
         
@@ -1536,24 +2051,24 @@ async function saveCapacityConfig() {
     try {
         const configData = {
             // 持久条件配置
-            context_trigger_interval: parseInt(document.getElementById('recall-context-trigger-interval').value) || 5,
-            context_max_per_type: parseInt(document.getElementById('recall-context-max-per-type').value) || 30,
-            context_max_total: parseInt(document.getElementById('recall-context-max-total').value) || 100,
-            context_decay_days: parseInt(document.getElementById('recall-context-decay-days').value) || 7,
-            context_decay_rate: parseFloat(document.getElementById('recall-context-decay-rate').value) || 0.1,
-            context_min_confidence: parseFloat(document.getElementById('recall-context-min-confidence').value) || 0.3,
+            context_trigger_interval: parseInt(document.getElementById('recall-context-trigger-interval')?.value) || 5,
+            context_max_per_type: parseInt(document.getElementById('recall-context-max-per-type')?.value) || 30,
+            context_max_total: parseInt(document.getElementById('recall-context-max-total')?.value) || 100,
+            context_decay_days: parseInt(document.getElementById('recall-context-decay-days')?.value) || 7,
+            context_decay_rate: parseFloat(document.getElementById('recall-context-decay-rate')?.value) || 0.1,
+            context_min_confidence: parseFloat(document.getElementById('recall-context-min-confidence')?.value) || 0.3,
             // 伏笔配置
-            foreshadowing_max_return: parseInt(document.getElementById('recall-foreshadowing-max-return').value) || 5,
-            foreshadowing_max_active: parseInt(document.getElementById('recall-foreshadowing-max-active').value) || 50,
+            foreshadowing_max_return: parseInt(document.getElementById('recall-foreshadowing-max-return')?.value) || 5,
+            foreshadowing_max_active: parseInt(document.getElementById('recall-foreshadowing-max-active')?.value) || 50,
             // 去重配置
-            dedup_embedding_enabled: document.getElementById('recall-dedup-embedding-enabled').checked,
-            dedup_high_threshold: parseFloat(document.getElementById('recall-dedup-high-threshold').value) || 0.92,
-            dedup_low_threshold: parseFloat(document.getElementById('recall-dedup-low-threshold').value) || 0.75,
+            dedup_embedding_enabled: document.getElementById('recall-dedup-embedding-enabled')?.checked ?? true,
+            dedup_high_threshold: parseFloat(document.getElementById('recall-dedup-high-threshold')?.value) || 0.92,
+            dedup_low_threshold: parseFloat(document.getElementById('recall-dedup-low-threshold')?.value) || 0.75,
             // 上下文构建配置（100%不遗忘保证）
-            context_max_context_turns: parseInt(document.getElementById('recall-context-max-context-turns').value) || 20,
-            build_context_include_recent: parseInt(document.getElementById('recall-build-context-include-recent').value) || 10,
-            proactive_reminder_enabled: document.getElementById('recall-proactive-reminder-enabled').checked,
-            proactive_reminder_turns: parseInt(document.getElementById('recall-proactive-reminder-turns').value) || 50
+            context_max_context_turns: parseInt(document.getElementById('recall-context-max-context-turns')?.value) || 20,
+            build_context_include_recent: parseInt(document.getElementById('recall-build-context-include-recent')?.value) || 10,
+            proactive_reminder_enabled: document.getElementById('recall-proactive-reminder-enabled')?.checked ?? true,
+            proactive_reminder_turns: parseInt(document.getElementById('recall-proactive-reminder-turns')?.value) || 50
         };
         
         const response = await fetch(`${pluginSettings.apiUrl}/v1/config`, {
@@ -4939,6 +5454,950 @@ async function abandonForeshadowing(foreshadowingId) {
     }
 }
 
+// ============================================================================
+// v4.0/v4.1 新功能 API 函数
+// ============================================================================
+
+// 当前选中的实体和矛盾（用于详情面板）
+let currentSelectedEntity = null;
+let currentSelectedContradiction = null;
+
+/**
+ * 加载实体列表
+ */
+async function loadEntities() {
+    const userId = currentCharacterId || 'default';
+    const searchInput = document.getElementById('recall-entity-search-input');
+    const typeFilter = document.getElementById('recall-entity-type-filter');
+    const search = searchInput?.value?.trim() || '';
+    const entityType = typeFilter?.value || '';
+    
+    try {
+        let url = `${pluginSettings.apiUrl}/v1/entities?user_id=${encodeURIComponent(userId)}&limit=100`;
+        if (entityType) url += `&entity_type=${encodeURIComponent(entityType)}`;
+        
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        
+        const data = await response.json();
+        let entities = data.entities || data || [];
+        
+        // 客户端搜索过滤
+        if (search) {
+            entities = entities.filter(e => 
+                (e.name || '').toLowerCase().includes(search.toLowerCase())
+            );
+        }
+        
+        // 更新计数
+        document.getElementById('recall-entity-count').textContent = entities.length;
+        
+        // 渲染列表
+        const listEl = document.getElementById('recall-entity-list');
+        if (!listEl) return;
+        
+        if (entities.length === 0) {
+            listEl.innerHTML = `
+                <div class="recall-empty-state">
+                    <div class="recall-empty-icon">🏷️</div>
+                    <p>暂无实体</p>
+                    <small>对话时会自动提取实体</small>
+                </div>
+            `;
+            return;
+        }
+        
+        listEl.innerHTML = entities.map(e => createEntityItemHtml(e)).join('');
+        
+        // 绑定实体点击事件
+        listEl.querySelectorAll('.recall-entity-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const entityName = item.dataset.name;
+                showEntityDetail(entityName);
+            });
+        });
+        
+    } catch (e) {
+        console.warn('[Recall] 加载实体失败:', e);
+        safeToastr.error('加载实体失败: ' + e.message);
+    }
+}
+
+/**
+ * 创建单个实体项 HTML
+ */
+function createEntityItemHtml(entity) {
+    const name = entity.name || entity.entity_name || '-';
+    const type = entity.entity_type || entity.type || 'UNKNOWN';
+    const count = entity.mention_count || entity.count || 0;
+    const typeIcon = getEntityTypeIcon(type);
+    
+    return `
+        <div class="recall-entity-item" data-name="${escapeHtml(name)}">
+            <span class="recall-entity-icon">${typeIcon}</span>
+            <div class="recall-entity-info">
+                <div class="recall-entity-name">${escapeHtml(name)}</div>
+                <div class="recall-entity-meta">${type} · 出现 ${count} 次</div>
+            </div>
+        </div>
+    `;
+}
+
+/**
+ * 获取实体类型图标
+ */
+function getEntityTypeIcon(type) {
+    const icons = {
+        'PERSON': '👤',
+        'LOCATION': '📍',
+        'ORGANIZATION': '🏢',
+        'OBJECT': '📦',
+        'EVENT': '📅',
+        'CONCEPT': '💡',
+        'TIME': '⏰',
+        'UNKNOWN': '❓'
+    };
+    return icons[type?.toUpperCase()] || '🏷️';
+}
+
+/**
+ * 显示实体详情
+ */
+async function showEntityDetail(entityName) {
+    const userId = currentCharacterId || 'default';
+    currentSelectedEntity = entityName;
+    
+    try {
+        // 获取实体详情
+        const response = await fetch(
+            `${pluginSettings.apiUrl}/v1/entities/${encodeURIComponent(entityName)}?user_id=${encodeURIComponent(userId)}`
+        );
+        
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const entity = await response.json();
+        
+        // 获取相关实体
+        let relatedEntities = [];
+        try {
+            const relatedResponse = await fetch(
+                `${pluginSettings.apiUrl}/v1/entities/${encodeURIComponent(entityName)}/related?user_id=${encodeURIComponent(userId)}`
+            );
+            if (relatedResponse.ok) {
+                const relatedData = await relatedResponse.json();
+                relatedEntities = relatedData.related || relatedData || [];
+            }
+        } catch (e) {
+            console.warn('[Recall] 获取相关实体失败:', e);
+        }
+        
+        // 填充详情面板
+        document.getElementById('recall-entity-detail-name').textContent = entityName;
+        document.getElementById('recall-entity-detail-type').textContent = entity.entity_type || entity.type || '-';
+        document.getElementById('recall-entity-detail-summary').textContent = entity.summary || '暂无摘要';
+        document.getElementById('recall-entity-detail-count').textContent = entity.mention_count || entity.count || '-';
+        
+        // 显示相关实体
+        if (relatedEntities.length > 0) {
+            const relatedHtml = relatedEntities.slice(0, 10).map(r => {
+                const name = r.name || r.entity_name || r;
+                const relation = r.relation || r.relation_type || '';
+                return `<span class="recall-related-entity" data-name="${escapeHtml(name)}">${escapeHtml(name)}${relation ? ` (${relation})` : ''}</span>`;
+            }).join(' ');
+            document.getElementById('recall-entity-detail-relations').innerHTML = relatedHtml;
+            
+            // 绑定相关实体点击事件
+            document.querySelectorAll('.recall-related-entity').forEach(el => {
+                el.addEventListener('click', () => {
+                    showEntityDetail(el.dataset.name);
+                });
+            });
+        } else {
+            document.getElementById('recall-entity-detail-relations').textContent = '暂无关系';
+        }
+        
+        // 显示面板
+        document.getElementById('recall-entity-detail-panel').style.display = 'block';
+        
+    } catch (e) {
+        console.warn('[Recall] 获取实体详情失败:', e);
+        safeToastr.error('获取实体详情失败: ' + e.message);
+    }
+}
+
+/**
+ * 生成实体摘要
+ */
+async function generateEntitySummary() {
+    if (!currentSelectedEntity) return;
+    
+    const userId = currentCharacterId || 'default';
+    const btn = document.getElementById('recall-generate-entity-summary');
+    const originalText = btn.innerHTML;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 生成中...';
+    btn.disabled = true;
+    
+    try {
+        const response = await fetch(
+            `${pluginSettings.apiUrl}/v1/entities/${encodeURIComponent(currentSelectedEntity)}/generate-summary?user_id=${encodeURIComponent(userId)}`,
+            { method: 'POST' }
+        );
+        
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const result = await response.json();
+        
+        document.getElementById('recall-entity-detail-summary').textContent = result.summary || '生成失败';
+        safeToastr.success('摘要已生成');
+        
+    } catch (e) {
+        console.warn('[Recall] 生成摘要失败:', e);
+        safeToastr.error('生成摘要失败: ' + e.message);
+    } finally {
+        btn.innerHTML = originalText;
+        btn.disabled = false;
+    }
+}
+
+/**
+ * 加载矛盾列表
+ */
+async function loadContradictions() {
+    const userId = currentCharacterId || 'default';
+    const statusFilter = document.getElementById('recall-contradiction-status-filter');
+    const status = statusFilter?.value || '';
+    
+    try {
+        let url = `${pluginSettings.apiUrl}/v1/contradictions?user_id=${encodeURIComponent(userId)}`;
+        if (status) url += `&status=${encodeURIComponent(status)}`;
+        
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        
+        const data = await response.json();
+        const contradictions = data.contradictions || data || [];
+        
+        // 更新计数
+        document.getElementById('recall-contradiction-count').textContent = contradictions.length;
+        
+        // 渲染列表
+        const listEl = document.getElementById('recall-contradiction-list');
+        if (!listEl) return;
+        
+        if (contradictions.length === 0) {
+            listEl.innerHTML = `
+                <div class="recall-empty-state">
+                    <div class="recall-empty-icon">⚔️</div>
+                    <p>暂无矛盾</p>
+                    <small>系统会自动检测事实冲突</small>
+                </div>
+            `;
+            return;
+        }
+        
+        listEl.innerHTML = contradictions.map(c => createContradictionItemHtml(c)).join('');
+        
+        // 绑定矛盾点击事件
+        listEl.querySelectorAll('.recall-contradiction-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const contradictionId = item.dataset.id;
+                const contradiction = contradictions.find(c => (c.id || c.contradiction_id) === contradictionId);
+                if (contradiction) showContradictionDetail(contradiction);
+            });
+        });
+        
+    } catch (e) {
+        console.warn('[Recall] 加载矛盾失败:', e);
+        safeToastr.error('加载矛盾失败: ' + e.message);
+    }
+}
+
+/**
+ * 创建单个矛盾项 HTML
+ */
+function createContradictionItemHtml(contradiction) {
+    const id = contradiction.id || contradiction.contradiction_id || '';
+    const status = contradiction.status || 'pending';
+    const factA = contradiction.fact_a || contradiction.statement_a || '';
+    const factB = contradiction.fact_b || contradiction.statement_b || '';
+    const statusIcon = status === 'pending' ? '⏳' : status === 'resolved' ? '✅' : '🚫';
+    
+    return `
+        <div class="recall-contradiction-item" data-id="${id}">
+            <div class="recall-contradiction-header">
+                <span class="recall-contradiction-status">${statusIcon} ${status}</span>
+            </div>
+            <div class="recall-contradiction-preview">
+                <div class="recall-contradiction-fact-preview">${escapeHtml(factA.substring(0, 50))}...</div>
+                <div class="recall-contradiction-vs-preview">⚔️</div>
+                <div class="recall-contradiction-fact-preview">${escapeHtml(factB.substring(0, 50))}...</div>
+            </div>
+        </div>
+    `;
+}
+
+/**
+ * 显示矛盾详情
+ */
+function showContradictionDetail(contradiction) {
+    currentSelectedContradiction = contradiction;
+    
+    const factAEl = document.getElementById('recall-contradiction-fact-a');
+    const factBEl = document.getElementById('recall-contradiction-fact-b');
+    const panelEl = document.getElementById('recall-contradiction-detail-panel');
+    
+    if (factAEl) {
+        factAEl.textContent = contradiction.fact_a || contradiction.statement_a || '-';
+    }
+    if (factBEl) {
+        factBEl.textContent = contradiction.fact_b || contradiction.statement_b || '-';
+    }
+    if (panelEl) {
+        panelEl.style.display = 'block';
+    }
+}
+
+/**
+ * 解决矛盾
+ */
+async function resolveContradiction(resolution) {
+    if (!currentSelectedContradiction) return;
+    
+    const userId = currentCharacterId || 'default';
+    const contradictionId = currentSelectedContradiction.id || currentSelectedContradiction.contradiction_id;
+    
+    try {
+        const response = await fetch(
+            `${pluginSettings.apiUrl}/v1/contradictions/${encodeURIComponent(contradictionId)}/resolve?user_id=${encodeURIComponent(userId)}`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ resolution })
+            }
+        );
+        
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        
+        safeToastr.success('矛盾已解决');
+        document.getElementById('recall-contradiction-detail-panel').style.display = 'none';
+        currentSelectedContradiction = null;
+        loadContradictions();
+        
+    } catch (e) {
+        console.warn('[Recall] 解决矛盾失败:', e);
+        safeToastr.error('解决矛盾失败: ' + e.message);
+    }
+}
+
+/**
+ * 加载时态统计
+ */
+async function loadTemporalStats() {
+    const userId = currentCharacterId || 'default';
+    
+    try {
+        const response = await fetch(
+            `${pluginSettings.apiUrl}/v1/temporal/stats?user_id=${encodeURIComponent(userId)}`
+        );
+        
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const stats = await response.json();
+        
+        document.getElementById('recall-temporal-record-count').textContent = 
+            stats.total_records || stats.record_count || 0;
+        document.getElementById('recall-temporal-span').textContent = 
+            stats.time_span || stats.span || '-';
+        
+    } catch (e) {
+        console.warn('[Recall] 加载时态统计失败:', e);
+    }
+}
+
+/**
+ * 查询实体时间线
+ */
+async function queryEntityTimeline() {
+    const entityInput = document.getElementById('recall-temporal-entity-input');
+    const entityName = entityInput?.value?.trim();
+    
+    if (!entityName) {
+        safeToastr.warning('请输入实体名称');
+        return;
+    }
+    
+    const userId = currentCharacterId || 'default';
+    
+    try {
+        const response = await fetch(
+            `${pluginSettings.apiUrl}/v1/temporal/timeline/${encodeURIComponent(entityName)}?user_id=${encodeURIComponent(userId)}`
+        );
+        
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        const timeline = data.timeline || data.events || data || [];
+        
+        // 渲染时间线
+        const resultsEl = document.getElementById('recall-temporal-results');
+        if (!resultsEl) return;
+        
+        if (timeline.length === 0) {
+            resultsEl.innerHTML = `
+                <div class="recall-empty-state">
+                    <div class="recall-empty-icon">⏱️</div>
+                    <p>未找到时间线数据</p>
+                </div>
+            `;
+            return;
+        }
+        
+        resultsEl.innerHTML = `
+            <div class="recall-timeline">
+                ${timeline.map(event => `
+                    <div class="recall-timeline-item">
+                        <div class="recall-timeline-time">${formatTimelineDate(event.timestamp || event.time)}</div>
+                        <div class="recall-timeline-content">${escapeHtml(event.fact || event.content || event.description || '-')}</div>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+        
+    } catch (e) {
+        console.warn('[Recall] 查询时间线失败:', e);
+        safeToastr.error('查询时间线失败: ' + e.message);
+    }
+}
+
+/**
+ * 时间范围查询
+ */
+async function queryTemporalRange() {
+    const startInput = document.getElementById('recall-temporal-start');
+    const endInput = document.getElementById('recall-temporal-end');
+    const startTime = startInput?.value;
+    const endTime = endInput?.value;
+    
+    if (!startTime || !endTime) {
+        safeToastr.warning('请选择时间范围');
+        return;
+    }
+    
+    const userId = currentCharacterId || 'default';
+    
+    try {
+        const response = await fetch(
+            `${pluginSettings.apiUrl}/v1/temporal/range`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    user_id: userId,
+                    start_time: new Date(startTime).toISOString(),
+                    end_time: new Date(endTime).toISOString()
+                })
+            }
+        );
+        
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        const facts = data.facts || data.results || data || [];
+        
+        // 渲染结果
+        const resultsEl = document.getElementById('recall-temporal-results');
+        if (!resultsEl) return;
+        
+        if (facts.length === 0) {
+            resultsEl.innerHTML = `
+                <div class="recall-empty-state">
+                    <div class="recall-empty-icon">⏱️</div>
+                    <p>该时间范围内无记录</p>
+                </div>
+            `;
+            return;
+        }
+        
+        resultsEl.innerHTML = `
+            <div class="recall-temporal-facts">
+                ${facts.map(f => `
+                    <div class="recall-temporal-fact-item">
+                        <div class="recall-temporal-fact-time">${formatTimelineDate(f.timestamp || f.time)}</div>
+                        <div class="recall-temporal-fact-content">${escapeHtml(f.fact || f.content || '-')}</div>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+        
+    } catch (e) {
+        console.warn('[Recall] 时间范围查询失败:', e);
+        safeToastr.error('时间范围查询失败: ' + e.message);
+    }
+}
+
+/**
+ * 格式化时间线日期
+ */
+function formatTimelineDate(timestamp) {
+    if (!timestamp) return '-';
+    try {
+        const date = new Date(timestamp);
+        return date.toLocaleString();
+    } catch {
+        return String(timestamp);
+    }
+}
+
+/**
+ * 图遍历
+ */
+async function traverseGraph() {
+    const entityInput = document.getElementById('recall-graph-entity-input');
+    const depthSelect = document.getElementById('recall-graph-depth');
+    const entityName = entityInput?.value?.trim();
+    const depth = parseInt(depthSelect?.value || '2');
+    
+    if (!entityName) {
+        safeToastr.warning('请输入起始实体');
+        return;
+    }
+    
+    const userId = currentCharacterId || 'default';
+    
+    try {
+        const response = await fetch(
+            `${pluginSettings.apiUrl}/v1/graph/traverse`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    user_id: userId,
+                    start_entity: entityName,
+                    max_depth: depth,
+                    direction: 'both'
+                })
+            }
+        );
+        
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        const nodes = data.nodes || [];
+        const edges = data.edges || data.relations || [];
+        
+        // 渲染结果
+        const resultsEl = document.getElementById('recall-graph-results');
+        if (!resultsEl) return;
+        
+        if (nodes.length === 0) {
+            resultsEl.innerHTML = `
+                <div class="recall-empty-state">
+                    <div class="recall-empty-icon">🕸️</div>
+                    <p>未找到相关节点</p>
+                </div>
+            `;
+            return;
+        }
+        
+        resultsEl.innerHTML = `
+            <div class="recall-graph-info">
+                <div class="recall-stat-item">节点数: <strong>${nodes.length}</strong></div>
+                <div class="recall-stat-item">边数: <strong>${edges.length}</strong></div>
+            </div>
+            <div class="recall-graph-nodes">
+                ${nodes.map(n => `
+                    <div class="recall-graph-node" data-name="${escapeHtml(n.name || n)}">
+                        ${getEntityTypeIcon(n.type || 'UNKNOWN')} ${escapeHtml(n.name || n)}
+                    </div>
+                `).join('')}
+            </div>
+            <div class="recall-graph-edges">
+                <div class="recall-setting-title" style="margin-top:10px;">关系列表</div>
+                ${edges.slice(0, 20).map(e => `
+                    <div class="recall-graph-edge">
+                        ${escapeHtml(e.source || e.from)} → <em>${escapeHtml(e.relation || e.type || '相关')}</em> → ${escapeHtml(e.target || e.to)}
+                    </div>
+                `).join('')}
+                ${edges.length > 20 ? `<div class="recall-more-hint">还有 ${edges.length - 20} 条关系...</div>` : ''}
+            </div>
+        `;
+        
+        // 绑定节点点击事件
+        resultsEl.querySelectorAll('.recall-graph-node').forEach(node => {
+            node.addEventListener('click', () => {
+                entityInput.value = node.dataset.name;
+                traverseGraph();
+            });
+        });
+        
+    } catch (e) {
+        console.warn('[Recall] 图遍历失败:', e);
+        safeToastr.error('图遍历失败: ' + e.message);
+    }
+}
+
+/**
+ * 加载社区检测结果
+ */
+async function loadCommunities() {
+    const userId = currentCharacterId || 'default';
+    
+    try {
+        const response = await fetch(
+            `${pluginSettings.apiUrl}/v1/graph/communities?user_id=${encodeURIComponent(userId)}`
+        );
+        
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        const communities = data.communities || data || [];
+        
+        const listEl = document.getElementById('recall-communities-list');
+        const contentEl = document.getElementById('recall-communities-content');
+        if (!listEl || !contentEl) return;
+        
+        if (communities.length === 0) {
+            contentEl.innerHTML = '<div class="recall-setting-hint">未检测到社区结构</div>';
+        } else {
+            contentEl.innerHTML = communities.map((c, i) => `
+                <div class="recall-community-item">
+                    <div class="recall-community-header">🏘️ 社区 ${i + 1} (${c.members?.length || c.size || 0} 成员)</div>
+                    <div class="recall-community-members">
+                        ${(c.members || c.entities || []).slice(0, 10).map(m => 
+                            `<span class="recall-community-member">${escapeHtml(m)}</span>`
+                        ).join(' ')}
+                        ${(c.members || c.entities || []).length > 10 ? '...' : ''}
+                    </div>
+                </div>
+            `).join('');
+        }
+        
+        listEl.style.display = 'block';
+        
+    } catch (e) {
+        console.warn('[Recall] 加载社区失败:', e);
+        safeToastr.error('社区检测失败: ' + e.message);
+    }
+}
+
+/**
+ * 加载高级功能配置 (v4.0/v4.1)
+ */
+async function loadAdvancedConfig() {
+    try {
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/config/full`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        
+        const config = await response.json();
+        
+        // 核心功能开关
+        const temporalGraphEl = document.getElementById('recall-temporal-graph-enabled');
+        const contradictionEl = document.getElementById('recall-contradiction-detection-enabled');
+        const entitySummaryEl = document.getElementById('recall-entity-summary-enabled');
+        
+        if (temporalGraphEl) temporalGraphEl.checked = config.TEMPORAL_GRAPH_ENABLED ?? true;
+        if (contradictionEl) contradictionEl.checked = config.CONTRADICTION_DETECTION_ENABLED ?? true;
+        if (entitySummaryEl) entitySummaryEl.checked = config.ENTITY_SUMMARY_ENABLED ?? true;
+        
+        // 检索层配置
+        const l2El = document.getElementById('recall-retrieval-l2-temporal');
+        const l4El = document.getElementById('recall-retrieval-l4-entity');
+        const l5El = document.getElementById('recall-retrieval-l5-graph');
+        
+        if (l2El) l2El.checked = config.RETRIEVAL_L2_TEMPORAL_ENABLED ?? true;
+        if (l4El) l4El.checked = config.RETRIEVAL_L4_ENTITY_ENABLED ?? true;
+        if (l5El) l5El.checked = config.RETRIEVAL_L5_GRAPH_ENABLED ?? true;
+        
+        safeToastr.success('高级配置已加载');
+        
+    } catch (e) {
+        console.warn('[Recall] 加载高级配置失败:', e);
+        safeToastr.error('加载高级配置失败: ' + e.message);
+    }
+}
+
+/**
+ * 保存高级功能配置到服务器
+ */
+async function saveAdvancedConfig() {
+    try {
+        const config = {
+            // 核心功能开关
+            TEMPORAL_GRAPH_ENABLED: document.getElementById('recall-temporal-graph-enabled')?.checked ?? true,
+            CONTRADICTION_DETECTION_ENABLED: document.getElementById('recall-contradiction-detection-enabled')?.checked ?? true,
+            ENTITY_SUMMARY_ENABLED: document.getElementById('recall-entity-summary-enabled')?.checked ?? true,
+            
+            // 检索层配置
+            RETRIEVAL_L2_TEMPORAL_ENABLED: document.getElementById('recall-retrieval-l2-temporal')?.checked ?? true,
+            RETRIEVAL_L4_ENTITY_ENABLED: document.getElementById('recall-retrieval-l4-entity')?.checked ?? true,
+            RETRIEVAL_L5_GRAPH_ENABLED: document.getElementById('recall-retrieval-l5-graph')?.checked ?? true
+        };
+        
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/config`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(config)
+        });
+        
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        
+        const result = await response.json();
+        
+        if (result.success || result.status === 'ok') {
+            safeToastr.success('高级配置已保存到服务器');
+        } else {
+            throw new Error(result.message || '保存失败');
+        }
+        
+    } catch (e) {
+        console.warn('[Recall] 保存高级配置失败:', e);
+        safeToastr.error('保存高级配置失败: ' + e.message);
+    }
+}
+
+// ============================================================================
+// Episode 片段管理函数
+// ============================================================================
+
+let currentSelectedEpisode = null;
+
+/**
+ * 加载 Episode 列表
+ */
+async function loadEpisodes() {
+    const userId = currentCharacterId || 'default';
+    
+    try {
+        const response = await fetch(
+            `${pluginSettings.apiUrl}/v1/episodes?user_id=${encodeURIComponent(userId)}`
+        );
+        
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        
+        const data = await response.json();
+        const episodes = data.episodes || data || [];
+        
+        // 更新计数
+        document.getElementById('recall-episode-count').textContent = episodes.length;
+        
+        // 渲染列表
+        const listEl = document.getElementById('recall-episode-list');
+        if (!listEl) return;
+        
+        if (episodes.length === 0) {
+            listEl.innerHTML = `
+                <div class="recall-empty-state">
+                    <div class="recall-empty-icon">📖</div>
+                    <p>暂无对话片段</p>
+                    <small>对话时会自动组织成片段</small>
+                </div>
+            `;
+            return;
+        }
+        
+        listEl.innerHTML = episodes.map(ep => createEpisodeItemHtml(ep)).join('');
+        
+        // 绑定点击事件
+        listEl.querySelectorAll('.recall-episode-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const episodeId = item.dataset.id;
+                const episode = episodes.find(e => (e.uuid || e.id || e.episode_id) === episodeId);
+                if (episode) showEpisodeDetail(episode);
+            });
+        });
+        
+    } catch (e) {
+        console.warn('[Recall] 加载 Episode 失败:', e);
+        safeToastr.error('加载片段失败: ' + e.message);
+    }
+}
+
+/**
+ * 创建 Episode 项 HTML
+ */
+function createEpisodeItemHtml(episode) {
+    const id = episode.uuid || episode.id || episode.episode_id || '';
+    const startTime = formatTimelineDate(episode.start_time || episode.created_at);
+    const endTime = formatTimelineDate(episode.end_time || episode.updated_at);
+    const memoryCount = episode.memory_count || episode.memories?.length || 0;
+    const summary = episode.summary || episode.title || `片段 ${id.substring(0, 8)}...`;
+    
+    return `
+        <div class="recall-episode-item" data-id="${escapeHtml(id)}">
+            <div class="recall-episode-icon">📖</div>
+            <div class="recall-episode-info">
+                <div class="recall-episode-title">${escapeHtml(summary)}</div>
+                <div class="recall-episode-meta">
+                    ${startTime} ~ ${endTime} · ${memoryCount} 条记忆
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+/**
+ * 显示 Episode 详情
+ */
+async function showEpisodeDetail(episode) {
+    currentSelectedEpisode = episode;
+    const episodeId = episode.uuid || episode.id || episode.episode_id;
+    
+    document.getElementById('recall-episode-detail-id').textContent = episodeId;
+    document.getElementById('recall-episode-detail-start').textContent = 
+        formatTimelineDate(episode.start_time || episode.created_at);
+    document.getElementById('recall-episode-detail-end').textContent = 
+        formatTimelineDate(episode.end_time || episode.updated_at);
+    document.getElementById('recall-episode-detail-memory-count').textContent = 
+        episode.memory_count || episode.memories?.length || 0;
+    
+    // 加载 Episode 详情（包含记忆列表）
+    try {
+        const userId = currentCharacterId || 'default';
+        const response = await fetch(
+            `${pluginSettings.apiUrl}/v1/episodes/${encodeURIComponent(episodeId)}?user_id=${encodeURIComponent(userId)}`
+        );
+        
+        if (response.ok) {
+            const detail = await response.json();
+            const memories = detail.memories || [];
+            
+            const memoriesEl = document.getElementById('recall-episode-memories');
+            if (memoriesEl) {
+                if (memories.length === 0) {
+                    memoriesEl.innerHTML = '<div class="recall-setting-hint">无关联记忆</div>';
+                } else {
+                    memoriesEl.innerHTML = memories.slice(0, 10).map(m => `
+                        <div class="recall-episode-memory-item">
+                            <div class="recall-episode-memory-role">${m.role === 'user' ? '👤' : '🤖'}</div>
+                            <div class="recall-episode-memory-content">${escapeHtml((m.content || '').substring(0, 100))}...</div>
+                        </div>
+                    `).join('');
+                    
+                    if (memories.length > 10) {
+                        memoriesEl.innerHTML += `<div class="recall-more-hint">还有 ${memories.length - 10} 条记忆...</div>`;
+                    }
+                }
+            }
+        }
+    } catch (e) {
+        console.warn('[Recall] 加载 Episode 详情失败:', e);
+    }
+    
+    document.getElementById('recall-episode-detail-panel').style.display = 'block';
+}
+
+// ============================================================================
+// 高级搜索函数
+// ============================================================================
+
+/**
+ * 执行高级搜索
+ */
+async function performAdvancedSearch() {
+    const query = document.getElementById('recall-advanced-search-input')?.value?.trim();
+    
+    if (!query) {
+        safeToastr.warning('请输入搜索内容');
+        return;
+    }
+    
+    const userId = currentCharacterId || 'default';
+    const limit = parseInt(document.getElementById('recall-search-limit')?.value || '10');
+    const activeTab = document.querySelector('.recall-search-type-tab.active');
+    const searchType = activeTab?.dataset?.type || 'hybrid';
+    const hybridWeight = parseFloat(document.getElementById('recall-hybrid-weight')?.value || '0.6');
+    
+    try {
+        let url, body;
+        
+        if (searchType === 'fulltext') {
+            // 全文搜索
+            url = `${pluginSettings.apiUrl}/v1/search/fulltext`;
+            body = {
+                query: query,
+                user_id: userId,
+                limit: limit
+            };
+        } else if (searchType === 'hybrid') {
+            // 混合搜索
+            url = `${pluginSettings.apiUrl}/v1/search/hybrid`;
+            body = {
+                query: query,
+                user_id: userId,
+                limit: limit,
+                semantic_weight: hybridWeight
+            };
+        } else {
+            // 语义搜索（使用基础搜索接口）
+            url = `${pluginSettings.apiUrl}/v1/memories/search`;
+            body = {
+                query: query,
+                user_id: userId,
+                top_k: limit
+            };
+        }
+        
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        
+        const data = await response.json();
+        const results = data.results || data.memories || data || [];
+        
+        // 更新结果计数
+        document.getElementById('recall-search-result-count').textContent = `(${results.length})`;
+        
+        // 渲染结果
+        const resultsEl = document.getElementById('recall-advanced-search-results');
+        if (!resultsEl) return;
+        
+        if (results.length === 0) {
+            resultsEl.innerHTML = `
+                <div class="recall-empty-state">
+                    <div class="recall-empty-icon">🔍</div>
+                    <p>未找到匹配结果</p>
+                    <small>尝试其他关键词或搜索类型</small>
+                </div>
+            `;
+            return;
+        }
+        
+        resultsEl.innerHTML = results.map(r => createSearchResultItemHtml(r, searchType)).join('');
+        
+    } catch (e) {
+        console.warn('[Recall] 高级搜索失败:', e);
+        safeToastr.error('搜索失败: ' + e.message);
+    }
+}
+
+/**
+ * 创建搜索结果项 HTML
+ */
+function createSearchResultItemHtml(result, searchType) {
+    const content = result.content || result.text || '';
+    const role = result.role || result.metadata?.role || 'unknown';
+    const score = result.score || result.similarity || result.relevance || 0;
+    const scorePercent = (score * 100).toFixed(1);
+    const roleIcon = role === 'user' ? '👤' : role === 'assistant' ? '🤖' : '📄';
+    
+    // 根据搜索类型显示不同的分数标签
+    let scoreLabel = '';
+    if (searchType === 'hybrid') {
+        scoreLabel = `RRF: ${scorePercent}%`;
+    } else if (searchType === 'fulltext') {
+        scoreLabel = `匹配: ${scorePercent}%`;
+    } else {
+        scoreLabel = `相似: ${scorePercent}%`;
+    }
+    
+    return `
+        <div class="recall-search-result-item">
+            <div class="recall-search-result-header">
+                <span class="recall-search-result-role">${roleIcon} ${role}</span>
+                <span class="recall-search-result-score">${scoreLabel}</span>
+            </div>
+            <div class="recall-search-result-content">${escapeHtml(content.substring(0, 300))}${content.length > 300 ? '...' : ''}</div>
+        </div>
+    `;
+}
+
 /**
  * 获取要注入的记忆上下文
  */
@@ -4971,13 +6430,16 @@ async function getMemoryContext(query) {
 }
 
 /**
- * HTML 转义
+ * HTML 转义（高性能版本）
  */
 function escapeHtml(text) {
     if (!text) return '';
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+    return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
 }
 
 // 导出供外部使用（安全方式）
