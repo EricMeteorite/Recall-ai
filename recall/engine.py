@@ -627,7 +627,7 @@ class RecallEngine:
         self.episode_store = None
         self._episode_tracking_enabled = False
         
-        episode_enabled = os.environ.get('EPISODE_TRACKING_ENABLED', 'false').lower() == 'true'
+        episode_enabled = os.environ.get('EPISODE_TRACKING_ENABLED', 'true').lower() == 'true'
         if episode_enabled:
             try:
                 from .storage.episode_store import EpisodeStore

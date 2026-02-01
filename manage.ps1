@@ -830,7 +830,7 @@ ENTITY_SUMMARY_MIN_FACTS=5
 # ----------------------------------------------------------------------------
 # 是否启用 Episode 追溯
 # Enable episode tracking
-EPISODE_TRACKING_ENABLED=false
+EPISODE_TRACKING_ENABLED=true
 
 # ----------------------------------------------------------------------------
 # LLM Max Tokens 配置

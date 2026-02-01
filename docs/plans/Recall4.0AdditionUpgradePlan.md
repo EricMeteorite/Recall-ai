@@ -1504,7 +1504,7 @@ def _init_v4_modules(self):
     self.episode_store = None
     self._episode_tracking_enabled = False
     
-    episode_enabled = os.environ.get('EPISODE_TRACKING_ENABLED', 'false').lower() == 'true'
+    episode_enabled = os.environ.get('EPISODE_TRACKING_ENABLED', 'true').lower() == 'true'
     if episode_enabled:
         try:
             from .storage.episode_store import EpisodeStore
@@ -1946,7 +1946,7 @@ ENTITY_SUMMARY_MIN_FACTS=5
 
 # === Episode 追溯 ===
 # 是否启用 Episode 追溯
-EPISODE_TRACKING_ENABLED=false
+EPISODE_TRACKING_ENABLED=true
 ```
 
 ### 配置优先级
