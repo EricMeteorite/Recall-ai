@@ -1873,10 +1873,10 @@ function createUI() {
         tab.addEventListener('click', () => {
             document.querySelectorAll('.recall-search-type-tab').forEach(t => t.classList.remove('active'));
             tab.classList.add('active');
-            // 混合搜索时显示权重选项
+            // 混合搜索时显示权重选项（使用空字符串恢复CSS默认flex布局）
             const weightOption = document.getElementById('recall-hybrid-weight-option');
             if (weightOption) {
-                weightOption.style.display = tab.dataset.type === 'hybrid' ? 'block' : 'none';
+                weightOption.style.display = tab.dataset.type === 'hybrid' ? '' : 'none';
             }
         });
     });
@@ -3921,6 +3921,7 @@ function displayMemories(memories) {
     
     // 绑定展开/收起事件
     listEl.querySelectorAll('.recall-expand-btn').forEach(btn => {
+        btn.setAttribute('data-bound', 'true');
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
             // 直接从按钮向上查找父元素，而不是用 data-id 选择器
