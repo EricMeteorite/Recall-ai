@@ -66,14 +66,29 @@ cloud = [
     "faiss-cpu>=1.7",          # 向量索引
 ]
 
-# Local 模式：本地 Embedding 模型
+# Local 模式：本地 Embedding 模型（默认 GPU 版 PyTorch）
 local = [
-    "sentence-transformers>=2.2",  # Embedding模型（会自动安装torch）
+    "sentence-transformers>=2.2",  # Embedding模型（会自动安装torch GPU版）
+    "faiss-cpu>=1.7",              # 向量索引
+]
+
+# Local-CPU 模式：本地 Embedding 模型（CPU 版 PyTorch，无需显卡）
+# 注意：需要先安装 CPU 版 PyTorch，脚本会自动处理
+local-cpu = [
+    "sentence-transformers>=2.2",  # Embedding模型
     "faiss-cpu>=1.7",              # 向量索引
 ]
 
 # Enterprise 模式：Phase 3.5 企业级性能引擎（可选）
 enterprise = [
+    "faiss-cpu>=1.7",              # 向量索引 (VectorIndexIVF)
+    "networkx>=3.0",               # 图分析与社区检测 (CommunityDetector)
+    "kuzu>=0.3",                   # 嵌入式图数据库 (KuzuGraphBackend)
+]
+
+# Enterprise-CPU 模式：企业级 + CPU 版 PyTorch
+enterprise-cpu = [
+    "sentence-transformers>=2.2",  # Embedding模型
     "faiss-cpu>=1.7",              # 向量索引 (VectorIndexIVF)
     "networkx>=3.0",               # 图分析与社区检测 (CommunityDetector)
     "kuzu>=0.3",                   # 嵌入式图数据库 (KuzuGraphBackend)

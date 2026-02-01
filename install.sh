@@ -27,7 +27,8 @@ VENV_PATH="$SCRIPT_DIR/recall-env"
 DATA_PATH="$SCRIPT_DIR/recall_data"
 PIP_MIRROR=""
 INSTALL_SUCCESS=false
-INSTALL_MODE="local"  # lite, cloud, local (旧值 lightweight/hybrid/full 兼容)
+INSTALL_MODE="local"  # lite, cloud, local, enterprise (旧值 lightweight/hybrid/full 兼容)
+USE_CPU=false         # 是否使用 CPU 版 PyTorch（无需显卡）
 
 # ==================== 工具函数 ====================
 
@@ -115,6 +116,35 @@ show_mode_selection() {
     
     echo ""
     echo -e "已选择: ${GREEN}$INSTALL_MODE${NC} 模式"
+    
+    # 如果是 local 或 enterprise 模式，询问 GPU/CPU（兼容旧名称 full）
+    if [ "$INSTALL_MODE" = "local" ] || [ "$INSTALL_MODE" = "full" ] || [ "$INSTALL_MODE" = "enterprise" ]; then
+        echo ""
+        echo -e "${BOLD}─────────────────────────────────────────────${NC}"
+        echo ""
+        echo -e "${BOLD}PyTorch 版本选择：${NC}"
+        echo ""
+        echo -e "  1) ${GREEN}GPU 版本${NC}   需要 NVIDIA 显卡，下载约 2.5GB"
+        echo -e "     ${CYAN}适合: 有 NVIDIA 显卡，需要加速嵌入计算${NC}"
+        echo ""
+        echo -e "  2) ${YELLOW}CPU 版本${NC}   无需显卡，下载约 200MB ${YELLOW}[推荐无显卡用户]${NC}"
+        echo -e "     ${CYAN}适合: 没有显卡或不想下载 CUDA 依赖${NC}"
+        echo ""
+        read -p "请选择 [1-2，默认2 CPU版本]: " gpu_choice
+        
+        case "${gpu_choice:-2}" in
+            1) 
+                USE_CPU=false
+                echo ""
+                echo -e "已选择: ${GREEN}GPU 版本${NC}"
+                ;;
+            *)
+                USE_CPU=true
+                echo ""
+                echo -e "已选择: ${YELLOW}CPU 版本${NC} (节省 ~2GB 下载)"
+                ;;
+        esac
+    fi
     echo ""
 }
 
@@ -262,12 +292,22 @@ install_deps() {
             echo -e "    ${CYAN}ℹ 预计需要 5-8 分钟${NC}"
             ;;
         local|full)
-            echo -e "    ${CYAN}ℹ Local 模式：下载约 1.5GB 依赖 (包含 PyTorch)${NC}"
-            echo -e "    ${CYAN}ℹ 预计需要 10-20 分钟${NC}"
+            if [ "$USE_CPU" = true ]; then
+                echo -e "    ${CYAN}ℹ Local 模式 (CPU)：下载约 500MB 依赖${NC}"
+                echo -e "    ${CYAN}ℹ 预计需要 5-10 分钟${NC}"
+            else
+                echo -e "    ${CYAN}ℹ Local 模式 (GPU)：下载约 2.5GB 依赖 (包含 CUDA)${NC}"
+                echo -e "    ${CYAN}ℹ 预计需要 15-30 分钟${NC}"
+            fi
             ;;
         enterprise)
-            echo -e "    ${CYAN}ℹ Enterprise 模式：下载约 2GB 依赖 (PyTorch + Kuzu + NetworkX)${NC}"
-            echo -e "    ${CYAN}ℹ 预计需要 15-30 分钟${NC}"
+            if [ "$USE_CPU" = true ]; then
+                echo -e "    ${CYAN}ℹ Enterprise 模式 (CPU)：下载约 600MB 依赖${NC}"
+                echo -e "    ${CYAN}ℹ 预计需要 8-15 分钟${NC}"
+            else
+                echo -e "    ${CYAN}ℹ Enterprise 模式 (GPU)：下载约 2.8GB 依赖 (PyTorch + CUDA + Kuzu)${NC}"
+                echo -e "    ${CYAN}ℹ 预计需要 20-40 分钟${NC}"
+            fi
             ;;
     esac
     echo ""
@@ -276,6 +316,22 @@ install_deps() {
     print_info "升级 pip..."
     python -m pip install --upgrade pip $PIP_MIRROR -q 2>&1
     print_success "pip 升级完成"
+    
+    # 如果选择 CPU 版本，先安装 CPU 版 PyTorch
+    if [ "$USE_CPU" = true ] && { [ "$INSTALL_MODE" = "local" ] || [ "$INSTALL_MODE" = "full" ] || [ "$INSTALL_MODE" = "enterprise" ]; }; then
+        print_info "安装 CPU 版 PyTorch (无需 NVIDIA 显卡)..."
+        echo -e "    ${YELLOW}ℹ 注意：PyTorch CPU 版从官方源下载${NC}"
+        pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu 2>&1 | while IFS= read -r line; do
+            if [[ $line == *"Collecting"* ]]; then
+                pkg=$(echo "$line" | sed 's/Collecting //' | cut -d' ' -f1)
+                echo -e "    ${CYAN}📦${NC} 收集: $pkg"
+            elif [[ $line == *"Downloading"* ]]; then
+                echo -e "    ${CYAN}↓${NC}  下载中..."
+            elif [[ $line == *"Successfully installed"* ]]; then
+                echo -e "    ${GREEN}✓${NC}  PyTorch CPU 版安装成功"
+            fi
+        done
+    fi
     
     # 根据模式安装不同依赖（兼容新旧名称）
     local EXTRAS=""
@@ -400,6 +456,13 @@ initialize() {
     # 保存安装模式
     echo "$INSTALL_MODE" > "$DATA_PATH/config/install_mode"
     
+    # 保存 CPU/GPU 选择
+    if [ "$USE_CPU" = true ]; then
+        echo "true" > "$DATA_PATH/config/use_cpu"
+    else
+        echo "false" > "$DATA_PATH/config/use_cpu"
+    fi
+    
     print_success "初始化完成"
 }
 
@@ -493,22 +556,63 @@ do_repair() {
         return
     fi
     
+    # 读取之前的安装模式
+    local mode_file="$DATA_PATH/config/install_mode"
+    local cpu_file="$DATA_PATH/config/use_cpu"
+    
+    if [ -f "$mode_file" ]; then
+        INSTALL_MODE=$(cat "$mode_file")
+        print_info "检测到安装模式: $INSTALL_MODE"
+    else
+        INSTALL_MODE="cloud"
+        print_warning "未找到安装模式配置，使用默认 cloud 模式"
+    fi
+    
+    if [ -f "$cpu_file" ]; then
+        local cpu_setting=$(cat "$cpu_file")
+        if [ "$cpu_setting" = "true" ]; then
+            USE_CPU=true
+            print_info "检测到 PyTorch 版本: CPU"
+        else
+            USE_CPU=false
+            print_info "检测到 PyTorch 版本: GPU"
+        fi
+    fi
+    
     source "$VENV_PATH/bin/activate"
     
+    echo ""
     echo "选择修复方式:"
     echo "  1) 快速修复 (只更新 recall)"
     echo "  2) 完整重装 (重新安装所有依赖)"
     echo ""
     read -p "请选择 [1/2]: " repair_choice
     
+    # 确定 extras
+    local EXTRAS=""
+    case $INSTALL_MODE in
+        lite|lightweight) EXTRAS="" ;;
+        cloud|hybrid) EXTRAS="[cloud]" ;;
+        local|full) EXTRAS="[local]" ;;
+        enterprise) EXTRAS="[local,enterprise]" ;;
+        *) EXTRAS="[cloud]" ;;
+    esac
+    
     case $repair_choice in
         1)
             print_info "快速修复中..."
-            pip install -e "$SCRIPT_DIR" $PIP_MIRROR --upgrade
+            pip install -e "$SCRIPT_DIR$EXTRAS" $PIP_MIRROR --upgrade
             ;;
         2)
             print_info "完整重装中..."
-            pip install -e "$SCRIPT_DIR" $PIP_MIRROR --force-reinstall
+            
+            # 如果是 CPU 模式，先安装 CPU 版 PyTorch
+            if [ "$USE_CPU" = true ] && { [ "$INSTALL_MODE" = "local" ] || [ "$INSTALL_MODE" = "full" ] || [ "$INSTALL_MODE" = "enterprise" ]; }; then
+                print_info "重装 CPU 版 PyTorch..."
+                pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu --force-reinstall 2>&1 | grep -E "(Collecting|Successfully)" || true
+            fi
+            
+            pip install -e "$SCRIPT_DIR$EXTRAS" $PIP_MIRROR --force-reinstall
             
             # 重新安装 spaCy 模型（与 download_models 相同逻辑）
             print_info "重新安装 spaCy 模型..."

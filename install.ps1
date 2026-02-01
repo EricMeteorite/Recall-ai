@@ -41,7 +41,8 @@ $DataPath = Join-Path $ScriptDir "recall_data"
 $PipMirror = ""
 $InstallSuccess = $false
 $VenvCreated = $false
-$InstallMode = "local"  # lite, cloud, local (旧值 lightweight/hybrid/full 兼容)
+$InstallMode = "local"  # lite, cloud, local, enterprise (旧值 lightweight/hybrid/full 兼容)
+$UseCPU = $false       # 是否使用 CPU 版 PyTorch（无需显卡）
 
 # ==================== 工具函数 ====================
 
@@ -140,6 +141,33 @@ function Show-ModeSelection {
     Write-Host "已选择: " -NoNewline
     Write-Host "$($script:InstallMode)" -ForegroundColor Green -NoNewline
     Write-Host " 模式"
+    
+    # 如果是 local 或 enterprise 模式，询问 GPU/CPU（兼容旧名称 full）
+    if ($script:InstallMode -in @("local", "full", "enterprise")) {
+        Write-Host ""
+        Write-Host "─────────────────────────────────────────────" -ForegroundColor DarkGray
+        Write-Host ""
+        Write-Host "PyTorch 版本选择：" -ForegroundColor White
+        Write-Host ""
+        Write-Host "  1) " -NoNewline; Write-Host "GPU 版本" -ForegroundColor Green -NoNewline; Write-Host "   需要 NVIDIA 显卡，下载约 2.5GB"
+        Write-Host "     适合: 有 NVIDIA 显卡，需要加速嵌入计算" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "  2) " -NoNewline; Write-Host "CPU 版本" -ForegroundColor Yellow -NoNewline; Write-Host "   无需显卡，下载约 200MB " -NoNewline; Write-Host "[推荐无显卡用户]" -ForegroundColor Yellow
+        Write-Host "     适合: 没有显卡或不想下载 CUDA 依赖" -ForegroundColor Cyan
+        Write-Host ""
+        
+        $gpuChoice = Read-Host "请选择 [1-2，默认2 CPU版本]"
+        
+        if ($gpuChoice -eq "1") {
+            $script:UseCPU = $false
+            Write-Host ""
+            Write-Host "已选择: " -NoNewline; Write-Host "GPU 版本" -ForegroundColor Green
+        } else {
+            $script:UseCPU = $true
+            Write-Host ""
+            Write-Host "已选择: " -NoNewline; Write-Host "CPU 版本" -ForegroundColor Yellow -NoNewline; Write-Host " (节省 ~2GB 下载)"
+        }
+    }
     Write-Host ""
 }
 
@@ -293,8 +321,22 @@ function Install-Dependencies {
             Write-Host "    ℹ 预计需要 5-8 分钟" -ForegroundColor Cyan
         }
         { $_ -in "local", "full" } {
-            Write-Host "    ℹ Local 模式：下载约 1.5GB 依赖 (包含 PyTorch)" -ForegroundColor Cyan
-            Write-Host "    ℹ 预计需要 10-20 分钟" -ForegroundColor Cyan
+            if ($UseCPU) {
+                Write-Host "    ℹ Local 模式 (CPU)：下载约 500MB 依赖" -ForegroundColor Cyan
+                Write-Host "    ℹ 预计需要 5-10 分钟" -ForegroundColor Cyan
+            } else {
+                Write-Host "    ℹ Local 模式 (GPU)：下载约 2.5GB 依赖 (包含 CUDA)" -ForegroundColor Cyan
+                Write-Host "    ℹ 预计需要 15-30 分钟" -ForegroundColor Cyan
+            }
+        }
+        "enterprise" {
+            if ($UseCPU) {
+                Write-Host "    ℹ Enterprise 模式 (CPU)：下载约 600MB 依赖" -ForegroundColor Cyan
+                Write-Host "    ℹ 预计需要 8-15 分钟" -ForegroundColor Cyan
+            } else {
+                Write-Host "    ℹ Enterprise 模式 (GPU)：下载约 2.8GB 依赖 (包含 CUDA)" -ForegroundColor Cyan
+                Write-Host "    ℹ 预计需要 20-40 分钟" -ForegroundColor Cyan
+            }
         }
     }
     Write-Host ""
@@ -306,6 +348,26 @@ function Install-Dependencies {
     if ($PipMirror) { $pipUpgradeArgs += $PipMirror.Split(" ") }
     & $pythonPath @pipUpgradeArgs 2>$null
     Write-Success "pip 升级完成"
+    
+    # 如果选择 CPU 版本，先安装 CPU 版 PyTorch
+    if ($UseCPU -and $InstallMode -in @("local", "full", "enterprise")) {
+        Write-Info "安装 CPU 版 PyTorch (无需 NVIDIA 显卡)..."
+        $torchArgs = @("install", "torch", "torchvision", "torchaudio", "--index-url", "https://download.pytorch.org/whl/cpu")
+        if ($PipMirror) { 
+            # CPU 版必须从 PyTorch 官方源安装，但其他依赖可以用镜像
+            Write-Host "    ℹ 注意：PyTorch CPU 版从官方源下载" -ForegroundColor Yellow
+        }
+        & $pipPath @torchArgs 2>&1 | ForEach-Object {
+            if ($_ -match "Collecting") {
+                $pkg = ($_ -replace "Collecting ", "") -split " " | Select-Object -First 1
+                Write-Host "    📦 收集: $pkg" -ForegroundColor Cyan
+            } elseif ($_ -match "Downloading") {
+                Write-Host "    ↓  下载中..." -ForegroundColor Cyan
+            } elseif ($_ -match "Successfully installed") {
+                Write-Host "    ✓  PyTorch CPU 版安装成功" -ForegroundColor Green
+            }
+        }
+    }
     
     # 安装项目依赖
     Write-Info "安装项目依赖..."
@@ -447,6 +509,14 @@ function Initialize-Recall {
     # 保存安装模式
     $modePath = Join-Path $DataPath "config\install_mode"
     Set-Content -Path $modePath -Value $InstallMode
+    
+    # 保存 CPU/GPU 选择
+    $cpuModePath = Join-Path $DataPath "config\use_cpu"
+    if ($UseCPU) {
+        Set-Content -Path $cpuModePath -Value "true"
+    } else {
+        Set-Content -Path $cpuModePath -Value "false"
+    }
     
     Write-Success "初始化完成"
 }
@@ -649,24 +719,65 @@ function Invoke-Repair {
         return
     }
     
+    # 读取之前的安装模式
+    $modePath = Join-Path $DataPath "config\install_mode"
+    $cpuModePath = Join-Path $DataPath "config\use_cpu"
+    
+    if (Test-Path $modePath) {
+        $script:InstallMode = Get-Content $modePath -ErrorAction SilentlyContinue
+        Write-Info "检测到安装模式: $InstallMode"
+    } else {
+        $script:InstallMode = "cloud"
+        Write-Warning2 "未找到安装模式配置，使用默认 cloud 模式"
+    }
+    
+    if (Test-Path $cpuModePath) {
+        $cpuSetting = Get-Content $cpuModePath -ErrorAction SilentlyContinue
+        $script:UseCPU = ($cpuSetting -eq "true")
+        if ($UseCPU) {
+            Write-Info "检测到 PyTorch 版本: CPU"
+        } else {
+            Write-Info "检测到 PyTorch 版本: GPU"
+        }
+    }
+    
     $pipPath = Join-Path $VenvPath "Scripts\pip.exe"
     
+    Write-Host ""
     Write-Host "选择修复方式:"
     Write-Host "  1) 快速修复 (只更新 recall)"
     Write-Host "  2) 完整重装 (重新安装所有依赖)"
     Write-Host ""
     $choice = Read-Host "请选择 [1/2]"
     
+    # 确定 extras
+    $extras = ""
+    switch ($InstallMode) {
+        { $_ -in "lite", "lightweight" } { $extras = "" }
+        { $_ -in "cloud", "hybrid" } { $extras = "[cloud]" }
+        { $_ -in "local", "full" } { $extras = "[local]" }
+        "enterprise" { $extras = "[local,enterprise]" }
+        default { $extras = "[cloud]" }
+    }
+    
     switch ($choice) {
         "1" {
             Write-Info "快速修复中..."
-            $pipArgs = @("install", "-e", $ScriptDir, "--upgrade")
+            $pipArgs = @("install", "-e", "$ScriptDir$extras", "--upgrade")
             if ($PipMirror) { $pipArgs += $PipMirror.Split(" ") }
             & $pipPath @pipArgs
         }
         "2" {
             Write-Info "完整重装中..."
-            $pipArgs = @("install", "-e", $ScriptDir, "--force-reinstall")
+            
+            # 如果是 CPU 模式，先安装 CPU 版 PyTorch
+            if ($UseCPU -and $InstallMode -in @("local", "full", "enterprise")) {
+                Write-Info "重装 CPU 版 PyTorch..."
+                $torchArgs = @("install", "torch", "torchvision", "torchaudio", "--index-url", "https://download.pytorch.org/whl/cpu", "--force-reinstall")
+                & $pipPath @torchArgs 2>&1 | Out-Null
+            }
+            
+            $pipArgs = @("install", "-e", "$ScriptDir$extras", "--force-reinstall")
             if ($PipMirror) { $pipArgs += $PipMirror.Split(" ") }
             & $pipPath @pipArgs
             
