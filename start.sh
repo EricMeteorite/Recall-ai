@@ -979,27 +979,46 @@ do_start() {
         local pid=$!
         echo $pid > "$PID_FILE"
         
-        # 等待启动
+        # 等待服务真正可用（最多 60 秒）
         print_info "启动中..."
-        sleep 2
+        local max_wait=60
+        local waited=0
+        while [ $waited -lt $max_wait ]; do
+            sleep 2
+            waited=$((waited + 2))
+            echo -n "."
+            # 检查进程是否还存在
+            if ! kill -0 $pid 2>/dev/null; then
+                echo ""
+                print_error "启动失败！进程已退出"
+                rm -f "$PID_FILE"
+                echo ""
+                echo "查看日志获取详细错误:"
+                echo -e "  ${CYAN}cat $LOG_FILE${NC}"
+                exit 1
+            fi
+            # 检查服务是否可用
+            if curl -s --connect-timeout 2 "http://127.0.0.1:$PORT/health" > /dev/null 2>&1; then
+                echo ""
+                print_success "启动成功！(${waited}秒)"
+                echo ""
+                print_info "PID: $pid"
+                print_info "日志: $LOG_FILE"
+                echo ""
+                echo -e "  查看日志: ${CYAN}./start.sh --logs${NC}"
+                echo -e "  查看状态: ${CYAN}./start.sh --status${NC}"
+                echo -e "  停止服务: ${CYAN}./start.sh --stop${NC}"
+                return
+            fi
+        done
         
-        if kill -0 $pid 2>/dev/null; then
-            print_success "启动成功！"
-            echo ""
-            print_info "PID: $pid"
-            print_info "日志: $LOG_FILE"
-            echo ""
-            echo -e "  查看日志: ${CYAN}./start.sh --logs${NC}"
-            echo -e "  查看状态: ${CYAN}./start.sh --status${NC}"
-            echo -e "  停止服务: ${CYAN}./start.sh --stop${NC}"
-        else
-            print_error "启动失败！"
-            rm -f "$PID_FILE"
-            echo ""
-            echo "查看日志获取详细错误:"
-            echo -e "  ${CYAN}cat $LOG_FILE${NC}"
-            exit 1
-        fi
+        # 超时但进程还在
+        echo ""
+        print_warning "启动超时，但进程仍在运行 (PID: $pid)"
+        print_info "服务可能正在加载模型，请稍后检查状态"
+        echo ""
+        echo -e "  查看状态: ${CYAN}./start.sh --status${NC}"
+        echo -e "  查看日志: ${CYAN}./start.sh --logs${NC}"
     else
         # 前台运行
         echo -e "${BOLD}🚀 前台运行 (按 Ctrl+C 停止)${NC}"

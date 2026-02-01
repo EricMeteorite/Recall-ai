@@ -960,12 +960,45 @@ function Start-RecallService {
         
         $proc.Id | Out-File $PidFile -Force
         
-        # 等待启动
-        Start-Sleep -Seconds 3
+        # 等待服务真正可用（最多 60 秒）
+        Write-Host "  启动中" -NoNewline
+        $maxWait = 60
+        $waited = 0
+        $started = $false
         
-        if (Get-Process -Id $proc.Id -ErrorAction SilentlyContinue) {
-            Write-Host ""
-            Write-Success "启动成功!"
+        while ($waited -lt $maxWait) {
+            Start-Sleep -Seconds 2
+            $waited += 2
+            Write-Host "." -NoNewline
+            
+            # 检查进程是否还存在
+            $running = Get-Process -Id $proc.Id -ErrorAction SilentlyContinue
+            if (-not $running) {
+                Write-Host ""
+                Write-Error2 "启动失败！进程已退出"
+                Write-Host ""
+                Write-Host "  查看错误日志:" -ForegroundColor Yellow
+                Write-Host "    Get-Content '$LogDir\recall_error.log' -Tail 20" -ForegroundColor Cyan
+                Remove-Item $PidFile -Force -ErrorAction SilentlyContinue
+                return
+            }
+            
+            # 检查服务是否可用
+            try {
+                $response = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/health" -TimeoutSec 2 -UseBasicParsing -ErrorAction Stop
+                if ($response.StatusCode -eq 200) {
+                    $started = $true
+                    break
+                }
+            } catch {
+                # 继续等待
+            }
+        }
+        
+        Write-Host ""
+        
+        if ($started) {
+            Write-Success "启动成功! (${waited}秒)"
             Write-Host ""
             Write-Host "    PID:      $($proc.Id)" -ForegroundColor White
             Write-Host "    日志:     $LogFile" -ForegroundColor White
@@ -976,12 +1009,11 @@ function Start-RecallService {
             Write-Host "    停止服务: .\start.ps1 -Stop" -ForegroundColor Cyan
             Write-Host ""
         } else {
-            Write-Error2 "启动失败"
+            Write-Warning "启动超时，但进程仍在运行 (PID: $($proc.Id))"
+            Write-Info "服务可能正在加载模型，请稍后检查状态"
             Write-Host ""
-            Write-Host "  查看错误日志:" -ForegroundColor Yellow
-            Write-Host "    Get-Content '$LogDir\recall_error.log' -Tail 20" -ForegroundColor Cyan
-            Write-Host ""
-            Remove-Item $PidFile -Force -ErrorAction SilentlyContinue
+            Write-Host "    查看状态: .\start.ps1 -Status" -ForegroundColor Cyan
+            Write-Host "    查看日志: .\start.ps1 -Logs" -ForegroundColor Cyan
         }
     } else {
         Write-Info "前台运行模式"

@@ -907,23 +907,31 @@ DEDUP_LLM_MAX_TOKENS=100
         $errorLog = Join-Path $SCRIPT_DIR "recall_data\logs\start_error.log"
         Start-Process powershell -ArgumentList "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $startScript -WorkingDirectory $SCRIPT_DIR -RedirectStandardOutput $startLog -RedirectStandardError $errorLog -WindowStyle Hidden
         
-        # Wait for service to start
+        # Wait for service to start (up to 60 seconds, model loading can be slow)
         Write-Host "  Waiting for service to start" -NoNewline
-        for ($i = 0; $i -lt 10; $i++) {
-            Start-Sleep -Seconds 1
+        $maxWait = 60
+        $waited = 0
+        while ($waited -lt $maxWait) {
+            Start-Sleep -Seconds 2
+            $waited += 2
             Write-Host "." -NoNewline
             if (Test-ServiceRunning) {
                 Write-Host ""
-                Write-Success "Service started!"
+                Write-Success "Service started! (${waited}s)"
                 Write-Dim "API Address: http://127.0.0.1:$DEFAULT_PORT"
                 return
+            }
+            # Check if process is still running
+            $proc = Get-Process -Name "python" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like "*recall*" }
+            if (-not $proc) {
+                $proc = Get-Process -Name "uvicorn" -ErrorAction SilentlyContinue
             }
         }
         Write-Host ""
         
         # Check if start failed
         if (-not (Test-ServiceRunning)) {
-            Write-Error2 "Service failed to start"
+            Write-Error2 "Service start timeout or failed"
             Write-Host ""
             Write-Info "Start log:"
             if (Test-Path $startLog) {

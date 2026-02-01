@@ -904,23 +904,32 @@ EOF
         # 在后台启动，保存日志
         nohup bash "$start_script" > "$start_log" 2>&1 &
         
-        # 等待服务启动
+        # 等待服务启动（最多 60 秒，因为模型加载可能较慢）
         echo -n "  等待服务启动"
-        for i in {1..10}; do
-            sleep 1
+        local max_wait=60
+        local waited=0
+        while [ $waited -lt $max_wait ]; do
+            sleep 2
+            waited=$((waited + 2))
             echo -n "."
             if test_service_running; then
                 echo ""
-                print_success "服务已启动！"
+                print_success "服务已启动！(${waited}秒)"
                 print_dim "API 地址: http://127.0.0.1:$DEFAULT_PORT"
                 return
+            fi
+            # 检查进程是否还在运行
+            if ! pgrep -f "uvicorn.*recall" > /dev/null 2>&1 && ! pgrep -f "recall serve" > /dev/null 2>&1; then
+                echo ""
+                print_error "服务进程已退出"
+                break
             fi
         done
         echo ""
         
         # 检查是否启动失败
         if ! test_service_running; then
-            print_error "服务启动失败"
+            print_error "服务启动超时或失败"
             echo ""
             print_info "启动日志:"
             if [[ -f "$start_log" ]]; then
