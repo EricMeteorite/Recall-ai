@@ -19,7 +19,8 @@ from .base import GraphBackend
 
 
 if TYPE_CHECKING:
-    from ..knowledge_graph import KnowledgeGraph
+    # v4.0: KnowledgeGraph 是 TemporalKnowledgeGraph 的别名
+    from ..temporal_knowledge_graph import TemporalKnowledgeGraph as KnowledgeGraph
 
 
 logger = logging.getLogger(__name__)
@@ -162,12 +163,18 @@ def _create_legacy_backend(
     data_path: str,
     existing_knowledge_graph: Optional["KnowledgeGraph"] = None
 ) -> GraphBackend:
-    """创建 Legacy 适配器后端"""
+    """创建 Legacy 适配器后端
+    
+    Note:
+        v4.0 统一架构后，KnowledgeGraph 是 TemporalKnowledgeGraph 的别名，
+        此函数同时支持两者。
+    """
     from .legacy_adapter import LegacyKnowledgeGraphAdapter
     
     if existing_knowledge_graph is None:
-        from ..knowledge_graph import KnowledgeGraph
-        existing_knowledge_graph = KnowledgeGraph(data_path)
+        # v4.0: 使用统一的 TemporalKnowledgeGraph
+        from ..temporal_knowledge_graph import TemporalKnowledgeGraph
+        existing_knowledge_graph = TemporalKnowledgeGraph(data_path)
     
     return LegacyKnowledgeGraphAdapter(existing_knowledge_graph)
 

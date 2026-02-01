@@ -135,7 +135,8 @@ SUPPORTED_CONFIG_KEYS = {
     # ====== v4.0 Phase 1/2 新增配置项 ======
     # 时态知识图谱配置
     'TEMPORAL_GRAPH_ENABLED',         # 是否启用时态知识图谱
-    'TEMPORAL_GRAPH_BACKEND',         # 图谱后端: file/neo4j/falkordb
+    'TEMPORAL_GRAPH_BACKEND',         # 图谱后端: file(JSON文件)/kuzu(嵌入式图数据库)
+    'KUZU_BUFFER_POOL_SIZE',          # Kuzu 缓冲池大小 (MB)，默认 256
     'TEMPORAL_DECAY_RATE',            # 时态信息衰减率 (0.0-1.0)
     'TEMPORAL_MAX_HISTORY',           # 保留的最大时态历史记录数
     # 矛盾检测与管理配置
@@ -426,15 +427,24 @@ DEDUP_LOW_THRESHOLD=0.70
 
 # ----------------------------------------------------------------------------
 # 时态知识图谱配置
-# Temporal Knowledge Graph Configuration
 # ----------------------------------------------------------------------------
-# 是否启用时态知识图谱（追踪事实随时间的变化）
-# Enable temporal knowledge graph (track facts over time)
+# 统一知识图谱配置 (v4.0 统一架构)
+# Unified Knowledge Graph Configuration (v4.0 Unified Architecture)
+# ----------------------------------------------------------------------------
+# 注意：v4.0 后图谱始终启用，此开关仅控制时态增强功能（衰减、历史限制等）
+# Note: Graph is always enabled in v4.0, this switch only controls temporal enhancements
 TEMPORAL_GRAPH_ENABLED=true
 
-# 图谱存储后端: file(本地JSON), neo4j, falkordb
-# Graph storage backend: file(local JSON), neo4j, falkordb
+# 图谱存储后端: file(本地JSON文件), kuzu(嵌入式图数据库)
+# Graph storage backend: file(local JSON), kuzu(embedded graph database)
+# 此配置控制所有图数据的存储位置（包括实体关系）
+# This setting controls storage for ALL graph data (including entity relations)
+# Kuzu 提供更高的查询性能（需要 pip install kuzu）
 TEMPORAL_GRAPH_BACKEND=file
+
+# Kuzu 缓冲池大小（MB），仅当 TEMPORAL_GRAPH_BACKEND=kuzu 时生效
+# Kuzu buffer pool size in MB, only used when backend is kuzu
+KUZU_BUFFER_POOL_SIZE=256
 
 # 时态信息衰减率（0.0-1.0，值越大衰减越快）
 # Temporal decay rate (0.0-1.0, higher = faster decay)

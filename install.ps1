@@ -508,9 +508,9 @@ function Invoke-Install {
                 Write-Host "    ✓ FAISS IVF 磁盘索引 (百万级向量)"
                 Write-Host "    ✓ QueryPlanner 查询优化器"
                 Write-Host ""
-                Write-Host "  配置 (可选):" -ForegroundColor Yellow
-                Write-Host "    KUZU_BUFFER_POOL_SIZE=256  # Kuzu 内存池大小 (MB)"
-                Write-Host "    AUTO_KUZU_THRESHOLD=100000 # 自动切换 Kuzu 的节点阈值"
+                Write-Host "  启用 Kuzu 后端:" -ForegroundColor Yellow
+                Write-Host "    TEMPORAL_GRAPH_BACKEND=kuzu  # 使用 Kuzu 图数据库"
+                Write-Host "    KUZU_BUFFER_POOL_SIZE=256    # Kuzu 内存池大小 (MB)"
             }
         }
         

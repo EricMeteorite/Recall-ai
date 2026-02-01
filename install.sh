@@ -459,9 +459,9 @@ do_install() {
             echo -e "    ✓ FAISS IVF 磁盘索引 (百万级向量)"
             echo -e "    ✓ QueryPlanner 查询优化器"
             echo ""
-            echo -e "  ${YELLOW}配置 (可选):${NC}"
-            echo -e "    KUZU_BUFFER_POOL_SIZE=256  # Kuzu 内存池大小 (MB)"
-            echo -e "    AUTO_KUZU_THRESHOLD=100000 # 自动切换 Kuzu 的节点阈值"
+            echo -e "  ${YELLOW}启用 Kuzu 后端:${NC}"
+            echo -e "    TEMPORAL_GRAPH_BACKEND=kuzu  # 使用 Kuzu 图数据库"
+            echo -e "    KUZU_BUFFER_POOL_SIZE=256    # Kuzu 内存池大小 (MB)"
             ;;
     esac
     

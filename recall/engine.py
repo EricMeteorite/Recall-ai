@@ -16,7 +16,7 @@ from .storage import (
     MultiTenantStorage, MemoryScope, CoreSettings
 )
 from .index import EntityIndex, InvertedIndex, VectorIndex, OptimizedNgramIndex
-from .graph import KnowledgeGraph, RelationExtractor
+from .graph import RelationExtractor, TemporalKnowledgeGraph
 from .processor import (
     EntityExtractor, ForeshadowingTracker,
     ConsistencyChecker, MemorySummarizer, ScenarioDetector,
@@ -315,10 +315,20 @@ class RecallEngine:
             data_path=os.path.join(self.data_root, 'data')
         )
         
-        # 图谱层
-        self.knowledge_graph = KnowledgeGraph(
-            data_path=os.path.join(self.data_root, 'data')
+        # 图谱层（统一使用 TemporalKnowledgeGraph，支持 file/kuzu 后端）
+        # 读取图谱后端配置
+        graph_backend = os.environ.get('TEMPORAL_GRAPH_BACKEND', 'file').lower()
+        kuzu_buffer_pool_size = int(os.environ.get('KUZU_BUFFER_POOL_SIZE', '256'))
+        self._unified_graph = TemporalKnowledgeGraph(
+            data_path=os.path.join(self.data_root, 'data'),
+            backend=graph_backend,
+            kuzu_buffer_pool_size=kuzu_buffer_pool_size
         )
+        # 兼容别名：knowledge_graph 和 temporal_graph 都指向同一个实例
+        self.knowledge_graph = self._unified_graph
+        self.temporal_graph = self._unified_graph
+        _safe_print(f"[Recall v4.0] 统一图谱已初始化 (backend={graph_backend})")
+        
         self.relation_extractor = RelationExtractor(
             entity_extractor=self.entity_extractor
         )
@@ -370,7 +380,7 @@ class RecallEngine:
         """初始化 v4.0 Phase 1/2 可选模块
         
         这些模块基于配置文件中的开关决定是否启用：
-        - TEMPORAL_GRAPH_ENABLED: 时态知识图谱
+        - TEMPORAL_GRAPH_ENABLED: 时态追踪增强功能（图谱本身已在核心初始化）
         - CONTRADICTION_DETECTION_ENABLED: 矛盾检测
         - FULLTEXT_ENABLED: 全文检索 (BM25)
         
@@ -378,9 +388,11 @@ class RecallEngine:
         1. 默认关闭，不影响现有功能
         2. 即使启用失败也不影响引擎运行
         3. 所有 Phase 1 模块都是可选的增强功能
+        
+        注意：temporal_graph 已在核心初始化中创建（统一图谱），
+        这里只处理额外的时态配置。
         """
         # 初始化为 None，表示未启用
-        self.temporal_graph = None
         self.contradiction_manager = None
         self.fulltext_index = None
         
@@ -389,27 +401,20 @@ class RecallEngine:
         contradiction_enabled = os.environ.get('CONTRADICTION_DETECTION_ENABLED', 'false').lower() == 'true'
         fulltext_enabled = os.environ.get('FULLTEXT_ENABLED', 'false').lower() == 'true'
         
-        # 1. 时态知识图谱
-        if temporal_enabled:
+        # 1. 时态增强配置（temporal_graph 已在核心初始化中创建）
+        if temporal_enabled and self.temporal_graph:
             try:
-                from .graph import TemporalKnowledgeGraph
-                # 读取图谱后端配置
-                graph_backend = os.environ.get('TEMPORAL_GRAPH_BACKEND', 'file').lower()
                 # 读取衰减率和历史记录限制配置
                 decay_rate = float(os.environ.get('TEMPORAL_DECAY_RATE', '0.1'))
                 max_history = int(os.environ.get('TEMPORAL_MAX_HISTORY', '1000'))
-                self.temporal_graph = TemporalKnowledgeGraph(
-                    data_path=os.path.join(self.data_root, 'data'),
-                    backend=graph_backend
-                )
                 # 设置额外配置（如果类支持）
                 if hasattr(self.temporal_graph, 'decay_rate'):
                     self.temporal_graph.decay_rate = decay_rate
                 if hasattr(self.temporal_graph, 'max_history'):
                     self.temporal_graph.max_history = max_history
-                _safe_print(f"[Recall v4.0] 时态知识图谱已启用 (backend={graph_backend})")
+                _safe_print(f"[Recall v4.0] 时态增强功能已启用 (decay_rate={decay_rate})")
             except Exception as e:
-                _safe_print(f"[Recall v4.0] 时态知识图谱初始化失败（不影响核心功能）: {e}")
+                _safe_print(f"[Recall v4.0] 时态增强配置失败（不影响核心功能）: {e}")
         
         # 2. 矛盾检测管理器
         if contradiction_enabled:
@@ -516,6 +521,12 @@ class RecallEngine:
         - Louvain: 最常用，适合大规模图
         - Label Propagation: 快速，适合动态图
         - Connected Components: 基础连通分量
+        
+        后端选择策略（确保数据一致性）：
+        1. 如果统一图谱启用了 Kuzu，使用相同的 Kuzu 后端
+        2. 否则使用统一图谱的 legacy 适配器
+        
+        注意：knowledge_graph 和 temporal_graph 现在是同一个 TemporalKnowledgeGraph 实例
         """
         self.community_detector = None
         
@@ -525,12 +536,22 @@ class RecallEngine:
                 from .graph import CommunityDetector
                 from .graph.backends import create_graph_backend
                 
-                # 使用 legacy 适配器包装现有 KnowledgeGraph
-                backend = create_graph_backend(
-                    data_path=os.path.join(self.data_root, 'data'),
-                    backend='legacy',
-                    existing_knowledge_graph=self.knowledge_graph
-                )
+                backend = None
+                backend_type = 'unified_graph'
+                
+                # 优先使用统一图谱的 Kuzu 后端（确保数据一致性）
+                if self._unified_graph and hasattr(self._unified_graph, 'is_kuzu_enabled'):
+                    if self._unified_graph.is_kuzu_enabled:
+                        backend = self._unified_graph.kuzu_backend
+                        backend_type = 'kuzu (shared with unified_graph)'
+                
+                # 如果没有 Kuzu，使用 legacy 适配器
+                if backend is None:
+                    backend = create_graph_backend(
+                        data_path=os.path.join(self.data_root, 'data'),
+                        backend='legacy',
+                        existing_knowledge_graph=self._unified_graph
+                    )
                 
                 algorithm = os.environ.get('COMMUNITY_DETECTION_ALGORITHM', 'louvain')
                 min_size = int(os.environ.get('COMMUNITY_MIN_SIZE', '2'))
@@ -540,7 +561,7 @@ class RecallEngine:
                     algorithm=algorithm,
                     min_community_size=min_size
                 )
-                _safe_print(f"[Recall v4.0 Phase 3.5] 社区检测器已启用 (算法: {algorithm})")
+                _safe_print(f"[Recall v4.0 Phase 3.5] 社区检测器已启用 (算法: {algorithm}, 后端: {backend_type})")
             except Exception as e:
                 _safe_print(f"[Recall v4.0] 社区检测器初始化失败（不影响核心功能）: {e}")
         
@@ -1641,23 +1662,9 @@ class RecallEngine:
                 except Exception as e:
                     _safe_print(f"[Recall] 全文索引更新失败（不影响主流程）: {e}")
             
-            # 6.6 更新时态知识图谱（Phase 1 功能）
-            if self.temporal_graph is not None:
-                try:
-                    from .models.temporal import TemporalFact
-                    # 为每个实体关系创建时态事实
-                    for rel in relations if 'relations' in dir() else []:
-                        source_id, relation_type, target_id, source_text = rel
-                        fact = TemporalFact(
-                            uuid=f"fact_{memory_id}_{source_id}_{target_id}",
-                            fact=f"{source_id} {relation_type} {target_id}",
-                            source_text=source_text[:200] if source_text else "",
-                            user_id=user_id,
-                            entity_name=source_id
-                        )
-                        self.temporal_graph.add_fact(fact)
-                except Exception as e:
-                    _safe_print(f"[Recall] 时态图谱更新失败（不影响主流程）: {e}")
+            # 6.6 时态图谱更新 - 已整合到统一图谱中
+            # 注意：knowledge_graph 和 temporal_graph 现在是同一个 TemporalKnowledgeGraph 实例，
+            # 第 6 步的 add_relation 调用已经完成了数据写入，无需重复添加。
             
             # 7. 自动提取持久条件（已移至 server.py 中处理，避免 character_id 传递问题）
             # 注意：之前这里调用 extract_from_text 时没有传递 character_id，
@@ -1995,7 +2002,7 @@ class RecallEngine:
                         _safe_print(f"[Recall] 清理了 {deleted_episodes} 个 Episode")
             
             # 注意：以下全局索引不支持按用户精确清理
-            # - knowledge_graph: 旧版知识图谱，结构不支持用户隔离
+            # - 统一图谱 (knowledge_graph/temporal_graph): 使用 user_id 字段隔离，通过 clear_user 清理
             # - volume_manager: L3 存档是全局的，不支持按用户删除
             # 
             # 如需完全清空所有数据，请使用 clear_all() 方法
@@ -2024,47 +2031,43 @@ class RecallEngine:
                 scope = self.storage.get_scope(user_id)
                 scope.clear()
             
-            # 2. 清空时态知识图谱
-            if self.temporal_graph is not None:
-                self.temporal_graph.clear()
+            # 2. 清空统一图谱（knowledge_graph 和 temporal_graph 是同一个实例）
+            if self._unified_graph is not None:
+                self._unified_graph.clear()
             
-            # 3. 清空旧版知识图谱
-            if self.knowledge_graph is not None and hasattr(self.knowledge_graph, 'clear'):
-                self.knowledge_graph.clear()
-            
-            # 4. 清空实体索引
+            # 3. 清空实体索引
             if self._entity_index is not None and hasattr(self._entity_index, 'clear'):
                 self._entity_index.clear()
             
-            # 5. 清空 L1 整合存储
+            # 4. 清空 L1 整合存储
             if self.consolidated_memory is not None and hasattr(self.consolidated_memory, 'clear'):
                 self.consolidated_memory.clear()
             
-            # 6. 清空向量索引
+            # 5. 清空向量索引
             if self._vector_index is not None and hasattr(self._vector_index, 'clear'):
                 self._vector_index.clear()
             
-            # 7. 清空倒排索引
+            # 6. 清空倒排索引
             if self._inverted_index is not None and hasattr(self._inverted_index, 'clear'):
                 self._inverted_index.clear()
             
-            # 8. 清空 n-gram 索引
+            # 7. 清空 n-gram 索引
             if self._ngram_index is not None and hasattr(self._ngram_index, 'clear'):
                 self._ngram_index.clear()
             
-            # 9. 清空全文索引
+            # 8. 清空全文索引
             if self.fulltext_index is not None and hasattr(self.fulltext_index, 'clear'):
                 self.fulltext_index.clear()
             
-            # 10. 清空伏笔追踪器
+            # 9. 清空伏笔追踪器
             if self.foreshadowing_tracker is not None and hasattr(self.foreshadowing_tracker, 'clear'):
                 self.foreshadowing_tracker.clear()
             
-            # 11. 清空上下文系统
+            # 10. 清空上下文系统
             if self.context_tracker is not None and hasattr(self.context_tracker, 'clear'):
                 self.context_tracker.clear()
             
-            # 12. 清空伏笔分析器（缓冲区、计数器、分析标记）
+            # 11. 清空伏笔分析器（缓冲区、计数器、分析标记）
             if self.foreshadowing_analyzer is not None:
                 # 清空所有用户的缓冲区和计数器
                 self.foreshadowing_analyzer._buffers.clear()
@@ -2072,11 +2075,11 @@ class RecallEngine:
                 self.foreshadowing_analyzer._analysis_markers.clear()
                 self.foreshadowing_analyzer._save_analysis_markers()
             
-            # 13. 清空 Episode 存储
+            # 12. 清空 Episode 存储
             if self.episode_store is not None and hasattr(self.episode_store, 'clear'):
                 self.episode_store.clear()
             
-            # 14. 清空 L3 存档（VolumeManager）
+            # 13. 清空 L3 存档（VolumeManager）
             if self.volume_manager is not None and hasattr(self.volume_manager, 'clear'):
                 self.volume_manager.clear()
             

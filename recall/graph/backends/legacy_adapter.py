@@ -50,12 +50,17 @@ class LegacyKnowledgeGraphAdapter(GraphBackend):
         """初始化适配器
         
         Args:
-            knowledge_graph: KnowledgeGraph 实例
+            knowledge_graph: KnowledgeGraph 或 TemporalKnowledgeGraph 实例
+            
+        Note:
+            v4.0 统一架构后，KnowledgeGraph 是 TemporalKnowledgeGraph 的别名，
+            两者都可以接受。
         """
-        # 类型提示避免循环导入
-        from ..knowledge_graph import KnowledgeGraph
-        if not isinstance(knowledge_graph, KnowledgeGraph):
-            raise TypeError(f"Expected KnowledgeGraph, got {type(knowledge_graph)}")
+        # 类型检查：同时支持老的 KnowledgeGraph 和新的 TemporalKnowledgeGraph
+        from ..knowledge_graph import KnowledgeGraph as OriginalKnowledgeGraph
+        from ..temporal_knowledge_graph import TemporalKnowledgeGraph
+        if not isinstance(knowledge_graph, (OriginalKnowledgeGraph, TemporalKnowledgeGraph)):
+            raise TypeError(f"Expected KnowledgeGraph or TemporalKnowledgeGraph, got {type(knowledge_graph)}")
         
         self._kg = knowledge_graph
     
