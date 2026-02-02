@@ -301,6 +301,8 @@
                 startTime: Date.now()
             });
             this._updateUI();
+            // 启动自动刷新
+            this.startAutoRefresh();
             return taskId;
         },
         
@@ -324,6 +326,7 @@
             if (task) {
                 task.status = success ? 'success' : 'error';
                 if (detail) task.detail = detail;
+                task.endTime = Date.now();
                 this._updateUI();
                 
                 // 成功的任务 2 秒后移除，失败的任务 5 秒后移除
@@ -332,6 +335,18 @@
                     this._updateUI();
                 }, success ? 2000 : 5000);
             }
+        },
+        
+        /**
+         * 启动 UI 自动刷新（每秒更新运行时间显示）
+         */
+        startAutoRefresh() {
+            if (this._refreshIntervalId) return;
+            this._refreshIntervalId = setInterval(() => {
+                if (this.getActiveCount() > 0) {
+                    this._updateUI();
+                }
+            }, 1000);
         },
         
         /**
@@ -1710,10 +1725,15 @@ function createUI() {
         extensionContainer.insertAdjacentHTML('beforeend', extensionHtml);
     }
     
-    // 绑定标签页切换
-    document.querySelectorAll('.recall-tab').forEach(tab => {
-        tab.addEventListener('click', () => {
+    // 绑定标签页切换 - 使用事件委托确保事件能正确触发
+    const tabContainer = document.querySelector('#recall-extension-settings .recall-tabs');
+    if (tabContainer) {
+        tabContainer.addEventListener('click', (e) => {
+            const tab = e.target.closest('.recall-tab');
+            if (!tab) return;
+            
             const tabName = tab.dataset.tab;
+            console.warn(`🔔🔔🔔 [Recall] 标签点击事件触发! tabName=${tabName}`);
             
             // 切换标签按钮状态
             document.querySelectorAll('.recall-tab').forEach(t => t.classList.remove('active'));
@@ -1749,7 +1769,10 @@ function createUI() {
                 // 搜索标签页初始不加载，等用户输入查询
             }
         });
-    });
+        console.log('[Recall] 标签页事件委托已绑定');
+    } else {
+        console.error('[Recall] 找不到标签容器，无法绑定事件!');
+    }
     
     // 折叠面板由 SillyTavern 原生处理，不需要自己绑定事件
     // SillyTavern 会自动处理 .inline-drawer-toggle 的点击
