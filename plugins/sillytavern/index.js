@@ -1881,23 +1881,19 @@ function createUI() {
         extensionContainer.insertAdjacentHTML('beforeend', extensionHtml);
     }
     
-    // 使用事件委托在 document 级别监听（避免 SillyTavern 移动/克隆 DOM 导致事件丢失）
-    // 只绑定一次
-    if (!window._recallTabClickBound) {
+    // 使用 jQuery 事件委托（SillyTavern 已加载 jQuery，比原生更可靠）
+    if (!window._recallTabClickBound && typeof $ !== 'undefined') {
         window._recallTabClickBound = true;
-        document.addEventListener('click', function(e) {
-            const tab = e.target.closest('.recall-tab');
-            if (tab) {
-                e.preventDefault();
-                e.stopPropagation();
-                const tabName = tab.dataset?.tab || tab.getAttribute('data-tab');
-                console.log('🎯 [Recall] 标签点击 (document 委托):', tabName);
-                if (tabName && typeof handleRecallTabClick === 'function') {
-                    handleRecallTabClick(tabName);
-                }
+        $(document).on('click', '.recall-tab', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            const tabName = $(this).data('tab') || $(this).attr('data-tab');
+            console.log('🎯 [Recall] 标签点击 (jQuery 委托):', tabName);
+            if (tabName && typeof handleRecallTabClick === 'function') {
+                handleRecallTabClick(tabName);
             }
-        }, true);  // 捕获阶段
-        console.log('[Recall] 已在 document 级别设置标签点击事件委托');
+        });
+        console.log('[Recall] 已使用 jQuery 设置标签点击事件委托');
     }
     console.log('[Recall] UI 已创建');
     
