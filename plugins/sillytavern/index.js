@@ -1726,8 +1726,9 @@ function createUI() {
     }
     
     // 绑定标签页切换 - 使用事件委托确保事件能正确触发
-    const tabContainer = document.querySelector('#recall-extension-settings .recall-tabs');
+    const tabContainer = document.querySelector('#recall-extension .recall-tabs');
     if (tabContainer) {
+        console.log('[Recall] 找到标签容器，绑定事件委托');
         tabContainer.addEventListener('click', (e) => {
             const tab = e.target.closest('.recall-tab');
             if (!tab) return;
