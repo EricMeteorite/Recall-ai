@@ -1724,7 +1724,9 @@ function createUI() {
             document.getElementById(`recall-tab-${tabName}`)?.classList.add('active');
             
             // 根据标签页加载对应数据
+            console.log(`[Recall] 点击标签页: ${tabName}, isConnected: ${isConnected}`);
             if (tabName === 'contexts' && isConnected) {
+                console.log('[Recall] 点击条件标签，准备调用 loadPersistentContexts');
                 loadPersistentContexts();
             } else if (tabName === 'foreshadowing' && isConnected) {
                 loadForeshadowings();
@@ -3780,10 +3782,14 @@ async function onMessageReceived(messageIndex) {
  * 聊天切换时（角色/群组切换）
  */
 function onChatChanged() {
+    console.log('[Recall] ▶▶▶ onChatChanged 被触发');
+    
     // 获取当前角色信息
     const context = SillyTavern.getContext();
     const characterId = context.characterId;
     const character = characterId !== undefined ? context.characters[characterId] : null;
+    
+    console.log('[Recall] onChatChanged - characterId:', characterId, 'character:', character?.name, 'groupId:', context.groupId);
     
     // 清除旧角色的记忆注入，避免残留
     try {
@@ -3803,11 +3809,14 @@ function onChatChanged() {
         console.log(`[Recall] 切换到群组: ${currentCharacterId}`);
     } else {
         currentCharacterId = 'default';
+        console.log('[Recall] onChatChanged - 未检测到角色，使用 default');
     }
     
+    console.log('[Recall] onChatChanged - 准备加载数据，isConnected:', isConnected);
     loadMemories();
     loadForeshadowings();
     loadPersistentContexts();
+    console.log('[Recall] onChatChanged - 已调用 loadPersistentContexts');
 }
 
 /**
