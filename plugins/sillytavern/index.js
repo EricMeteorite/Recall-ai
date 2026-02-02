@@ -1725,6 +1725,21 @@ function createUI() {
         extensionContainer.insertAdjacentHTML('beforeend', extensionHtml);
     }
     
+    // 【调试】全局点击监听器 - 捕获所有点击
+    document.addEventListener('click', (e) => {
+        // 只关注 recall-extension 内的点击
+        const recallExt = e.target.closest('#recall-extension');
+        if (recallExt) {
+            console.warn('🌐🌐🌐 [Recall] 全局捕获到 recall-extension 内的点击!');
+            console.warn('🌐🌐🌐 [Recall] 点击目标:', e.target);
+            console.warn('🌐🌐🌐 [Recall] 目标 tagName:', e.target.tagName);
+            console.warn('🌐🌐🌐 [Recall] 目标 className:', e.target.className);
+            console.warn('🌐🌐🌐 [Recall] 目标 data-tab:', e.target.dataset?.tab);
+            console.warn('🌐🌐🌐 [Recall] closest .recall-tab:', e.target.closest('.recall-tab'));
+            console.warn('🌐🌐🌐 [Recall] closest .recall-tabs:', e.target.closest('.recall-tabs'));
+        }
+    }, true); // 使用捕获阶段
+    
     // 绑定标签页切换 - 使用事件委托确保事件能正确触发
     const tabContainer = document.querySelector('#recall-extension .recall-tabs');
     if (tabContainer) {
