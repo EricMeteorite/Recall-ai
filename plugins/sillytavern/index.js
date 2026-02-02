@@ -13,6 +13,19 @@
 (function() {
     'use strict';
     
+    // ========== 立即暴露全局函数，供内联 onclick 使用 ==========
+    // 必须在 IIFE 开始时就定义，因为 HTML 中的 onclick 属性需要它
+    window.recallTabClick = function(tabName) {
+        console.warn(`🔥🔥🔥 [Recall] window.recallTabClick 被调用! tabName=${tabName}`);
+        // 实际实现稍后注入
+        if (window._recallTabClickImpl) {
+            window._recallTabClickImpl(tabName);
+        } else {
+            console.error('[Recall] _recallTabClickImpl 未定义!');
+        }
+    };
+    console.log('[Recall] window.recallTabClick 已在 IIFE 开始时定义');
+    
     // 插件配置
     const defaultSettings = {
         enabled: true,
@@ -496,34 +509,85 @@
         }
     }
     
-    // 暴露到全局（用于内联 onclick）
+    // 将实现注入到全局函数
+    window._recallTabClickImpl = handleRecallTabClick;
+    // 同时直接更新全局函数（双保险）
     window.recallTabClick = handleRecallTabClick;
+    console.log('[Recall] handleRecallTabClick 已注入到 window._recallTabClickImpl 和 window.recallTabClick');
     
-    // ============== 直接在 document 上捕获所有 mousedown 事件 ==============
-    // 使用 mousedown 而不是 click，因为 click 可能被 SillyTavern 拦截
-    // 使用捕获阶段，在任何其他处理器之前执行
-    document.addEventListener('mousedown', function(e) {
-        const tab = e.target.closest('.recall-tab');
-        if (tab) {
-            console.warn(`🖱️ [Recall] mousedown 捕获: ${tab.dataset?.tab}`);
-            e.preventDefault();
-            e.stopImmediatePropagation(); // 阻止所有其他处理器
-            const tabName = tab.dataset.tab;
-            if (tabName) {
-                handleRecallTabClick(tabName);
+    // ============== 持续检测并直接绑定到每个 tab 按钮 ==============
+    // SillyTavern 的 dialog 弹窗可能阻止了 document 级别的事件捕获
+    // 使用定时器持续检测新出现的 tab 按钮并直接绑定事件
+    const boundTabs = new WeakSet();
+    
+    function bindRecallTabEvents() {
+        const tabs = document.querySelectorAll('.recall-tab');
+        let newBindCount = 0;
+        tabs.forEach(tab => {
+            if (!boundTabs.has(tab)) {
+                boundTabs.add(tab);
+                newBindCount++;
+                // 直接在元素上设置 onclick，绕过所有事件委托问题
+                tab.onclick = function(e) {
+                    console.warn(`🎯 [Recall] onclick 直接触发: ${this.dataset?.tab}`);
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const tabName = this.dataset.tab;
+                    if (tabName) {
+                        handleRecallTabClick(tabName);
+                    }
+                    return false;
+                };
+                // 同时绑定 mousedown 作为备用
+                tab.onmousedown = function(e) {
+                    console.warn(`🖱️ [Recall] onmousedown 直接触发: ${this.dataset?.tab}`);
+                };
+            }
+        });
+        if (newBindCount > 0) {
+            console.log(`[Recall] 新绑定 ${newBindCount} 个标签按钮事件 (总计 ${tabs.length} 个)`);
+        }
+    }
+    
+    // 立即执行一次
+    bindRecallTabEvents();
+    
+    // 每500ms检查一次，持续10秒（dialog 可能延迟打开）
+    let checkCount = 0;
+    const checkInterval = setInterval(() => {
+        bindRecallTabEvents();
+        checkCount++;
+        if (checkCount > 20) {
+            clearInterval(checkInterval);
+            console.log('[Recall] 停止定时检测标签按钮');
+        }
+    }, 500);
+    
+    // 同时监听 dialog 打开事件
+    const observer = new MutationObserver((mutations) => {
+        for (const mutation of mutations) {
+            if (mutation.addedNodes.length > 0) {
+                // 检查是否有新的 dialog 或 recall 相关元素
+                const hasRecallContent = Array.from(mutation.addedNodes).some(node => 
+                    node.nodeType === 1 && (
+                        node.classList?.contains('popup') ||
+                        node.querySelector?.('.recall-tab') ||
+                        node.id === 'recall-extension'
+                    )
+                );
+                if (hasRecallContent) {
+                    console.log('[Recall] MutationObserver: 检测到新的弹窗/Recall内容');
+                    setTimeout(bindRecallTabEvents, 100);
+                    setTimeout(bindRecallTabEvents, 300);
+                    setTimeout(bindRecallTabEvents, 500);
+                }
             }
         }
-    }, true); // 捕获阶段
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
     
-    // 同时监听 click 作为备用
-    document.addEventListener('click', function(e) {
-        const tab = e.target.closest('.recall-tab');
-        if (tab) {
-            console.warn(`🖱️ [Recall] click 捕获: ${tab.dataset?.tab}`);
-        }
-    }, true);
-    
-    console.log('[Recall] 全局 mousedown/click 监听器已绑定到 document（捕获阶段）');
+    console.log('[Recall] 标签事件绑定系统已启动（内联onclick + 直接绑定 + 定时检测 + MutationObserver）');
+    console.log('[Recall] 验证 window.recallTabClick:', typeof window.recallTabClick, window.recallTabClick ? '✓' : '✗');
 
     /**
      * 初始化插件
@@ -659,17 +723,17 @@ function createUI() {
                 
                 <!-- 标签页导航 -->
                 <div class="recall-tabs recall-tabs-scrollable">
-                    <button class="recall-tab active" data-tab="memories">📚 记忆</button>
-                    <button class="recall-tab" data-tab="entities">🏷️ 实体</button>
-                    <button class="recall-tab" data-tab="contexts">📌 条件</button>
-                    <button class="recall-tab" data-tab="foreshadowing">🎭 伏笔</button>
-                    <button class="recall-tab" data-tab="contradictions">⚔️ 矛盾</button>
-                    <button class="recall-tab" data-tab="temporal">⏱️ 时态</button>
-                    <button class="recall-tab" data-tab="graph">🕸️ 图谱</button>
-                    <button class="recall-tab" data-tab="episodes">📖 片段</button>
-                    <button class="recall-tab" data-tab="search">🔍 搜索</button>
-                    <button class="recall-tab" data-tab="core-settings">⚠️ 规则</button>
-                    <button class="recall-tab" data-tab="settings">⚙️ 设置</button>
+                    <button class="recall-tab active" data-tab="memories" onclick="window.recallTabClick && window.recallTabClick('memories')">📚 记忆</button>
+                    <button class="recall-tab" data-tab="entities" onclick="window.recallTabClick && window.recallTabClick('entities')">🏷️ 实体</button>
+                    <button class="recall-tab" data-tab="contexts" onclick="window.recallTabClick && window.recallTabClick('contexts')">📌 条件</button>
+                    <button class="recall-tab" data-tab="foreshadowing" onclick="window.recallTabClick && window.recallTabClick('foreshadowing')">🎭 伏笔</button>
+                    <button class="recall-tab" data-tab="contradictions" onclick="window.recallTabClick && window.recallTabClick('contradictions')">⚔️ 矛盾</button>
+                    <button class="recall-tab" data-tab="temporal" onclick="window.recallTabClick && window.recallTabClick('temporal')">⏱️ 时态</button>
+                    <button class="recall-tab" data-tab="graph" onclick="window.recallTabClick && window.recallTabClick('graph')">🕸️ 图谱</button>
+                    <button class="recall-tab" data-tab="episodes" onclick="window.recallTabClick && window.recallTabClick('episodes')">📖 片段</button>
+                    <button class="recall-tab" data-tab="search" onclick="window.recallTabClick && window.recallTabClick('search')">🔍 搜索</button>
+                    <button class="recall-tab" data-tab="core-settings" onclick="window.recallTabClick && window.recallTabClick('core-settings')">⚠️ 规则</button>
+                    <button class="recall-tab" data-tab="settings" onclick="window.recallTabClick && window.recallTabClick('settings')">⚙️ 设置</button>
                 </div>
                 
                 <!-- 记忆标签页 -->
