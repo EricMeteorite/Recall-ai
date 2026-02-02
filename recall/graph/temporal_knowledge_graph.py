@@ -769,9 +769,18 @@ class TemporalKnowledgeGraph:
         # 否则，按照参数创建边
         subject = subject_or_fact
         
-        # 确保主体和客体节点存在
-        subject_node = self.get_node_by_name(subject) or self.get_node(subject)
-        object_node = self.get_node_by_name(object_) or self.get_node(object_)
+        # 支持传入 UnifiedNode 对象
+        if isinstance(subject, UnifiedNode):
+            subject_node = subject
+            subject = subject.name
+        else:
+            subject_node = self.get_node_by_name(subject) or self.get_node(subject)
+        
+        if isinstance(object_, UnifiedNode):
+            object_node = object_
+            object_ = object_node.name
+        else:
+            object_node = self.get_node_by_name(object_) or self.get_node(object_)
         
         if not subject_node:
             subject_node = self.add_node(subject, group_id=group_id, user_id=user_id)

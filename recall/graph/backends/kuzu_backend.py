@@ -274,15 +274,17 @@ class KuzuGraphBackend(GraphBackend):
         """BFS 图遍历 - 利用 Kuzu 的原生路径查询"""
         try:
             # 使用 Kuzu 的可变长度路径查询
+            # 注意：Kuzu 的 RECURSIVE_REL 类型不能直接访问属性，需要用 ALL() 谓词
             query = f"""
                 MATCH (a:Node)-[r:Edge*1..{max_depth}]->(b:Node)
                 WHERE a.id IN $start_ids
             """
             
             if edge_types:
-                # Kuzu 的边类型过滤
-                type_filter = " OR ".join([f"r.edge_type = '{t}'" for t in edge_types])
-                query += f" AND ({type_filter})"
+                # 使用 ALL() 谓词过滤路径中所有边的类型
+                # ALL(edge IN rels(r) WHERE edge.edge_type IN [...])
+                type_list = ", ".join([f"'{t}'" for t in edge_types])
+                query += f" AND ALL(edge IN rels(r) WHERE edge.edge_type IN [{type_list}])"
             
             query += f"""
                 RETURN a.id, b.*, length(r) as depth
@@ -326,7 +328,21 @@ class KuzuGraphBackend(GraphBackend):
             return {}
     
     def query(self, cypher_like: str, params: Optional[Dict[str, Any]] = None) -> List[Dict]:
-        """执行 Cypher 查询"""
+        """执行 Cypher 查询
+        
+        Args:
+            cypher_like: Cypher 查询字符串
+            params: 查询参数，使用 $param_name 语法
+            
+        Note:
+            Kuzu 参数化查询限制：
+            - 在 WHERE 子句中使用: WHERE n.id = $id ✓
+            - 在 MATCH 模式中不支持: MATCH (n:Node {id: $id}) ✗
+            - 在 MERGE/SET 中支持: MERGE (n:Node {id: $id}) SET n.name = $name ✓
+            
+        Returns:
+            查询结果列表，每行是一个字典
+        """
         try:
             result = self.conn.execute(cypher_like, params or {})
             return [dict(enumerate(row)) for row in result]
@@ -381,12 +397,17 @@ class KuzuGraphBackend(GraphBackend):
     def delete_node(self, node_id: str) -> bool:
         """删除节点及其相关边"""
         try:
-            # 先删除相关边
+            # 先删除出边
             self.conn.execute(
-                "MATCH (n:Node {id: $id})-[r:Edge]-() DELETE r",
+                "MATCH (n:Node {id: $id})-[r:Edge]->() DELETE r",
                 {"id": node_id}
             )
-            # 再删除节点
+            # 再删除入边
+            self.conn.execute(
+                "MATCH (n:Node {id: $id})<-[r:Edge]-() DELETE r",
+                {"id": node_id}
+            )
+            # 最后删除节点
             self.conn.execute(
                 "MATCH (n:Node {id: $id}) DELETE n",
                 {"id": node_id}
