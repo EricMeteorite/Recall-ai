@@ -167,6 +167,43 @@
     let isInitialized = false;
 
     /**
+     * 🔧 调试函数：测试 API 连接
+     * 可在浏览器控制台执行: window.recallDebug.testApi()
+     */
+    window.recallDebug = {
+        testApi: async function(endpoint = '/v1/persistent-contexts') {
+            const userId = encodeURIComponent(currentCharacterId || 'default');
+            const url = `${pluginSettings.apiUrl}${endpoint}?user_id=${userId}&character_id=${userId}`;
+            console.log(`[Recall Debug] 测试 API: ${url}`);
+            console.log(`[Recall Debug] 当前角色: ${currentCharacterId}`);
+            console.log(`[Recall Debug] isConnected: ${isConnected}`);
+            
+            const startTime = Date.now();
+            try {
+                const response = await fetch(url, { mode: 'cors' });
+                const elapsed = Date.now() - startTime;
+                console.log(`[Recall Debug] 响应状态: ${response.status}, 耗时: ${elapsed}ms`);
+                const data = await response.json();
+                console.log(`[Recall Debug] 响应数据:`, data);
+                return { success: true, elapsed, data };
+            } catch (e) {
+                const elapsed = Date.now() - startTime;
+                console.error(`[Recall Debug] 请求失败:`, e);
+                console.error(`[Recall Debug] 耗时: ${elapsed}ms`);
+                return { success: false, elapsed, error: e.message };
+            }
+        },
+        getState: function() {
+            return {
+                apiUrl: pluginSettings.apiUrl,
+                isConnected,
+                currentCharacterId,
+                isInitialized
+            };
+        }
+    };
+
+    /**
      * 安全的 toastr 包装对象
      * 避免在 toastr 未加载时报错
      */
@@ -4255,19 +4292,27 @@ async function loadForeshadowings() {
     
     try {
         // 添加超时控制（30秒，避免网络延迟导致误报）
-        _loadForeshadowingsController = new AbortController();
+        const controller = new AbortController();  // 使用局部变量
+        _loadForeshadowingsController = controller;
         const timeoutId = setTimeout(() => {
-            console.log('[Recall] 伏笔请求即将超时，触发 abort');
-            _loadForeshadowingsController.abort();
+            console.log(`[Recall] 伏笔请求超时 (requestId=${currentRequestId})，触发 abort`);
+            controller.abort();  // 使用局部变量
         }, 30000);
         
         const url = `${pluginSettings.apiUrl}/v1/foreshadowing?user_id=${userId}&character_id=${userId}`;
-        console.log('[Recall] 开始加载伏笔:', url);
+        console.log(`[Recall] 开始加载伏笔 (requestId=${currentRequestId}):`, url);
+        
+        // 添加诊断：记录 fetch 开始时间
+        const fetchStartTime = Date.now();
+        console.log(`[Recall] 伏笔 fetch 开始 @ ${new Date().toISOString()}`);
         
         const response = await fetch(url, {
-            signal: _loadForeshadowingsController.signal
+            signal: controller.signal,
+            mode: 'cors'  // 显式设置 CORS 模式
         });
         clearTimeout(timeoutId);
+        
+        console.log(`[Recall] 伏笔 fetch 响应到达，耗时 ${Date.now() - fetchStartTime}ms`);
         
         // 检查是否是当前有效的请求
         if (_loadForeshadowingsRequestId !== currentRequestId) {
@@ -4315,12 +4360,34 @@ async function loadForeshadowings() {
     } catch (e) {
         // 检查是否是当前有效的请求
         if (_loadForeshadowingsRequestId !== currentRequestId) {
-            console.log('[Recall] 伏笔请求异常但已被新请求取代，忽略');
+            console.log(`[Recall] 伏笔请求异常但已被新请求取代 (requestId=${currentRequestId})，忽略`);
             return;
         }
         
-        const errMsg = e.name === 'AbortError' ? '请求超时（30s）' : e.message;
-        console.error('[Recall] 加载伏笔失败:', errMsg, `耗时 ${Date.now() - startTime}ms`);
+        // 详细的错误诊断
+        const elapsed = Date.now() - startTime;
+        let errMsg;
+        if (e.name === 'AbortError') {
+            errMsg = `请求超时（30s）`;
+            console.error(`[Recall] 伏笔请求超时:`, {
+                requestId: currentRequestId,
+                userId: userId,
+                elapsed: elapsed,
+                errorName: e.name,
+                errorMessage: e.message
+            });
+        } else {
+            errMsg = e.message || String(e);
+            console.error(`[Recall] 加载伏笔失败:`, {
+                requestId: currentRequestId,
+                userId: userId,
+                elapsed: elapsed,
+                errorName: e.name,
+                errorMessage: e.message,
+                errorStack: e.stack
+            });
+        }
+        
         _loadForeshadowingsLoading = false;
         _loadForeshadowingsController = null;
     }
@@ -4410,19 +4477,27 @@ async function loadPersistentContexts() {
     
     try {
         // 添加超时控制（30秒）
-        _loadPersistentContextsController = new AbortController();
+        const controller = new AbortController();  // 使用局部变量，避免闭包问题
+        _loadPersistentContextsController = controller;
         const timeoutId = setTimeout(() => {
-            console.log('[Recall] 持久条件请求即将超时，触发 abort');
-            _loadPersistentContextsController.abort();
+            console.log(`[Recall] 持久条件请求超时 (requestId=${currentRequestId})，触发 abort`);
+            controller.abort();  // 使用局部变量
         }, 30000);
         
         const url = `${pluginSettings.apiUrl}/v1/persistent-contexts?user_id=${userId}&character_id=${userId}`;
-        console.log('[Recall] 开始加载持久条件:', url);
+        console.log(`[Recall] 开始加载持久条件 (requestId=${currentRequestId}):`, url);
+        
+        // 添加诊断：记录 fetch 开始时间
+        const fetchStartTime = Date.now();
+        console.log(`[Recall] fetch 开始 @ ${new Date().toISOString()}`);
         
         const response = await fetch(url, {
-            signal: _loadPersistentContextsController.signal
+            signal: controller.signal,
+            mode: 'cors'  // 显式设置 CORS 模式
         });
         clearTimeout(timeoutId);
+        
+        console.log(`[Recall] fetch 响应到达，耗时 ${Date.now() - fetchStartTime}ms`);
         
         // 检查是否是当前有效的请求
         if (_loadPersistentContextsRequestId !== currentRequestId) {
@@ -4474,13 +4549,35 @@ async function loadPersistentContexts() {
     } catch (e) {
         // 检查是否是当前有效的请求
         if (_loadPersistentContextsRequestId !== currentRequestId) {
-            console.log('[Recall] 持久条件请求异常但已被新请求取代，忽略');
+            console.log(`[Recall] 持久条件请求异常但已被新请求取代 (requestId=${currentRequestId})，忽略`);
             // taskId 已在角色切换时被完成，无需再处理
             return;
         }
         
-        const errMsg = e.name === 'AbortError' ? '请求超时（30s）' : e.message;
-        console.error('[Recall] 加载持久条件失败:', errMsg, `耗时 ${Date.now() - startTime}ms`);
+        // 详细的错误诊断
+        const elapsed = Date.now() - startTime;
+        let errMsg;
+        if (e.name === 'AbortError') {
+            errMsg = `请求超时（30s）`;
+            console.error(`[Recall] 持久条件请求超时:`, {
+                requestId: currentRequestId,
+                userId: userId,
+                elapsed: elapsed,
+                errorName: e.name,
+                errorMessage: e.message
+            });
+        } else {
+            errMsg = e.message || String(e);
+            console.error(`[Recall] 加载持久条件失败:`, {
+                requestId: currentRequestId,
+                userId: userId,
+                elapsed: elapsed,
+                errorName: e.name,
+                errorMessage: e.message,
+                errorStack: e.stack
+            });
+        }
+        
         taskTracker.complete(taskId, false, errMsg);
         _loadPersistentContextsLoading = false;
         _loadPersistentContextsController = null;
