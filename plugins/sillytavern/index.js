@@ -1729,9 +1729,21 @@ function createUI() {
     const tabContainer = document.querySelector('#recall-extension .recall-tabs');
     if (tabContainer) {
         console.log('[Recall] 找到标签容器，绑定事件委托');
+        console.log('[Recall] 标签容器元素:', tabContainer);
+        console.log('[Recall] 标签容器内的按钮数量:', tabContainer.querySelectorAll('.recall-tab').length);
+        
         tabContainer.addEventListener('click', (e) => {
+            console.warn('🎯🎯🎯 [Recall] recall-tabs 容器收到点击事件!');
+            console.warn('🎯🎯🎯 [Recall] 点击的目标元素:', e.target);
+            console.warn('🎯🎯🎯 [Recall] 目标元素 tagName:', e.target.tagName);
+            console.warn('🎯🎯🎯 [Recall] 目标元素 className:', e.target.className);
+            
             const tab = e.target.closest('.recall-tab');
-            if (!tab) return;
+            console.warn('🎯🎯🎯 [Recall] closest(.recall-tab) 结果:', tab);
+            if (!tab) {
+                console.warn('🎯🎯🎯 [Recall] 未找到 .recall-tab，跳过');
+                return;
+            }
             
             const tabName = tab.dataset.tab;
             console.warn(`🔔🔔🔔 [Recall] 标签点击事件触发! tabName=${tabName}`);
@@ -1771,6 +1783,14 @@ function createUI() {
             }
         });
         console.log('[Recall] 标签页事件委托已绑定');
+        
+        // 额外：为每个标签按钮直接绑定事件（用于调试）
+        tabContainer.querySelectorAll('.recall-tab').forEach((btn, idx) => {
+            btn.addEventListener('click', function(e) {
+                console.warn(`💥💥💥 [Recall] 标签按钮 ${idx} 直接点击! data-tab=${this.dataset.tab}`);
+            });
+        });
+        console.log('[Recall] 标签按钮直接事件已绑定');
     } else {
         console.error('[Recall] 找不到标签容器，无法绑定事件!');
     }
