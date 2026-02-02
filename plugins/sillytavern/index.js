@@ -499,62 +499,31 @@
     // 暴露到全局（用于内联 onclick）
     window.recallTabClick = handleRecallTabClick;
     
-    // ============== MutationObserver：监视 DOM 变化，为新出现的标签按钮绑定事件 ==============
-    // 这是解决 SillyTavern 弹窗复制 HTML 导致事件丢失的关键
-    function bindTabEvents(container) {
-        const tabs = container.querySelectorAll('.recall-tab');
-        tabs.forEach(tab => {
-            if (tab._recallEventBound) return; // 避免重复绑定
-            tab._recallEventBound = true;
-            
-            tab.addEventListener('click', function(e) {
-                e.preventDefault();
-                e.stopPropagation();
-                const tabName = this.dataset.tab;
-                console.warn(`🎯 [Recall] 直接事件触发: ${tabName}`);
+    // ============== 直接在 document 上捕获所有 mousedown 事件 ==============
+    // 使用 mousedown 而不是 click，因为 click 可能被 SillyTavern 拦截
+    // 使用捕获阶段，在任何其他处理器之前执行
+    document.addEventListener('mousedown', function(e) {
+        const tab = e.target.closest('.recall-tab');
+        if (tab) {
+            console.warn(`🖱️ [Recall] mousedown 捕获: ${tab.dataset?.tab}`);
+            e.preventDefault();
+            e.stopImmediatePropagation(); // 阻止所有其他处理器
+            const tabName = tab.dataset.tab;
+            if (tabName) {
                 handleRecallTabClick(tabName);
-            });
-            console.log(`[Recall] 绑定事件到标签: ${tab.dataset.tab}`);
-        });
-        return tabs.length;
-    }
-    
-    // 创建 MutationObserver 监视 DOM 变化
-    const recallObserver = new MutationObserver((mutations) => {
-        for (const mutation of mutations) {
-            for (const node of mutation.addedNodes) {
-                if (node.nodeType !== Node.ELEMENT_NODE) continue;
-                
-                // 检查添加的节点本身是否是 recall-tab
-                if (node.classList?.contains('recall-tab')) {
-                    if (!node._recallEventBound) {
-                        node._recallEventBound = true;
-                        node.addEventListener('click', function(e) {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            handleRecallTabClick(this.dataset.tab);
-                        });
-                        console.log(`[Recall] MutationObserver: 绑定新标签 ${node.dataset.tab}`);
-                    }
-                }
-                
-                // 检查添加的节点内部是否包含 recall-tab
-                if (node.querySelectorAll) {
-                    const count = bindTabEvents(node);
-                    if (count > 0) {
-                        console.log(`[Recall] MutationObserver: 在新节点中发现并绑定 ${count} 个标签`);
-                    }
-                }
             }
         }
-    });
+    }, true); // 捕获阶段
     
-    // 开始观察整个 document.body
-    recallObserver.observe(document.body, { 
-        childList: true, 
-        subtree: true 
-    });
-    console.log('[Recall] MutationObserver 已启动，监视 DOM 变化');
+    // 同时监听 click 作为备用
+    document.addEventListener('click', function(e) {
+        const tab = e.target.closest('.recall-tab');
+        if (tab) {
+            console.warn(`🖱️ [Recall] click 捕获: ${tab.dataset?.tab}`);
+        }
+    }, true);
+    
+    console.log('[Recall] 全局 mousedown/click 监听器已绑定到 document（捕获阶段）');
 
     /**
      * 初始化插件
@@ -1832,14 +1801,8 @@ function createUI() {
         extensionContainer.insertAdjacentHTML('beforeend', extensionHtml);
     }
     
-    // 为初始 HTML 中的标签绑定事件
-    const tabContainer = document.querySelector('#recall-extension .recall-tabs');
-    if (tabContainer) {
-        const count = bindTabEvents(tabContainer);
-        console.log(`[Recall] 初始化: 绑定了 ${count} 个标签按钮事件`);
-    } else {
-        console.warn('[Recall] 初始化时未找到标签容器（可能稍后出现）');
-    }
+    // 标签点击事件由全局 document mousedown 监听器处理，无需单独绑定
+    console.log('[Recall] UI 已创建，标签点击由全局 mousedown 监听器处理');
     
     // 辅助函数：防抖
     function debounce(fn, delay) {
