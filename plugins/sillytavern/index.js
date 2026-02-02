@@ -482,8 +482,17 @@
         
         switch(tabName) {
             case 'contexts':
-                console.warn('🔥 [Recall] 加载持久条件...');
-                loadPersistentContexts();
+                console.warn('🔥🔥🔥 [Recall] 准备调用 loadPersistentContexts...');
+                console.warn('🔥🔥🔥 [Recall] isConnected:', isConnected);
+                console.warn('🔥🔥🔥 [Recall] _loadPersistentContextsLoading:', _loadPersistentContextsLoading);
+                console.warn('🔥🔥🔥 [Recall] _loadPersistentContextsForUser:', _loadPersistentContextsForUser);
+                console.warn('🔥🔥🔥 [Recall] currentCharacterId:', currentCharacterId);
+                try {
+                    loadPersistentContexts();
+                    console.warn('🔥🔥🔥 [Recall] loadPersistentContexts 调用返回');
+                } catch (err) {
+                    console.error('🔥🔥🔥 [Recall] loadPersistentContexts 调用出错:', err);
+                }
                 break;
             case 'foreshadowing':
                 loadForeshadowings();
