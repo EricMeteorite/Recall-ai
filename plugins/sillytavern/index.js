@@ -4474,12 +4474,16 @@ let _loadPersistentContextsForUser = null;
 let _loadPersistentContextsRequestId = 0;      // 请求ID，用于识别当前有效请求
 let _loadPersistentContextsTaskId = null;      // 当前的 taskId
 async function loadPersistentContexts() {
+    // 【诊断】函数入口
+    console.log('[Recall] ▶▶▶ loadPersistentContexts 被调用，currentCharacterId:', currentCharacterId);
+    
     if (!isConnected) {
         console.log('[Recall] 未连接，跳过加载持久条件');
         return;
     }
     
     const userId = encodeURIComponent(currentCharacterId || 'default');
+    console.log('[Recall] userId:', userId, '_loadPersistentContextsLoading:', _loadPersistentContextsLoading, '_loadPersistentContextsForUser:', _loadPersistentContextsForUser);
     
     // 如果正在加载同一个角色的数据，跳过
     if (_loadPersistentContextsLoading && _loadPersistentContextsForUser === userId) {
@@ -4504,6 +4508,7 @@ async function loadPersistentContexts() {
         _loadPersistentContextsLoading = false;
     }
     
+    console.log('[Recall] 准备发送请求...');
     _loadPersistentContextsLoading = true;
     _loadPersistentContextsForUser = userId;
     const currentRequestId = ++_loadPersistentContextsRequestId;  // 生成唯一请求ID
@@ -4511,6 +4516,7 @@ async function loadPersistentContexts() {
     const taskId = taskTracker.add('load', '加载持久条件');
     _loadPersistentContextsTaskId = taskId;
     const startTime = Date.now();
+    console.log('[Recall] taskId:', taskId, 'requestId:', currentRequestId);
     
     try {
         // 添加超时控制（30秒）
