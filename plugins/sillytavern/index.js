@@ -292,6 +292,7 @@
          */
         add(type, title, detail = '') {
             const taskId = ++this.taskIdCounter;
+            console.log(`[Recall] [TaskTracker] ADD: taskId=${taskId}, type=${type}, title=${title}`);
             this.tasks.set(taskId, {
                 type,
                 title,
@@ -318,6 +319,7 @@
          * 完成任务
          */
         complete(taskId, success = true, detail = '') {
+            console.log(`[Recall] [TaskTracker] COMPLETE: taskId=${taskId}, success=${success}, detail=${detail}`);
             const task = this.tasks.get(taskId);
             if (task) {
                 task.status = success ? 'success' : 'error';
