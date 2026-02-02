@@ -515,79 +515,73 @@
     window.recallTabClick = handleRecallTabClick;
     console.log('[Recall] handleRecallTabClick 已注入到 window._recallTabClickImpl 和 window.recallTabClick');
     
-    // ============== 持续检测并直接绑定到每个 tab 按钮 ==============
-    // SillyTavern 的 dialog 弹窗可能阻止了 document 级别的事件捕获
-    // 使用定时器持续检测新出现的 tab 按钮并直接绑定事件
-    const boundTabs = new WeakSet();
+    // ============== 全局点击诊断 ==============
+    // 首先确认点击事件是否到达 document
+    document.addEventListener('click', function(e) {
+        // 记录所有点击
+        console.log('🌍 [全局点击]', e.target.tagName, e.target.className?.substring?.(0, 50) || '');
+    }, true);
     
-    function bindRecallTabEvents() {
-        const tabs = document.querySelectorAll('.recall-tab');
-        let newBindCount = 0;
-        tabs.forEach(tab => {
-            if (!boundTabs.has(tab)) {
-                boundTabs.add(tab);
-                newBindCount++;
-                // 直接在元素上设置 onclick，绕过所有事件委托问题
-                tab.onclick = function(e) {
-                    console.warn(`🎯 [Recall] onclick 直接触发: ${this.dataset?.tab}`);
-                    e.preventDefault();
-                    e.stopPropagation();
-                    const tabName = this.dataset.tab;
-                    if (tabName) {
-                        handleRecallTabClick(tabName);
-                    }
-                    return false;
-                };
-                // 同时绑定 mousedown 作为备用
-                tab.onmousedown = function(e) {
-                    console.warn(`🖱️ [Recall] onmousedown 直接触发: ${this.dataset?.tab}`);
-                };
-            }
-        });
-        if (newBindCount > 0) {
-            console.log(`[Recall] 新绑定 ${newBindCount} 个标签按钮事件 (总计 ${tabs.length} 个)`);
+    // ============== 使用 jQuery 事件委托 ==============
+    jQuery(document).on('click', '.recall-tab', function(e) {
+        console.warn('🔥🔥🔥 [Recall] jQuery 委托点击:', this.dataset?.tab);
+        e.preventDefault();
+        e.stopPropagation();
+        const tabName = this.dataset?.tab || this.getAttribute('data-tab');
+        if (tabName) {
+            handleRecallTabClick(tabName);
         }
-    }
-    
-    // 立即执行一次
-    bindRecallTabEvents();
-    
-    // 每500ms检查一次，持续10秒（dialog 可能延迟打开）
-    let checkCount = 0;
-    const checkInterval = setInterval(() => {
-        bindRecallTabEvents();
-        checkCount++;
-        if (checkCount > 20) {
-            clearInterval(checkInterval);
-            console.log('[Recall] 停止定时检测标签按钮');
-        }
-    }, 500);
-    
-    // 同时监听 dialog 打开事件
-    const observer = new MutationObserver((mutations) => {
-        for (const mutation of mutations) {
-            if (mutation.addedNodes.length > 0) {
-                // 检查是否有新的 dialog 或 recall 相关元素
-                const hasRecallContent = Array.from(mutation.addedNodes).some(node => 
-                    node.nodeType === 1 && (
-                        node.classList?.contains('popup') ||
-                        node.querySelector?.('.recall-tab') ||
-                        node.id === 'recall-extension'
-                    )
-                );
-                if (hasRecallContent) {
-                    console.log('[Recall] MutationObserver: 检测到新的弹窗/Recall内容');
-                    setTimeout(bindRecallTabEvents, 100);
-                    setTimeout(bindRecallTabEvents, 300);
-                    setTimeout(bindRecallTabEvents, 500);
-                }
-            }
-        }
+        return false;
     });
-    observer.observe(document.body, { childList: true, subtree: true });
+    console.log('[Recall] jQuery 事件委托已绑定到 document');
     
-    console.log('[Recall] 标签事件绑定系统已启动（内联onclick + 直接绑定 + 定时检测 + MutationObserver）');
-    console.log('[Recall] 验证 window.recallTabClick:', typeof window.recallTabClick, window.recallTabClick ? '✓' : '✗');
+    // ============== 强制 CSS 确保可点击 ==============
+    const forceClickableStyle = document.createElement('style');
+    forceClickableStyle.textContent = `
+        .recall-tab {
+            pointer-events: auto !important;
+            cursor: pointer !important;
+            position: relative !important;
+            z-index: 9999 !important;
+        }
+        .recall-tab:active {
+            background: red !important;
+        }
+        .recall-tabs {
+            pointer-events: auto !important;
+            position: relative !important;
+            z-index: 9998 !important;
+        }
+    `;
+    document.head.appendChild(forceClickableStyle);
+    console.log('[Recall] 强制可点击 CSS 已注入');
+    
+    // ============== 暴露调试函数 ==============
+    window.recallDebug = {
+        listTabs: () => {
+            const tabs = document.querySelectorAll('.recall-tab');
+            console.log(`找到 ${tabs.length} 个 .recall-tab 元素:`);
+            tabs.forEach((t, i) => {
+                const rect = t.getBoundingClientRect();
+                console.log(`  ${i}: data-tab="${t.dataset.tab}", 可见=${rect.width > 0 && rect.height > 0}, 位置=(${rect.left.toFixed(0)}, ${rect.top.toFixed(0)})`);
+            });
+            return tabs;
+        },
+        clickTab: (name) => {
+            console.log(`手动调用 handleRecallTabClick('${name}')`);
+            handleRecallTabClick(name);
+        },
+        testClick: () => {
+            const tab = document.querySelector('.recall-tab[data-tab="contexts"]');
+            if (tab) {
+                console.log('模拟点击 contexts 标签');
+                tab.click();
+            } else {
+                console.log('未找到 contexts 标签');
+            }
+        }
+    };
+    console.log('[Recall] 调试函数已暴露: window.recallDebug.listTabs(), window.recallDebug.clickTab("contexts"), window.recallDebug.testClick()');
 
     /**
      * 初始化插件
