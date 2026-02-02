@@ -3000,12 +3000,20 @@ function safeRegisterEventHandlers(context) {
 function registerEventHandlers(context) {
     const { eventSource, event_types } = context;
     
+    // 诊断：打印 event_types.CHAT_CHANGED 的值
+    console.log('[Recall] event_types.CHAT_CHANGED =', event_types?.CHAT_CHANGED);
+    
     if (eventSource && event_types) {
         // 使用安全包装的事件处理器
         eventSource.on(event_types.MESSAGE_SENT, safeExecute(onMessageSent, '处理发送消息失败'));
         eventSource.on(event_types.MESSAGE_RECEIVED, safeExecute(onMessageReceived, '处理接收消息失败'));
         eventSource.on(event_types.CHAT_CHANGED, safeExecute(onChatChanged, '处理聊天切换失败'));
         eventSource.on(event_types.GENERATION_AFTER_COMMANDS, safeExecute(onBeforeGeneration, '准备记忆上下文失败'));
+        
+        // 诊断：直接监听 'chat_id_changed' 事件
+        eventSource.on('chat_id_changed', () => {
+            console.log('[Recall] ▶▶▶ 直接监听到 chat_id_changed 事件');
+        });
         
         console.log('[Recall] 事件监听器已注册');
         
