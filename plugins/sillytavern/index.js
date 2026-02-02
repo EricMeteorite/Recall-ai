@@ -3072,38 +3072,77 @@ function startCharacterPolling() {
             const contextCharId = context.characterId;
             const contextChar = contextCharId !== undefined ? context.characters?.[contextCharId] : null;
             
-            // 方式2: 从 SillyTavern 全局导出 (更可靠)
-            const stExports = window.SillyTavern?.getContext?.() || {};
-            const this_chid = stExports.this_chid ?? context.this_chid;
-            const characters = stExports.characters ?? context.characters ?? [];
-            const name2 = stExports.name2 ?? context.name2;
-            const selected_group = stExports.selected_group ?? context.selected_group ?? context.groupId;
+            // 方式2: 从 SillyTavern 全局导出
+            const this_chid = context.this_chid;
+            const characters = context.characters ?? [];
+            const name2 = context.name2;
+            const selected_group = context.selected_group ?? context.groupId;
             
-            // 方式3: 从 chat 数组获取角色名
+            // 方式3: 从 window 全局变量（SillyTavern 内部变量）
+            const windowThisChid = window.this_chid;
+            const windowCharacters = window.characters;
+            const windowName2 = window.name2;
+            const windowSelectedGroup = window.selected_group;
+            
+            // 方式4: 从 chat 数组获取角色名
             const chat = context.chat || [];
             const lastCharMsg = [...chat].reverse().find(m => !m.is_user && !m.is_system);
             const chatCharName = lastCharMsg?.name;
             
-            // 方式4: 从 DOM 获取
-            const charNameFromDOM = document.querySelector('#rm_button_selected_ch h2')?.textContent?.trim();
+            // 方式5: 从多个 DOM 选择器获取
+            const domSelectors = [
+                '#rm_button_selected_ch h2',
+                '.selected_chat_block .ch_name',
+                '#selected_chat_pole .ch_name', 
+                '.character_select.selected .ch_name',
+                '#avatar_url_pole',
+                '.mes:last-child .name_text',
+                '#chat .mes:first-child .name_text'
+            ];
+            let charNameFromDOM = '';
+            for (const sel of domSelectors) {
+                const el = document.querySelector(sel);
+                if (el) {
+                    const text = el.textContent?.trim() || el.title?.trim() || '';
+                    if (text && text !== 'SillyTavern System') {
+                        charNameFromDOM = text;
+                        break;
+                    }
+                }
+            }
+            
+            // 方式6: 检查 URL hash
+            const urlHash = window.location.hash;
+            
+            // 方式7: 检查是否在聊天界面（通过 DOM 状态）
+            const inChatView = document.querySelector('#chat')?.children.length > 0 || 
+                              document.querySelector('#sheld')?.classList.contains('openDrawer');
             
             let detectedCharId = null;
             
-            // 优先使用 name2（当前对话角色名）
-            if (name2 && name2 !== 'SillyTavern System' && name2 !== 'Assistant') {
-                detectedCharId = name2;
+            // 优先使用 window 全局变量
+            if (windowThisChid !== undefined && windowCharacters?.[windowThisChid]) {
+                detectedCharId = windowCharacters[windowThisChid].name || `char_${windowThisChid}`;
             }
-            // 其次使用 this_chid + characters
+            // 其次使用 context.this_chid
             else if (this_chid !== undefined && characters[this_chid]) {
                 detectedCharId = characters[this_chid].name || `char_${this_chid}`;
             }
-            // 然后使用 context.characterId
+            // 使用 name2（但排除默认值）
+            else if (name2 && name2 !== 'SillyTavern System' && name2 !== 'Assistant') {
+                detectedCharId = name2;
+            }
+            // 使用 window.name2
+            else if (windowName2 && windowName2 !== 'SillyTavern System' && windowName2 !== 'Assistant') {
+                detectedCharId = windowName2;
+            }
+            // 使用 context.characterId
             else if (contextChar) {
                 detectedCharId = contextChar.name || `char_${contextCharId}`;
             }
             // 使用群组ID
-            else if (selected_group) {
-                detectedCharId = `group_${selected_group}`;
+            else if (selected_group || windowSelectedGroup) {
+                detectedCharId = `group_${selected_group || windowSelectedGroup}`;
             }
             // 从聊天记录获取
             else if (chatCharName) {
@@ -3119,7 +3158,7 @@ function startCharacterPolling() {
             }
             
             // 每次轮询都打印当前状态（用于诊断）
-            console.log(`[Recall] [轮询] name2=${name2}, this_chid=${this_chid}, chatCharName=${chatCharName}, DOM=${charNameFromDOM}, detected=${detectedCharId}, last=${_lastPolledCharacterId}, current=${currentCharacterId}`);
+            console.log(`[Recall] [轮询] win.this_chid=${windowThisChid}, ctx.this_chid=${this_chid}, name2=${name2}, win.name2=${windowName2}, DOM=${charNameFromDOM}, inChat=${inChatView}, detected=${detectedCharId}, last=${_lastPolledCharacterId}`);
             
             // 如果角色变化了
             if (detectedCharId && detectedCharId !== _lastPolledCharacterId) {
