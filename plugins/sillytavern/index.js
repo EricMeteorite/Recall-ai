@@ -3078,6 +3078,9 @@ function startCharacterPolling() {
                 detectedCharId = 'default';
             }
             
+            // 每次轮询都打印当前状态（用于诊断）
+            console.log(`[Recall] [轮询] context.characterId=${characterId}, character=${character?.name}, detectedCharId=${detectedCharId}, lastPolled=${_lastPolledCharacterId}, currentCharacterId=${currentCharacterId}`);
+            
             // 如果角色变化了
             if (detectedCharId && detectedCharId !== _lastPolledCharacterId) {
                 console.log(`[Recall] [轮询] 检测到角色变化: ${_lastPolledCharacterId} -> ${detectedCharId}`);
@@ -3092,7 +3095,7 @@ function startCharacterPolling() {
         } catch (e) {
             // 静默失败
         }
-    }, 2000); // 每2秒检查一次
+    }, 1000); // 每1秒检查一次
 }
 
 /**
