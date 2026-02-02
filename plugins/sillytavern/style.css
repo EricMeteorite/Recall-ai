@@ -77,10 +77,19 @@
     border-radius: 6px;
     border: 1px solid var(--SmartThemeBorderColor, #333);
     overflow: hidden;
+    /* 确保面板在正常文档流中，不覆盖其他元素 */
+    position: relative;
+    z-index: 1;
 }
 
 .recall-tasks-panel.visible {
     display: block;
+}
+
+/* 确保标签栏在任务面板之上 */
+.recall-tabs {
+    position: relative;
+    z-index: 10;
 }
 
 .recall-tasks-header {
