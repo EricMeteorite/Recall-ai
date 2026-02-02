@@ -3000,8 +3000,12 @@ function safeRegisterEventHandlers(context) {
 function registerEventHandlers(context) {
     const { eventSource, event_types } = context;
     
-    // 诊断：打印 event_types.CHAT_CHANGED 的值
-    console.log('[Recall] event_types.CHAT_CHANGED =', event_types?.CHAT_CHANGED);
+    // 诊断：打印所有相关事件类型
+    console.log('[Recall] event_types:', {
+        CHAT_CHANGED: event_types?.CHAT_CHANGED,
+        CHAT_CREATED: event_types?.CHAT_CREATED,
+        CHARACTER_MESSAGE_RENDERED: event_types?.CHARACTER_MESSAGE_RENDERED,
+    });
     
     if (eventSource && event_types) {
         // 使用安全包装的事件处理器
@@ -3010,9 +3014,23 @@ function registerEventHandlers(context) {
         eventSource.on(event_types.CHAT_CHANGED, safeExecute(onChatChanged, '处理聊天切换失败'));
         eventSource.on(event_types.GENERATION_AFTER_COMMANDS, safeExecute(onBeforeGeneration, '准备记忆上下文失败'));
         
-        // 诊断：直接监听 'chat_id_changed' 事件
-        eventSource.on('chat_id_changed', () => {
-            console.log('[Recall] ▶▶▶ 直接监听到 chat_id_changed 事件');
+        // 监听更多事件以捕获角色切换
+        if (event_types.CHAT_CREATED) {
+            eventSource.on(event_types.CHAT_CREATED, () => {
+                console.log('[Recall] ▶▶▶ CHAT_CREATED 事件触发');
+                safeExecute(onChatChanged, '处理新聊天创建失败')();
+            });
+        }
+        
+        // 诊断：直接监听多个事件
+        eventSource.on('chat_id_changed', (...args) => {
+            console.log('[Recall] ▶▶▶ chat_id_changed 事件触发，参数:', args);
+        });
+        eventSource.on('chat_created', () => {
+            console.log('[Recall] ▶▶▶ chat_created 事件触发');
+        });
+        eventSource.on('character_message_rendered', (mesId) => {
+            console.log('[Recall] ▶▶▶ character_message_rendered 事件触发，mesId:', mesId);
         });
         
         console.log('[Recall] 事件监听器已注册');
