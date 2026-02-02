@@ -1725,87 +1725,116 @@ function createUI() {
         extensionContainer.insertAdjacentHTML('beforeend', extensionHtml);
     }
     
-    // 【调试】全局点击监听器 - 捕获所有点击
+    // 【超级详细诊断】监听所有点击
     document.addEventListener('click', (e) => {
-        // 只关注 recall-extension 内的点击
-        const recallExt = e.target.closest('#recall-extension');
-        if (recallExt) {
-            console.warn('🌐🌐🌐 [Recall] 全局捕获到 recall-extension 内的点击!');
-            console.warn('🌐🌐🌐 [Recall] 点击目标:', e.target);
-            console.warn('🌐🌐🌐 [Recall] 目标 tagName:', e.target.tagName);
-            console.warn('🌐🌐🌐 [Recall] 目标 className:', e.target.className);
-            console.warn('🌐🌐🌐 [Recall] 目标 data-tab:', e.target.dataset?.tab);
-            console.warn('🌐🌐🌐 [Recall] closest .recall-tab:', e.target.closest('.recall-tab'));
-            console.warn('🌐🌐🌐 [Recall] closest .recall-tabs:', e.target.closest('.recall-tabs'));
+        // 检查点击是否在任何弹窗或 Recall 扩展内
+        const inPopup = e.target.closest('.popup, dialog, [role="dialog"]');
+        const inRecall = e.target.closest('#recall-extension');
+        const isRecallTab = e.target.closest('.recall-tab');
+        
+        // 只在与 Recall 相关的点击时输出日志
+        if (isRecallTab || inRecall) {
+            console.warn('🔍🔍🔍 [Recall] ========== 点击诊断 ==========');
+            console.warn('🔍🔍🔍 [Recall] 点击目标:', e.target);
+            console.warn('🔍🔍🔍 [Recall] tagName:', e.target.tagName);
+            console.warn('🔍🔍🔍 [Recall] className:', e.target.className);
+            console.warn('🔍🔍🔍 [Recall] id:', e.target.id);
+            console.warn('🔍🔍🔍 [Recall] 在弹窗内:', !!inPopup, inPopup?.tagName);
+            console.warn('🔍🔍🔍 [Recall] 在 #recall-extension 内:', !!inRecall);
+            console.warn('🔍🔍🔍 [Recall] 是 .recall-tab:', !!isRecallTab, isRecallTab?.dataset?.tab);
+            console.warn('🔍🔍🔍 [Recall] 事件阶段:', e.eventPhase); // 1=capture, 2=at target, 3=bubble
+            console.warn('🔍🔍🔍 [Recall] ================================');
         }
     }, true); // 使用捕获阶段
     
-    // 绑定标签页切换 - 使用事件委托确保事件能正确触发
-    const tabContainer = document.querySelector('#recall-extension .recall-tabs');
-    if (tabContainer) {
-        console.log('[Recall] 找到标签容器，绑定事件委托');
-        console.log('[Recall] 标签容器元素:', tabContainer);
-        console.log('[Recall] 标签容器内的按钮数量:', tabContainer.querySelectorAll('.recall-tab').length);
-        
-        tabContainer.addEventListener('click', (e) => {
-            console.warn('🎯🎯🎯 [Recall] recall-tabs 容器收到点击事件!');
-            console.warn('🎯🎯🎯 [Recall] 点击的目标元素:', e.target);
-            console.warn('🎯🎯🎯 [Recall] 目标元素 tagName:', e.target.tagName);
-            console.warn('🎯🎯🎯 [Recall] 目标元素 className:', e.target.className);
-            
+    // 【额外诊断】监听任意点击，打印简短日志（证明事件系统正常）
+    let clickCounter = 0;
+    document.addEventListener('click', (e) => {
+        clickCounter++;
+        // 每10次点击只打印一条日志，避免刷屏
+        if (clickCounter % 10 === 1) {
+            console.log(`[Recall] 🖱️ 全局点击 #${clickCounter}: ${e.target.tagName}.${e.target.className?.split(' ')[0] || '(no-class)'}`);
+        }
+    }, true);
+    
+    // 检查 jQuery 是否可用
+    if (typeof $ === 'undefined' && typeof jQuery === 'undefined') {
+        console.error('[Recall] ❌ jQuery 不可用！使用原生事件处理');
+        // 如果 jQuery 不可用，使用原生事件委托
+        document.addEventListener('click', (e) => {
             const tab = e.target.closest('.recall-tab');
-            console.warn('🎯🎯🎯 [Recall] closest(.recall-tab) 结果:', tab);
-            if (!tab) {
-                console.warn('🎯🎯🎯 [Recall] 未找到 .recall-tab，跳过');
-                return;
-            }
+            if (!tab) return;
             
             const tabName = tab.dataset.tab;
-            console.warn(`🔔🔔🔔 [Recall] 标签点击事件触发! tabName=${tabName}`);
+            console.warn(`📢📢📢 [Recall] 原生委托捕获! tabName=${tabName}`);
             
             // 切换标签按钮状态
             document.querySelectorAll('.recall-tab').forEach(t => t.classList.remove('active'));
             tab.classList.add('active');
             
             // 切换内容面板
-            document.querySelectorAll('.recall-tab-content').forEach(content => {
-                content.classList.remove('active');
-            });
+            document.querySelectorAll('.recall-tab-content').forEach(c => c.classList.remove('active'));
             document.getElementById(`recall-tab-${tabName}`)?.classList.add('active');
             
             // 根据标签页加载对应数据
-            console.warn(`🔔🔔🔔 [Recall] 点击标签页: ${tabName}, isConnected: ${isConnected}`);
-            if (tabName === 'contexts' && isConnected) {
-                console.warn('🔔🔔🔔 [Recall] 点击条件标签！准备调用 loadPersistentContexts');
-                console.warn('🔔🔔🔔 [Recall] 当前状态: currentCharacterId=' + currentCharacterId + ', loading=' + _loadPersistentContextsLoading + ', forUser=' + _loadPersistentContextsForUser);
-                loadPersistentContexts();
-            } else if (tabName === 'foreshadowing' && isConnected) {
-                loadForeshadowings();
-            } else if (tabName === 'core-settings' && isConnected) {
-                loadCoreSettings();
-            } else if (tabName === 'entities' && isConnected) {
-                loadEntities();
-            } else if (tabName === 'contradictions' && isConnected) {
-                loadContradictions();
-            } else if (tabName === 'temporal' && isConnected) {
-                loadTemporalStats();
-            } else if (tabName === 'graph' && isConnected) {
-                // 图谱标签页初始不加载，等用户输入查询
-            } else if (tabName === 'episodes' && isConnected) {
-                loadEpisodes();
-            } else if (tabName === 'search' && isConnected) {
-                // 搜索标签页初始不加载，等用户输入查询
-            }
+            handleTabSwitch(tabName);
         });
-        console.log('[Recall] 标签页事件委托已绑定');
-        
-        // 额外：为每个标签按钮直接绑定事件（用于调试）
-        tabContainer.querySelectorAll('.recall-tab').forEach((btn, idx) => {
-            btn.addEventListener('click', function(e) {
-                console.warn(`💥💥💥 [Recall] 标签按钮 ${idx} 直接点击! data-tab=${this.dataset.tab}`);
-            });
+    } else {
+        console.log('[Recall] ✅ jQuery 可用，使用 jQuery 事件委托');
+        // 使用 jQuery 事件委托（SillyTavern 使用 jQuery，这样更兼容）
+        // 绑定到 document，这样即使元素在弹窗内也能捕获
+        $(document).on('click', '.recall-tab', function(e) {
+            const tab = $(this);
+            const tabName = tab.data('tab');
+            console.warn(`📢📢📢 [Recall] jQuery 委托捕获! tabName=${tabName}`);
+            
+            // 切换标签按钮状态
+            $('.recall-tab').removeClass('active');
+            tab.addClass('active');
+            
+            // 切换内容面板
+            $('.recall-tab-content').removeClass('active');
+            $(`#recall-tab-${tabName}`).addClass('active');
+            
+            // 根据标签页加载对应数据
+            handleTabSwitch(tabName);
         });
-        console.log('[Recall] 标签按钮直接事件已绑定');
+    }
+    console.log('[Recall] 事件委托已绑定到 document');
+    
+    // 标签页切换处理函数
+    function handleTabSwitch(tabName) {
+        console.warn(`📢📢📢 [Recall] 点击标签页: ${tabName}, isConnected: ${isConnected}`);
+        if (tabName === 'contexts' && isConnected) {
+            console.warn('📢📢📢 [Recall] 点击条件标签！准备调用 loadPersistentContexts');
+            loadPersistentContexts();
+        } else if (tabName === 'foreshadowing' && isConnected) {
+            loadForeshadowings();
+        } else if (tabName === 'core-settings' && isConnected) {
+            loadCoreSettings();
+        } else if (tabName === 'entities' && isConnected) {
+            loadEntities();
+        } else if (tabName === 'contradictions' && isConnected) {
+            loadContradictions();
+        } else if (tabName === 'temporal' && isConnected) {
+            loadTemporalStats();
+        } else if (tabName === 'graph' && isConnected) {
+            // 图谱标签页初始不加载
+        } else if (tabName === 'episodes' && isConnected) {
+            loadEpisodes();
+        } else if (tabName === 'search' && isConnected) {
+            // 搜索标签页初始不加载
+        }
+    }
+    
+    // 保留原来的事件绑定作为备用
+    const tabContainer = document.querySelector('#recall-extension .recall-tabs');
+    if (tabContainer) {
+        console.log('[Recall] 找到标签容器，绑定事件委托');
+        console.log('[Recall] 标签容器元素:', tabContainer);
+        console.log('[Recall] 标签容器内的按钮数量:', tabContainer.querySelectorAll('.recall-tab').length);
+        // 注意：主要事件处理由上面的 jQuery 委托完成，这里只记录调试日志
+        console.log('[Recall] 标签页事件由 jQuery 委托处理');
     } else {
         console.error('[Recall] 找不到标签容器，无法绑定事件!');
     }
