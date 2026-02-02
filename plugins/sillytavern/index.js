@@ -482,20 +482,29 @@
         
         switch(tabName) {
             case 'contexts':
-                console.warn('🔥🔥🔥 [Recall] 准备调用 loadPersistentContexts...');
-                console.warn('🔥🔥🔥 [Recall] isConnected:', isConnected);
-                console.warn('🔥🔥🔥 [Recall] _loadPersistentContextsLoading:', _loadPersistentContextsLoading);
-                console.warn('🔥🔥🔥 [Recall] _loadPersistentContextsForUser:', _loadPersistentContextsForUser);
-                console.warn('🔥🔥🔥 [Recall] currentCharacterId:', currentCharacterId);
-                try {
+                // 【优化】不再每次点击都加载，只在数据为空或用户手动刷新时加载
+                // 这与伏笔等其他标签的行为保持一致
+                console.log('[Recall] 切换到条件标签，检查是否需要加载数据');
+                // 只有当列表为空且没有正在加载时才自动加载
+                const contextList = document.getElementById('recall-context-list');
+                const isEmpty = !contextList || contextList.children.length === 0 || 
+                               (contextList.children.length === 1 && contextList.querySelector('.recall-context-empty'));
+                if (isEmpty && !_loadPersistentContextsLoading) {
+                    console.log('[Recall] 持久条件列表为空，自动加载');
                     loadPersistentContexts();
-                    console.warn('🔥🔥🔥 [Recall] loadPersistentContexts 调用返回');
-                } catch (err) {
-                    console.error('🔥🔥🔥 [Recall] loadPersistentContexts 调用出错:', err);
+                } else {
+                    console.log('[Recall] 持久条件已有数据或正在加载，跳过');
                 }
                 break;
             case 'foreshadowing':
-                loadForeshadowings();
+                // 【优化】只在数据为空或用户手动刷新时加载
+                const foreshadowingList = document.getElementById('recall-foreshadowing-list');
+                const isForeshadowingEmpty = !foreshadowingList || foreshadowingList.children.length === 0 || 
+                                            (foreshadowingList.children.length === 1 && foreshadowingList.querySelector('.recall-foreshadowing-empty, .recall-empty-state'));
+                if (isForeshadowingEmpty && !_loadForeshadowingsLoading) {
+                    console.log('[Recall] 伏笔列表为空，自动加载');
+                    loadForeshadowings();
+                }
                 break;
             case 'core-settings':
                 loadCoreSettings();
@@ -2280,6 +2289,8 @@ async function loadCapacityConfig() {
  * 保存容量限制配置
  */
 async function saveCapacityConfig() {
+    const taskId = taskTracker.add('config', '保存容量限制配置');
+    
     try {
         const configData = {
             // 持久条件配置
@@ -2313,16 +2324,20 @@ async function saveCapacityConfig() {
         
         if (result.success !== false) {
             safeToastr.success('容量限制配置已保存', 'Recall');
-            console.log('[Recall] 容量限制配置保存成功:', result);
+            console.log('[Recall] 容量限制配置保存成功');
             
             // 热更新配置
             await fetch(`${pluginSettings.apiUrl}/v1/config/reload`, { method: 'POST' });
+            taskTracker.complete(taskId, true);
         } else {
-            safeToastr.error('保存失败: ' + (result.message || '未知错误'), 'Recall');
+            const errMsg = result.message || '未知错误';
+            safeToastr.error('保存失败: ' + errMsg, 'Recall');
+            taskTracker.complete(taskId, false, errMsg);
         }
     } catch (e) {
-        console.error('[Recall] 保存容量限制配置失败:', e);
+        console.warn('[Recall] 保存容量限制配置失败:', e.message);
         safeToastr.error('保存容量限制配置失败: ' + e.message, 'Recall');
+        taskTracker.complete(taskId, false, e.message);
     }
 }
 
@@ -2884,6 +2899,8 @@ async function onSaveForeshadowingAnalyzerConfig() {
  * 注：角色卡/世界观/写作风格请使用 SillyTavern 自带功能
  */
 async function loadCoreSettings() {
+    const taskId = taskTracker.add('load', '加载绝对规则');
+    
     try {
         const response = await fetch(`${pluginSettings.apiUrl}/v1/core-settings`);
         if (response.ok) {
@@ -2903,11 +2920,14 @@ async function loadCoreSettings() {
                 }
             }
             
+            taskTracker.complete(taskId, true);
             console.log('[Recall] 绝对规则已加载, 检测模式:', data.rule_detection_mode || 'unknown');
         } else {
+            taskTracker.complete(taskId, false, `HTTP ${response.status}`);
             console.error('[Recall] 加载绝对规则失败:', response.status);
         }
     } catch (e) {
+        taskTracker.complete(taskId, false, e.message);
         console.error('[Recall] 加载绝对规则失败:', e);
     }
 }
@@ -2931,6 +2951,8 @@ async function saveCoreSettings() {
         absolute_rules: absoluteRules.length > 0 ? absoluteRules : []
     };
     
+    const taskId = taskTracker.add('config', '保存绝对规则');
+    
     try {
         const response = await fetch(`${pluginSettings.apiUrl}/v1/core-settings`, {
             method: 'PUT',
@@ -2952,12 +2974,17 @@ async function saveCoreSettings() {
                     modeTextEl.innerHTML = '<span style="color:var(--SmartThemeEmColor);">⚠️ 未配置 LLM，规则检测未生效</span>（配置 LLM_API_KEY 后生效）';
                 }
             }
+            
+            taskTracker.complete(taskId, true);
         } else {
             const error = await response.json().catch(() => ({}));
-            alert(`❌ 保存绝对规则失败: ${error.detail || '未知错误'}`);
+            const errMsg = error.detail || '未知错误';
+            alert(`❌ 保存绝对规则失败: ${errMsg}`);
+            taskTracker.complete(taskId, false, errMsg);
         }
     } catch (e) {
         alert(`❌ 保存绝对规则失败: ${e.message}`);
+        taskTracker.complete(taskId, false, e.message);
     }
 }
 
@@ -2969,6 +2996,8 @@ async function saveCoreSettings() {
 async function triggerForeshadowingAnalysis() {
     const userId = encodeURIComponent(currentCharacterId || 'default');
     const characterId = encodeURIComponent(currentCharacterId || 'default');
+    
+    const taskId = taskTracker.add('analyze', '触发伏笔分析');
     
     try {
         const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing/analyze/trigger?user_id=${userId}&character_id=${characterId}`, {
@@ -2993,11 +3022,13 @@ async function triggerForeshadowingAnalysis() {
                 if (result.potentially_resolved && result.potentially_resolved.length > 0) {
                     message += `\n🎯 可能已解决的伏笔: ${result.potentially_resolved.length} 个\n`;
                 }
+                taskTracker.complete(taskId, true);
             } else {
                 message += '分析器未触发（可能 LLM 未配置或无足够对话内容）';
                 if (result.error) {
                     message += `\n错误: ${result.error}`;
                 }
+                taskTracker.complete(taskId, false, '分析器未触发');
             }
             
             alert(message);
@@ -3006,9 +3037,11 @@ async function triggerForeshadowingAnalysis() {
             loadForeshadowings();
         } else {
             const error = await response.json().catch(() => ({}));
+            taskTracker.complete(taskId, false, error.detail || '未知错误');
             alert(`❌ 触发伏笔分析失败: ${error.detail || '未知错误'}`);
         }
     } catch (e) {
+        taskTracker.complete(taskId, false, e.message);
         alert(`❌ 触发伏笔分析失败: ${e.message}`);
     }
 }
@@ -3019,6 +3052,8 @@ async function triggerForeshadowingAnalysis() {
  * 热更新服务端配置
  */
 async function reloadServerConfig() {
+    const taskId = taskTracker.add('config', '热更新配置');
+    
     try {
         const response = await fetch(`${pluginSettings.apiUrl}/v1/config/reload`, {
             method: 'POST'
@@ -3026,15 +3061,18 @@ async function reloadServerConfig() {
         
         if (response.ok) {
             const result = await response.json();
+            taskTracker.complete(taskId, true);
             alert(`✅ 配置已热更新\n\n${result.message || '配置重新加载成功'}`);
             
             // 重新加载前端配置
             loadApiConfig();
         } else {
             const error = await response.json().catch(() => ({}));
+            taskTracker.complete(taskId, false, error.detail || '未知错误');
             alert(`❌ 热更新失败: ${error.detail || '未知错误'}`);
         }
     } catch (e) {
+        taskTracker.complete(taskId, false, e.message);
         alert(`❌ 热更新失败: ${e.message}`);
     }
 }
@@ -3057,6 +3095,8 @@ async function consolidateMemories() {
         btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 整合中...';
     }
     
+    const taskId = taskTracker.add('process', '整合记忆');
+    
     try {
         const response = await fetch(`${pluginSettings.apiUrl}/v1/consolidate?user_id=${userId}`, {
             method: 'POST'
@@ -3064,15 +3104,18 @@ async function consolidateMemories() {
         
         if (response.ok) {
             const result = await response.json();
+            taskTracker.complete(taskId, true);
             safeToastr.success(result.message || '记忆整合完成', 'Recall');
             
             // 刷新记忆列表
             loadMemories();
         } else {
             const error = await response.json().catch(() => ({}));
+            taskTracker.complete(taskId, false, error.detail || '未知错误');
             safeToastr.error(`整合失败: ${error.detail || '未知错误'}`, 'Recall');
         }
     } catch (e) {
+        taskTracker.complete(taskId, false, e.message);
         safeToastr.error(`整合失败: ${e.message}`, 'Recall');
     } finally {
         // 恢复按钮状态
@@ -3096,6 +3139,8 @@ async function showSystemStats() {
     if (statsDisplay.style.display === 'none') {
         statsDisplay.style.display = 'block';
         statsContent.innerHTML = '<div style="text-align:center;padding:10px;">⏳ 加载中...</div>';
+        
+        const taskId = taskTracker.add('load', '加载系统统计');
         
         try {
             const response = await fetch(`${pluginSettings.apiUrl}/v1/stats`);
@@ -3126,11 +3171,14 @@ async function showSystemStats() {
                 html += '</div>';
                 
                 statsContent.innerHTML = html;
+                taskTracker.complete(taskId, true);
             } else {
                 statsContent.innerHTML = '<div style="color:#ff6b6b;">❌ 获取统计信息失败</div>';
+                taskTracker.complete(taskId, false, `HTTP ${response.status}`);
             }
         } catch (e) {
             statsContent.innerHTML = `<div style="color:#ff6b6b;">❌ ${e.message}</div>`;
+            taskTracker.complete(taskId, false, e.message);
         }
     } else {
         statsDisplay.style.display = 'none';
@@ -3388,7 +3436,7 @@ function startCharacterPolling() {
 /**
  * 初始化当前角色 - 页面加载/刷新时调用
  */
-function initializeCurrentCharacter() {
+async function initializeCurrentCharacter() {
     try {
         const context = SillyTavern.getContext();
         const characterId = context.characterId;
@@ -3421,10 +3469,20 @@ function initializeCurrentCharacter() {
         updateCharacterBadge();
         
         // 加载该角色的记忆
+        // 【优化】使用 await 确保关键数据加载完成后再继续
+        // 这避免了和保存队列竞争网络连接
         if (isConnected) {
-            loadMemories();
-            loadForeshadowings();
-            loadPersistentContexts();
+            try {
+                // 并行加载三种数据，等待全部完成
+                await Promise.all([
+                    loadMemories(),
+                    loadForeshadowings(),
+                    loadPersistentContexts()
+                ]);
+                console.log('[Recall] 初始化数据加载完成');
+            } catch (e) {
+                console.warn('[Recall] 初始化数据加载部分失败:', e);
+            }
         }
     } catch (e) {
         console.warn('[Recall] 初始化角色失败:', e);
@@ -3604,6 +3662,8 @@ async function onSearch() {
     const query = document.getElementById('recall-search-input')?.value;
     if (!query || !isConnected) return;
     
+    const taskId = taskTracker.add('search', '搜索记忆');
+    
     try {
         const response = await fetch(`${pluginSettings.apiUrl}/v1/memories/search`, {
             method: 'POST',
@@ -3624,7 +3684,9 @@ async function onSearch() {
         
         // 更新显示的数量（搜索结果数）
         updateStats(results.length);
+        taskTracker.complete(taskId, true);
     } catch (e) {
+        taskTracker.complete(taskId, false, e.message);
         console.error('[Recall] 搜索失败:', e);
     }
 }
@@ -3637,6 +3699,8 @@ async function onAddMemory() {
     if (!content || !isConnected) return;
     
     const userId = currentCharacterId || 'default';
+    const taskId = taskTracker.add('add', '添加记忆');
+    
     try {
         const response = await fetch(`${pluginSettings.apiUrl}/v1/memories`, {
             method: 'POST',
@@ -3655,6 +3719,7 @@ async function onAddMemory() {
         const result = await response.json();
         if (result.success) {
             document.getElementById('recall-add-input').value = '';
+            taskTracker.complete(taskId, true);
             loadMemories();
             
             // 显示一致性检查警告（如果有）
@@ -3666,12 +3731,14 @@ async function onAddMemory() {
             }
         } else {
             // 显示保存失败的原因
+            taskTracker.complete(taskId, false, result.message || '未保存');
             console.log('[Recall] 记忆未保存:', result.message);
             if (result.message) {
                 safeToastr.info(result.message, 'Recall', { timeOut: 3000 });
             }
         }
     } catch (e) {
+        taskTracker.complete(taskId, false, e.message);
         console.error('[Recall] 添加记忆失败:', e);
     }
 }
@@ -3684,6 +3751,8 @@ async function onPlantForeshadowing() {
     if (!content || !isConnected) return;
     
     const userId = currentCharacterId || 'default';
+    const taskId = taskTracker.add('add', '埋下伏笔');
+    
     try {
         const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing`, {
             method: 'POST',
@@ -3699,10 +3768,14 @@ async function onPlantForeshadowing() {
         const result = await response.json();
         if (result.id) {
             document.getElementById('recall-foreshadowing-input').value = '';
+            taskTracker.complete(taskId, true);
             loadForeshadowings();
             console.log(`[Recall] 伏笔已埋下 (角色: ${currentCharacterId})`);
+        } else {
+            taskTracker.complete(taskId, false, '未返回 ID');
         }
     } catch (e) {
+        taskTracker.complete(taskId, false, e.message);
         console.error('[Recall] 埋下伏笔失败:', e);
     }
 }
@@ -4150,7 +4223,7 @@ async function onMessageReceived(messageIndex) {
 /**
  * 聊天切换时（角色/群组切换）
  */
-function onChatChanged() {
+async function onChatChanged() {
     console.log('[Recall] ▶▶▶ onChatChanged 被触发');
     
     // 获取当前角色信息
@@ -4182,10 +4255,17 @@ function onChatChanged() {
     }
     
     console.log('[Recall] onChatChanged - 准备加载数据，isConnected:', isConnected);
-    loadMemories();
-    loadForeshadowings();
-    loadPersistentContexts();
-    console.log('[Recall] onChatChanged - 已调用 loadPersistentContexts');
+    // 【优化】使用 Promise.all 并行加载，避免阻塞
+    try {
+        await Promise.all([
+            loadMemories(),
+            loadForeshadowings(),
+            loadPersistentContexts()
+        ]);
+        console.log('[Recall] onChatChanged - 数据加载完成');
+    } catch (e) {
+        console.warn('[Recall] onChatChanged - 部分数据加载失败:', e);
+    }
 }
 
 /**
@@ -4272,6 +4352,8 @@ async function loadMemories() {
     // 重置分页状态
     currentMemoryOffset = 0;
     
+    const taskId = taskTracker.add('load', '加载记忆列表');
+    
     try {
         // 添加超时控制（10秒）
         const controller = new AbortController();
@@ -4305,13 +4387,12 @@ async function loadMemories() {
         updateLoadMoreButton();
         
         console.log('[Recall] 记忆加载完成:', { count: data.count, total: data.total, hasMore: hasMoreMemories });
+        taskTracker.complete(taskId, true);
         
     } catch (e) {
-        if (e.name === 'AbortError') {
-            console.warn('[Recall] 加载记忆超时');
-        } else {
-            console.error('[Recall] 加载记忆失败:', e);
-        }
+        const errMsg = e.name === 'AbortError' ? '请求超时' : e.message;
+        console.warn('[Recall] 加载记忆失败:', errMsg);
+        taskTracker.complete(taskId, false, errMsg);
     }
 }
 
@@ -4412,6 +4493,8 @@ async function deleteMemory(memoryId) {
         return;
     }
     
+    const taskId = taskTracker.add('delete', '删除记忆');
+    
     try {
         console.log(`[Recall] 正在删除记忆: ${memoryId}`);
         const url = `${pluginSettings.apiUrl}/v1/memories/${encodeURIComponent(memoryId)}?user_id=${encodeURIComponent(currentCharacterId || 'default')}`;
@@ -4422,14 +4505,17 @@ async function deleteMemory(memoryId) {
         
         if (response.ok) {
             console.log(`[Recall] 删除成功: ${memoryId}`);
+            taskTracker.complete(taskId, true);
             loadMemories();
         } else {
             const errData = await response.json().catch(() => ({}));
             console.error(`[Recall] 删除失败: ${response.status}`, errData);
+            taskTracker.complete(taskId, false, errData.detail || response.statusText);
             alert(`删除失败: ${errData.detail || response.statusText}`);
         }
     } catch (e) {
         console.error('[Recall] 删除记忆失败:', e);
+        taskTracker.complete(taskId, false, e.message);
         alert('删除失败: ' + e.message);
     }
 }
@@ -4463,6 +4549,8 @@ async function onClearAllMemories() {
     
     if (!doubleConfirm) return;
     
+    const taskId = taskTracker.add('delete', '清空所有记忆');
+    
     try {
         const response = await fetch(
             `${pluginSettings.apiUrl}/v1/memories?user_id=${encodeURIComponent(characterName)}&confirm=true`,
@@ -4472,13 +4560,16 @@ async function onClearAllMemories() {
         const result = await response.json();
         
         if (result.success) {
+            taskTracker.complete(taskId, true);
             alert(`✓ 已删除 ${result.deleted_count} 条记忆`);
             loadMemories();
         } else {
+            taskTracker.complete(taskId, false, result.detail || '未知错误');
             alert(`删除失败: ${result.detail || '未知错误'}`);
         }
     } catch (e) {
         console.error('[Recall] 清空记忆失败:', e);
+        taskTracker.complete(taskId, false, e.message);
         alert('清空记忆失败: ' + e.message);
     }
 }
@@ -4702,36 +4793,32 @@ async function loadForeshadowings() {
     
     _loadForeshadowingsLoading = true;
     _loadForeshadowingsForUser = userId;
-    const currentRequestId = ++_loadForeshadowingsRequestId;  // 生成唯一请求ID
+    const currentRequestId = ++_loadForeshadowingsRequestId;
     const startTime = Date.now();
     
+    const taskId = taskTracker.add('load', '加载伏笔列表');
+    
     try {
-        // 添加超时控制（30秒，避免网络延迟导致误报）
-        const controller = new AbortController();  // 使用局部变量
+        // 添加超时控制（30秒）
+        const controller = new AbortController();
         _loadForeshadowingsController = controller;
         const timeoutId = setTimeout(() => {
-            console.log(`[Recall] 伏笔请求超时 (requestId=${currentRequestId})，触发 abort`);
-            controller.abort();  // 使用局部变量
+            console.log('[Recall] 伏笔请求超时，触发 abort');
+            controller.abort();
         }, 30000);
         
         const url = `${pluginSettings.apiUrl}/v1/foreshadowing?user_id=${userId}&character_id=${userId}`;
-        console.log(`[Recall] 开始加载伏笔 (requestId=${currentRequestId}):`, url);
-        
-        // 添加诊断：记录 fetch 开始时间
-        const fetchStartTime = Date.now();
-        console.log(`[Recall] 伏笔 fetch 开始 @ ${new Date().toISOString()}`);
         
         const response = await fetch(url, {
             signal: controller.signal,
-            mode: 'cors'  // 显式设置 CORS 模式
+            mode: 'cors'
         });
         clearTimeout(timeoutId);
-        
-        console.log(`[Recall] 伏笔 fetch 响应到达，耗时 ${Date.now() - fetchStartTime}ms`);
         
         // 检查是否是当前有效的请求
         if (_loadForeshadowingsRequestId !== currentRequestId) {
             console.log('[Recall] 伏笔请求完成但已被新请求取代，忽略结果');
+            taskTracker.complete(taskId, true, '已被新请求取代');
             return;
         }
         
@@ -4740,7 +4827,7 @@ async function loadForeshadowings() {
         }
         
         const data = await response.json();
-        console.log(`[Recall] 伏笔数据: ${data.length} 条，耗时 ${Date.now() - startTime}ms`);
+        console.log(`[Recall] 伏笔加载完成: ${data.length} 条，耗时 ${Date.now() - startTime}ms`);
         
         displayForeshadowings(data);
         
@@ -4769,7 +4856,8 @@ async function loadForeshadowings() {
             // 忽略归档计数加载失败
         }
         
-        console.log(`[Recall] 伏笔加载完成，总耗时 ${Date.now() - startTime}ms`);
+        console.log(`[Recall] 伏笔加载完成，耗时 ${Date.now() - startTime}ms`);
+        taskTracker.complete(taskId, true);
         _loadForeshadowingsLoading = false;
         _loadForeshadowingsController = null;
     } catch (e) {
@@ -4793,16 +4881,10 @@ async function loadForeshadowings() {
             });
         } else {
             errMsg = e.message || String(e);
-            console.error(`[Recall] 加载伏笔失败:`, {
-                requestId: currentRequestId,
-                userId: userId,
-                elapsed: elapsed,
-                errorName: e.name,
-                errorMessage: e.message,
-                errorStack: e.stack
-            });
+            console.warn('[Recall] 加载伏笔失败:', errMsg);
         }
         
+        taskTracker.complete(taskId, false, errMsg);
         _loadForeshadowingsLoading = false;
         _loadForeshadowingsController = null;
     }
@@ -4823,6 +4905,8 @@ async function onClearAllForeshadowings() {
     
     if (!confirm(confirmMsg)) return;
     
+    const taskId = taskTracker.add('delete', '清空所有伏笔');
+    
     try {
         const userId = encodeURIComponent(currentCharacterId || 'default');
         const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing?user_id=${userId}&character_id=${userId}`, {
@@ -4831,12 +4915,15 @@ async function onClearAllForeshadowings() {
         
         if (response.ok) {
             const result = await response.json();
+            taskTracker.complete(taskId, true);
             loadForeshadowings();
             console.log(`[Recall] 已清空 ${result.count} 个伏笔 (角色: ${currentCharacterId})`);
         } else {
+            taskTracker.complete(taskId, false, `HTTP ${response.status}`);
             console.error('[Recall] 清空伏笔失败');
         }
     } catch (e) {
+        taskTracker.complete(taskId, false, e.message);
         console.error('[Recall] 清空伏笔失败:', e);
     }
 }
@@ -4852,24 +4939,16 @@ let _loadPersistentContextsForUser = null;
 let _loadPersistentContextsRequestId = 0;      // 请求ID，用于识别当前有效请求
 let _loadPersistentContextsTaskId = null;      // 当前的 taskId
 async function loadPersistentContexts() {
-    // 【诊断】函数入口
-    const callStack = new Error().stack;
-    console.warn('⭐⭐⭐ [Recall] loadPersistentContexts 函数被调用！');
-    console.warn('⭐⭐⭐ [Recall] 调用栈:', callStack?.split('\n').slice(1, 4).join(' <- '));
-    console.warn('⭐⭐⭐ [Recall] currentCharacterId:', currentCharacterId);
-    
     if (!isConnected) {
         console.log('[Recall] 未连接，跳过加载持久条件');
         return;
     }
     
     const userId = encodeURIComponent(currentCharacterId || 'default');
-    console.log('[Recall] userId:', userId, '_loadPersistentContextsLoading:', _loadPersistentContextsLoading, '_loadPersistentContextsForUser:', _loadPersistentContextsForUser, '_loadPersistentContextsRequestId:', _loadPersistentContextsRequestId);
     
     // 如果正在加载同一个角色的数据，跳过
     if (_loadPersistentContextsLoading && _loadPersistentContextsForUser === userId) {
-        console.warn('⚠️⚠️⚠️ [Recall] 持久条件正在加载中（同一角色），跳过重复请求！');
-        console.warn('⚠️⚠️⚠️ [Recall] 当前 taskId:', _loadPersistentContextsTaskId, ', requestId:', _loadPersistentContextsRequestId);
+        console.log('[Recall] 持久条件正在加载中（同一角色），跳过重复请求');
         return;
     }
     
@@ -4890,66 +4969,46 @@ async function loadPersistentContexts() {
         _loadPersistentContextsLoading = false;
     }
     
-    console.log('[Recall] 准备发送请求...');
     _loadPersistentContextsLoading = true;
     _loadPersistentContextsForUser = userId;
-    const currentRequestId = ++_loadPersistentContextsRequestId;  // 生成唯一请求ID
+    const currentRequestId = ++_loadPersistentContextsRequestId;
     
     const taskId = taskTracker.add('load', '加载持久条件');
     _loadPersistentContextsTaskId = taskId;
     const startTime = Date.now();
-    console.log('[Recall] taskId:', taskId, 'requestId:', currentRequestId);
     
     try {
         // 添加超时控制（30秒）
-        const controller = new AbortController();  // 使用局部变量，避免闭包问题
+        const controller = new AbortController();
         _loadPersistentContextsController = controller;
         
-        // 每5秒打印一次等待状态
-        const statusIntervalId = setInterval(() => {
-            const elapsed = Math.round((Date.now() - startTime) / 1000);
-            console.log(`[Recall] 持久条件请求等待中... ${elapsed}s (requestId=${currentRequestId})`);
-        }, 5000);
-        
         const timeoutId = setTimeout(() => {
-            clearInterval(statusIntervalId);
-            console.error(`❌❌❌ [Recall] 持久条件请求超时！(requestId=${currentRequestId})，触发 abort`);
-            controller.abort();  // 使用局部变量
+            console.log('[Recall] 持久条件请求超时，触发 abort');
+            controller.abort();
         }, 30000);
         
         const url = `${pluginSettings.apiUrl}/v1/persistent-contexts?user_id=${userId}&character_id=${userId}`;
-        console.log(`[Recall] 开始加载持久条件 (requestId=${currentRequestId}):`, url);
-        
-        // 添加诊断：记录 fetch 开始时间
-        const fetchStartTime = Date.now();
-        console.log(`[Recall] fetch 开始 @ ${new Date().toISOString()}`);
         
         const response = await fetch(url, {
             signal: controller.signal,
-            mode: 'cors'  // 显式设置 CORS 模式
+            mode: 'cors'
         });
         clearTimeout(timeoutId);
-        clearInterval(statusIntervalId);
-        
-        console.log(`[Recall] fetch 响应到达，耗时 ${Date.now() - fetchStartTime}ms`);
         
         // 检查是否是当前有效的请求
         if (_loadPersistentContextsRequestId !== currentRequestId) {
             console.log('[Recall] 持久条件请求完成但已被新请求取代，忽略结果');
-            // 重置状态，允许下一次请求
             _loadPersistentContextsLoading = false;
             _loadPersistentContextsController = null;
             return;
         }
-        
-        console.log(`[Recall] 持久条件 fetch 完成，状态: ${response.status}，耗时 ${Date.now() - startTime}ms`);
         
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}`);
         }
         
         const data = await response.json();
-        console.log(`[Recall] 持久条件数据: ${data.length} 条`);
+        console.log(`[Recall] 持久条件加载完成: ${data.length} 条，耗时 ${Date.now() - startTime}ms`);
         
         displayPersistentContexts(data);
         
@@ -4977,7 +5036,6 @@ async function loadPersistentContexts() {
             console.log('[Recall] 归档计数加载失败（忽略）:', archivedErr.message);
         }
         
-        console.log(`[Recall] 持久条件加载完成，总耗时 ${Date.now() - startTime}ms`);
         taskTracker.complete(taskId, true);
         _loadPersistentContextsLoading = false;
         _loadPersistentContextsController = null;
@@ -4985,34 +5043,12 @@ async function loadPersistentContexts() {
     } catch (e) {
         // 检查是否是当前有效的请求
         if (_loadPersistentContextsRequestId !== currentRequestId) {
-            console.log(`[Recall] 持久条件请求异常但已被新请求取代 (requestId=${currentRequestId})，忽略`);
-            // taskId 已在角色切换时被完成，无需再处理
+            console.log('[Recall] 持久条件请求异常但已被新请求取代，忽略');
             return;
         }
         
-        // 详细的错误诊断
-        const elapsed = Date.now() - startTime;
-        let errMsg;
-        if (e.name === 'AbortError') {
-            errMsg = `请求超时（30s）`;
-            console.error(`[Recall] 持久条件请求超时:`, {
-                requestId: currentRequestId,
-                userId: userId,
-                elapsed: elapsed,
-                errorName: e.name,
-                errorMessage: e.message
-            });
-        } else {
-            errMsg = e.message || String(e);
-            console.error(`[Recall] 加载持久条件失败:`, {
-                requestId: currentRequestId,
-                userId: userId,
-                elapsed: elapsed,
-                errorName: e.name,
-                errorMessage: e.message,
-                errorStack: e.stack
-            });
-        }
+        const errMsg = e.name === 'AbortError' ? '请求超时（30s）' : (e.message || String(e));
+        console.warn('[Recall] 加载持久条件失败:', errMsg);
         
         taskTracker.complete(taskId, false, errMsg);
         _loadPersistentContextsLoading = false;
@@ -5115,6 +5151,8 @@ async function addPersistentContext(content, contextType) {
     if (!isConnected || !content.trim()) return;
     
     const userId = currentCharacterId || 'default';
+    const taskId = taskTracker.add('add', '添加持久条件');
+    
     try {
         const response = await fetch(`${pluginSettings.apiUrl}/v1/persistent-contexts`, {
             method: 'POST',
@@ -5128,12 +5166,15 @@ async function addPersistentContext(content, contextType) {
         });
         
         if (response.ok) {
+            taskTracker.complete(taskId, true);
             loadPersistentContexts();
             console.log(`[Recall] 持久条件已添加 (角色: ${currentCharacterId})`);
         } else {
+            taskTracker.complete(taskId, false, `HTTP ${response.status}`);
             console.error('[Recall] 添加持久条件失败');
         }
     } catch (e) {
+        taskTracker.complete(taskId, false, e.message);
         console.error('[Recall] 添加持久条件失败:', e);
     }
 }
@@ -5142,6 +5183,8 @@ async function addPersistentContext(content, contextType) {
  * 移除持久条件
  */
 async function removePersistentContext(contextId) {
+    const taskId = taskTracker.add('delete', '移除持久条件');
+    
     try {
         const userId = encodeURIComponent(currentCharacterId || 'default');
         const response = await fetch(`${pluginSettings.apiUrl}/v1/persistent-contexts/${contextId}?user_id=${userId}&character_id=${userId}`, {
@@ -5149,12 +5192,15 @@ async function removePersistentContext(contextId) {
         });
         
         if (response.ok) {
+            taskTracker.complete(taskId, true);
             loadPersistentContexts();
             console.log(`[Recall] 持久条件已移除 (角色: ${currentCharacterId})`);
         } else {
+            taskTracker.complete(taskId, false, `HTTP ${response.status}`);
             console.error('[Recall] 移除持久条件失败');
         }
     } catch (e) {
+        taskTracker.complete(taskId, false, e.message);
         console.error('[Recall] 移除持久条件失败:', e);
     }
 }
@@ -5174,6 +5220,8 @@ async function onClearAllContexts() {
     
     if (!confirm(confirmMsg)) return;
     
+    const taskId = taskTracker.add('delete', '清空所有条件');
+    
     try {
         const userId = encodeURIComponent(currentCharacterId || 'default');
         const response = await fetch(`${pluginSettings.apiUrl}/v1/persistent-contexts?user_id=${userId}&character_id=${userId}`, {
@@ -5182,12 +5230,15 @@ async function onClearAllContexts() {
         
         if (response.ok) {
             const result = await response.json();
+            taskTracker.complete(taskId, true);
             loadPersistentContexts();
             console.log(`[Recall] 已清空 ${result.count} 个持久条件 (角色: ${currentCharacterId})`);
         } else {
+            taskTracker.complete(taskId, false, `HTTP ${response.status}`);
             console.error('[Recall] 清空持久条件失败');
         }
     } catch (e) {
+        taskTracker.complete(taskId, false, e.message);
         console.error('[Recall] 清空持久条件失败:', e);
     }
 }
@@ -5212,6 +5263,8 @@ async function loadArchivedContexts(page = archivedContextsPage) {
     const contextType = filterEl?.value || '';
     const pageSize = parseInt(pageSizeEl?.value || '20');
     
+    const taskId = taskTracker.add('load', '加载归档条件');
+    
     try {
         const userId = encodeURIComponent(currentCharacterId || 'default');
         let url = `${pluginSettings.apiUrl}/v1/persistent-contexts/archived?user_id=${userId}&character_id=${userId}&page=${page}&page_size=${pageSize}`;
@@ -5230,8 +5283,11 @@ async function loadArchivedContexts(page = archivedContextsPage) {
         // 更新归档计数
         const countEl = document.getElementById('recall-context-archived-count');
         if (countEl) countEl.textContent = data.total;
+        
+        taskTracker.complete(taskId, true);
     } catch (e) {
-        console.error('[Recall] 加载归档持久条件失败:', e);
+        console.warn('[Recall] 加载归档持久条件失败:', e.message);
+        taskTracker.complete(taskId, false, e.message);
     }
 }
 
@@ -5357,6 +5413,8 @@ function renderContextsPagination(data) {
  * 恢复归档的持久条件
  */
 async function restoreArchivedContext(contextId) {
+    const taskId = taskTracker.add('save', '恢复归档条件');
+    
     try {
         const userId = encodeURIComponent(currentCharacterId || 'default');
         const response = await fetch(`${pluginSettings.apiUrl}/v1/persistent-contexts/${contextId}/restore?user_id=${userId}&character_id=${userId}`, {
@@ -5364,13 +5422,16 @@ async function restoreArchivedContext(contextId) {
         });
         
         if (response.ok) {
+            taskTracker.complete(taskId, true);
             loadArchivedContexts();
             loadPersistentContexts();
             console.log(`[Recall] 已恢复归档条件: ${contextId}`);
         } else {
+            taskTracker.complete(taskId, false, `HTTP ${response.status}`);
             console.error('[Recall] 恢复归档条件失败');
         }
     } catch (e) {
+        taskTracker.complete(taskId, false, e.message);
         console.error('[Recall] 恢复归档条件失败:', e);
     }
 }
@@ -5379,6 +5440,8 @@ async function restoreArchivedContext(contextId) {
  * 彻底删除归档的持久条件
  */
 async function deleteArchivedContext(contextId) {
+    const taskId = taskTracker.add('delete', '删除归档条件');
+    
     try {
         const userId = encodeURIComponent(currentCharacterId || 'default');
         const response = await fetch(`${pluginSettings.apiUrl}/v1/persistent-contexts/archived/${contextId}?user_id=${userId}&character_id=${userId}`, {
@@ -5386,12 +5449,15 @@ async function deleteArchivedContext(contextId) {
         });
         
         if (response.ok) {
+            taskTracker.complete(taskId, true);
             loadArchivedContexts();
             console.log(`[Recall] 已彻底删除归档条件: ${contextId}`);
         } else {
+            taskTracker.complete(taskId, false, `HTTP ${response.status}`);
             console.error('[Recall] 删除归档条件失败');
         }
     } catch (e) {
+        taskTracker.complete(taskId, false, e.message);
         console.error('[Recall] 删除归档条件失败:', e);
     }
 }
@@ -5407,6 +5473,8 @@ async function onClearAllArchivedContexts() {
     
     if (!confirm('确定要清空所有归档的持久条件吗？\n\n此操作不可恢复！')) return;
     
+    const taskId = taskTracker.add('delete', '清空归档条件');
+    
     try {
         const userId = encodeURIComponent(currentCharacterId || 'default');
         const response = await fetch(`${pluginSettings.apiUrl}/v1/persistent-contexts/archived?user_id=${userId}&character_id=${userId}`, {
@@ -5415,10 +5483,14 @@ async function onClearAllArchivedContexts() {
         
         if (response.ok) {
             const result = await response.json();
+            taskTracker.complete(taskId, true);
             loadArchivedContexts();
             console.log(`[Recall] 已清空 ${result.count} 个归档条件`);
+        } else {
+            taskTracker.complete(taskId, false, `HTTP ${response.status}`);
         }
     } catch (e) {
+        taskTracker.complete(taskId, false, e.message);
         console.error('[Recall] 清空归档条件失败:', e);
     }
 }
@@ -5427,6 +5499,8 @@ async function onClearAllArchivedContexts() {
  * 手动归档活跃的持久条件
  */
 async function archiveContext(contextId) {
+    const taskId = taskTracker.add('save', '归档条件');
+    
     try {
         const userId = encodeURIComponent(currentCharacterId || 'default');
         const response = await fetch(`${pluginSettings.apiUrl}/v1/persistent-contexts/${contextId}/archive?user_id=${userId}&character_id=${userId}`, {
@@ -5434,11 +5508,15 @@ async function archiveContext(contextId) {
         });
         
         if (response.ok) {
+            taskTracker.complete(taskId, true);
             loadPersistentContexts();
             loadArchivedContexts();
             console.log(`[Recall] 已归档条件: ${contextId}`);
+        } else {
+            taskTracker.complete(taskId, false, `HTTP ${response.status}`);
         }
     } catch (e) {
+        taskTracker.complete(taskId, false, e.message);
         console.error('[Recall] 归档条件失败:', e);
     }
 }
@@ -5456,6 +5534,8 @@ async function loadArchivedForeshadowings(page = archivedForeshadowingsPage) {
     const search = searchEl?.value || '';
     const status = filterEl?.value || '';
     const pageSize = parseInt(pageSizeEl?.value || '20');
+    
+    const taskId = taskTracker.add('load', '加载归档伏笔');
     
     try {
         const userId = encodeURIComponent(currentCharacterId || 'default');
@@ -5475,8 +5555,11 @@ async function loadArchivedForeshadowings(page = archivedForeshadowingsPage) {
         // 更新归档计数
         const countEl = document.getElementById('recall-foreshadowing-archived-count');
         if (countEl) countEl.textContent = data.total;
+        
+        taskTracker.complete(taskId, true);
     } catch (e) {
-        console.error('[Recall] 加载归档伏笔失败:', e);
+        console.warn('[Recall] 加载归档伏笔失败:', e.message);
+        taskTracker.complete(taskId, false, e.message);
     }
 }
 
@@ -5592,6 +5675,8 @@ function renderForeshadowingsPagination(data) {
  * 恢复归档的伏笔
  */
 async function restoreArchivedForeshadowing(foreshadowingId) {
+    const taskId = taskTracker.add('save', '恢复归档伏笔');
+    
     try {
         const userId = encodeURIComponent(currentCharacterId || 'default');
         const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing/${foreshadowingId}/restore?user_id=${userId}&character_id=${userId}`, {
@@ -5599,13 +5684,16 @@ async function restoreArchivedForeshadowing(foreshadowingId) {
         });
         
         if (response.ok) {
+            taskTracker.complete(taskId, true);
             loadArchivedForeshadowings();
             loadForeshadowings();
             console.log(`[Recall] 已恢复归档伏笔: ${foreshadowingId}`);
         } else {
+            taskTracker.complete(taskId, false, `HTTP ${response.status}`);
             console.error('[Recall] 恢复归档伏笔失败');
         }
     } catch (e) {
+        taskTracker.complete(taskId, false, e.message);
         console.error('[Recall] 恢复归档伏笔失败:', e);
     }
 }
@@ -5614,6 +5702,8 @@ async function restoreArchivedForeshadowing(foreshadowingId) {
  * 彻底删除归档的伏笔
  */
 async function deleteArchivedForeshadowing(foreshadowingId) {
+    const taskId = taskTracker.add('delete', '删除归档伏笔');
+    
     try {
         const userId = encodeURIComponent(currentCharacterId || 'default');
         const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing/archived/${foreshadowingId}?user_id=${userId}&character_id=${userId}`, {
@@ -5621,12 +5711,15 @@ async function deleteArchivedForeshadowing(foreshadowingId) {
         });
         
         if (response.ok) {
+            taskTracker.complete(taskId, true);
             loadArchivedForeshadowings();
             console.log(`[Recall] 已彻底删除归档伏笔: ${foreshadowingId}`);
         } else {
+            taskTracker.complete(taskId, false, `HTTP ${response.status}`);
             console.error('[Recall] 删除归档伏笔失败');
         }
     } catch (e) {
+        taskTracker.complete(taskId, false, e.message);
         console.error('[Recall] 删除归档伏笔失败:', e);
     }
 }
@@ -5642,6 +5735,8 @@ async function onClearAllArchivedForeshadowings() {
     
     if (!confirm('确定要清空所有归档的伏笔吗？\n\n此操作不可恢复！')) return;
     
+    const taskId = taskTracker.add('delete', '清空归档伏笔');
+    
     try {
         const userId = encodeURIComponent(currentCharacterId || 'default');
         const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing/archived?user_id=${userId}&character_id=${userId}`, {
@@ -5650,10 +5745,14 @@ async function onClearAllArchivedForeshadowings() {
         
         if (response.ok) {
             const result = await response.json();
+            taskTracker.complete(taskId, true);
             loadArchivedForeshadowings();
             console.log(`[Recall] 已清空 ${result.count} 个归档伏笔`);
+        } else {
+            taskTracker.complete(taskId, false, `HTTP ${response.status}`);
         }
     } catch (e) {
+        taskTracker.complete(taskId, false, e.message);
         console.error('[Recall] 清空归档伏笔失败:', e);
     }
 }
@@ -5662,6 +5761,8 @@ async function onClearAllArchivedForeshadowings() {
  * 手动归档活跃的伏笔
  */
 async function archiveForeshadowing(foreshadowingId) {
+    const taskId = taskTracker.add('save', '归档伏笔');
+    
     try {
         const userId = encodeURIComponent(currentCharacterId || 'default');
         const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing/${foreshadowingId}/archive?user_id=${userId}&character_id=${userId}`, {
@@ -5669,11 +5770,15 @@ async function archiveForeshadowing(foreshadowingId) {
         });
         
         if (response.ok) {
+            taskTracker.complete(taskId, true);
             loadForeshadowings();
             loadArchivedForeshadowings();
             console.log(`[Recall] 已归档伏笔: ${foreshadowingId}`);
+        } else {
+            taskTracker.complete(taskId, false, `HTTP ${response.status}`);
         }
     } catch (e) {
+        taskTracker.complete(taskId, false, e.message);
         console.error('[Recall] 归档伏笔失败:', e);
     }
 }
@@ -5768,6 +5873,8 @@ function showEditContextModal(ctx) {
  * 更新持久条件
  */
 async function updateContext(contextId, updates) {
+    const taskId = taskTracker.add('save', '更新持久条件');
+    
     try {
         const userId = encodeURIComponent(currentCharacterId || 'default');
         const url = `${pluginSettings.apiUrl}/v1/persistent-contexts/${contextId}?user_id=${userId}&character_id=${userId}`;
@@ -5782,15 +5889,18 @@ async function updateContext(contextId, updates) {
         if (response.ok) {
             const result = await response.json();
             console.log(`[Recall] 已更新条件: ${contextId}`, result);
+            taskTracker.complete(taskId, true);
             safeToastr.success('持久条件已更新', 'Recall');
             loadPersistentContexts();
         } else {
             const errorText = await response.text();
             console.error('[Recall] 更新条件失败:', response.status, errorText);
+            taskTracker.complete(taskId, false, `HTTP ${response.status}`);
             safeToastr.error(`更新失败: ${response.status} ${errorText}`, 'Recall');
         }
     } catch (e) {
         console.error('[Recall] 更新条件失败:', e);
+        taskTracker.complete(taskId, false, e.message);
         safeToastr.error(`更新失败: ${e.message}`, 'Recall');
     }
 }
@@ -5883,6 +5993,8 @@ function showEditForeshadowingModal(fsh) {
  * 更新伏笔
  */
 async function updateForeshadowing(foreshadowingId, updates) {
+    const taskId = taskTracker.add('save', '更新伏笔');
+    
     try {
         const userId = encodeURIComponent(currentCharacterId || 'default');
         const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing/${foreshadowingId}?user_id=${userId}&character_id=${userId}`, {
@@ -5892,12 +6004,15 @@ async function updateForeshadowing(foreshadowingId, updates) {
         });
         
         if (response.ok) {
+            taskTracker.complete(taskId, true);
             loadForeshadowings();
             console.log(`[Recall] 已更新伏笔: ${foreshadowingId}`);
         } else {
+            taskTracker.complete(taskId, false, `HTTP ${response.status}`);
             console.error('[Recall] 更新伏笔失败');
         }
     } catch (e) {
+        taskTracker.complete(taskId, false, e.message);
         console.error('[Recall] 更新伏笔失败:', e);
     }
 }
@@ -5913,6 +6028,8 @@ window.RecallPlugin.loadArchivedForeshadowings = loadArchivedForeshadowings;
 async function consolidatePersistentContexts() {
     if (!isConnected) return;
     
+    const taskId = taskTracker.add('process', '压缩持久条件');
+    
     try {
         const userId = encodeURIComponent(currentCharacterId || 'default');
         const response = await fetch(`${pluginSettings.apiUrl}/v1/persistent-contexts/consolidate?user_id=${userId}&character_id=${userId}&force=true`, {
@@ -5921,14 +6038,18 @@ async function consolidatePersistentContexts() {
         
         if (response.ok) {
             const result = await response.json();
+            taskTracker.complete(taskId, true);
             loadPersistentContexts();
             if (result.reduced > 0) {
                 console.log(`[Recall] 持久条件已压缩，减少了 ${result.reduced} 个`);
             } else {
                 console.log('[Recall] 无需压缩');
             }
+        } else {
+            taskTracker.complete(taskId, false, `HTTP ${response.status}`);
         }
     } catch (e) {
+        taskTracker.complete(taskId, false, e.message);
         console.error('[Recall] 压缩持久条件失败:', e);
     }
 }
@@ -5952,6 +6073,8 @@ async function onRebuildVectorIndex() {
     const btn = document.getElementById('recall-rebuild-vector-index');
     const originalText = btn?.innerHTML;
     
+    const taskId = taskTracker.add('process', '重建向量索引');
+    
     try {
         // 显示加载状态
         if (btn) {
@@ -5968,13 +6091,16 @@ async function onRebuildVectorIndex() {
         const result = await response.json();
         
         if (result.success) {
+            taskTracker.complete(taskId, true);
             alert(`✅ 向量索引重建完成！\n\n成功索引: ${result.indexed_count}/${result.total_memories} 条记忆`);
             console.log('[Recall] 向量索引重建完成:', result);
         } else {
+            taskTracker.complete(taskId, false, result.message);
             alert(`❌ 重建失败: ${result.message}`);
             console.error('[Recall] 向量索引重建失败:', result);
         }
     } catch (e) {
+        taskTracker.complete(taskId, false, e.message);
         console.error('[Recall] 重建向量索引失败:', e);
         alert('重建向量索引失败: ' + e.message);
     } finally {
@@ -6086,6 +6212,8 @@ function displayForeshadowings(foreshadowings) {
  * 解决伏笔
  */
 async function resolveForeshadowing(foreshadowingId) {
+    const taskId = taskTracker.add('save', '解决伏笔');
+    
     try {
         const userId = encodeURIComponent(currentCharacterId || 'default');
         const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing/${foreshadowingId}/resolve?user_id=${userId}&character_id=${userId}`, {
@@ -6095,12 +6223,15 @@ async function resolveForeshadowing(foreshadowingId) {
         });
         
         if (response.ok) {
+            taskTracker.complete(taskId, true);
             loadForeshadowings();
             console.log(`[Recall] 伏笔已解决 (角色: ${currentCharacterId})`);
         } else {
+            taskTracker.complete(taskId, false, `HTTP ${response.status}`);
             console.error('[Recall] 解决伏笔失败');
         }
     } catch (e) {
+        taskTracker.complete(taskId, false, e.message);
         console.error('[Recall] 解决伏笔失败:', e);
     }
 }
@@ -6109,6 +6240,8 @@ async function resolveForeshadowing(foreshadowingId) {
  * 放弃/删除伏笔
  */
 async function abandonForeshadowing(foreshadowingId) {
+    const taskId = taskTracker.add('delete', '放弃伏笔');
+    
     try {
         const userId = encodeURIComponent(currentCharacterId || 'default');
         const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing/${foreshadowingId}?user_id=${userId}&character_id=${userId}`, {
@@ -6116,13 +6249,16 @@ async function abandonForeshadowing(foreshadowingId) {
         });
         
         if (response.ok) {
+            taskTracker.complete(taskId, true);
             loadForeshadowings();
             console.log(`[Recall] 伏笔已放弃 (角色: ${currentCharacterId})`);
         } else {
             const error = await response.json().catch(() => ({}));
+            taskTracker.complete(taskId, false, error.detail || '未知错误');
             console.error('[Recall] 放弃伏笔失败:', error.detail || '未知错误');
         }
     } catch (e) {
+        taskTracker.complete(taskId, false, e.message);
         console.error('[Recall] 放弃伏笔失败:', e);
     }
 }
@@ -6144,6 +6280,8 @@ async function loadEntities() {
     const typeFilter = document.getElementById('recall-entity-type-filter');
     const search = searchInput?.value?.trim() || '';
     const entityType = typeFilter?.value || '';
+    
+    const taskId = taskTracker.add('load', '加载实体列表');
     
     try {
         let url = `${pluginSettings.apiUrl}/v1/entities?user_id=${encodeURIComponent(userId)}&limit=100`;
@@ -6190,9 +6328,11 @@ async function loadEntities() {
             });
         });
         
+        taskTracker.complete(taskId, true);
+        
     } catch (e) {
-        console.warn('[Recall] 加载实体失败:', e);
-        safeToastr.error('加载实体失败: ' + e.message);
+        console.warn('[Recall] 加载实体失败:', e.message);
+        taskTracker.complete(taskId, false, e.message);
     }
 }
 
@@ -6239,6 +6379,8 @@ function getEntityTypeIcon(type) {
 async function showEntityDetail(entityName) {
     const userId = currentCharacterId || 'default';
     currentSelectedEntity = entityName;
+    
+    const taskId = taskTracker.add('load', '加载实体详情', entityName);
     
     try {
         // 获取实体详情
@@ -6291,9 +6433,12 @@ async function showEntityDetail(entityName) {
         // 显示面板
         document.getElementById('recall-entity-detail-panel').style.display = 'block';
         
+        taskTracker.complete(taskId, true);
+        
     } catch (e) {
         console.warn('[Recall] 获取实体详情失败:', e);
         safeToastr.error('获取实体详情失败: ' + e.message);
+        taskTracker.complete(taskId, false, e.message);
     }
 }
 
@@ -6309,6 +6454,8 @@ async function generateEntitySummary() {
     btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 生成中...';
     btn.disabled = true;
     
+    const taskId = taskTracker.add('process', '生成实体摘要', currentSelectedEntity);
+    
     try {
         const response = await fetch(
             `${pluginSettings.apiUrl}/v1/entities/${encodeURIComponent(currentSelectedEntity)}/generate-summary?user_id=${encodeURIComponent(userId)}`,
@@ -6321,9 +6468,12 @@ async function generateEntitySummary() {
         document.getElementById('recall-entity-detail-summary').textContent = result.summary || '生成失败';
         safeToastr.success('摘要已生成');
         
+        taskTracker.complete(taskId, true);
+        
     } catch (e) {
         console.warn('[Recall] 生成摘要失败:', e);
         safeToastr.error('生成摘要失败: ' + e.message);
+        taskTracker.complete(taskId, false, e.message);
     } finally {
         btn.innerHTML = originalText;
         btn.disabled = false;
@@ -6337,6 +6487,8 @@ async function loadContradictions() {
     const userId = currentCharacterId || 'default';
     const statusFilter = document.getElementById('recall-contradiction-status-filter');
     const status = statusFilter?.value || '';
+    
+    const taskId = taskTracker.add('load', '加载矛盾列表');
     
     try {
         let url = `${pluginSettings.apiUrl}/v1/contradictions?user_id=${encodeURIComponent(userId)}`;
@@ -6377,9 +6529,11 @@ async function loadContradictions() {
             });
         });
         
+        taskTracker.complete(taskId, true);
+        
     } catch (e) {
-        console.warn('[Recall] 加载矛盾失败:', e);
-        safeToastr.error('加载矛盾失败: ' + e.message);
+        console.warn('[Recall] 加载矛盾失败:', e.message);
+        taskTracker.complete(taskId, false, e.message);
     }
 }
 
@@ -6437,6 +6591,8 @@ async function resolveContradiction(resolution) {
     const userId = currentCharacterId || 'default';
     const contradictionId = currentSelectedContradiction.id || currentSelectedContradiction.contradiction_id;
     
+    const taskId = taskTracker.add('process', '解决矛盾', `ID: ${contradictionId}`);
+    
     try {
         const response = await fetch(
             `${pluginSettings.apiUrl}/v1/contradictions/${encodeURIComponent(contradictionId)}/resolve?user_id=${encodeURIComponent(userId)}`,
@@ -6452,11 +6608,13 @@ async function resolveContradiction(resolution) {
         safeToastr.success('矛盾已解决');
         document.getElementById('recall-contradiction-detail-panel').style.display = 'none';
         currentSelectedContradiction = null;
+        taskTracker.complete(taskId, true);
         loadContradictions();
         
     } catch (e) {
         console.warn('[Recall] 解决矛盾失败:', e);
         safeToastr.error('解决矛盾失败: ' + e.message);
+        taskTracker.complete(taskId, false, e.message);
     }
 }
 
@@ -6465,6 +6623,8 @@ async function resolveContradiction(resolution) {
  */
 async function loadTemporalStats() {
     const userId = currentCharacterId || 'default';
+    
+    const taskId = taskTracker.add('load', '加载时态统计');
     
     try {
         const response = await fetch(
@@ -6479,8 +6639,11 @@ async function loadTemporalStats() {
         document.getElementById('recall-temporal-span').textContent = 
             stats.time_span || stats.span || '-';
         
+        taskTracker.complete(taskId, true);
+        
     } catch (e) {
-        console.warn('[Recall] 加载时态统计失败:', e);
+        console.warn('[Recall] 加载时态统计失败:', e.message);
+        taskTracker.complete(taskId, false, e.message);
     }
 }
 
@@ -6498,6 +6661,8 @@ async function queryEntityTimeline() {
     
     const userId = currentCharacterId || 'default';
     
+    const taskId = taskTracker.add('query', '查询时间线', entityName);
+    
     try {
         const response = await fetch(
             `${pluginSettings.apiUrl}/v1/temporal/timeline/${encodeURIComponent(entityName)}?user_id=${encodeURIComponent(userId)}`
@@ -6506,6 +6671,8 @@ async function queryEntityTimeline() {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
         const timeline = data.timeline || data.events || data || [];
+        
+        taskTracker.complete(taskId, true);
         
         // 渲染时间线
         const resultsEl = document.getElementById('recall-temporal-results');
@@ -6535,6 +6702,7 @@ async function queryEntityTimeline() {
     } catch (e) {
         console.warn('[Recall] 查询时间线失败:', e);
         safeToastr.error('查询时间线失败: ' + e.message);
+        taskTracker.complete(taskId, false, e.message);
     }
 }
 
@@ -6554,6 +6722,8 @@ async function queryTemporalRange() {
     
     const userId = currentCharacterId || 'default';
     
+    const taskId = taskTracker.add('query', '时间范围查询');
+    
     try {
         const response = await fetch(
             `${pluginSettings.apiUrl}/v1/temporal/range`,
@@ -6571,6 +6741,8 @@ async function queryTemporalRange() {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
         const facts = data.facts || data.results || data || [];
+        
+        taskTracker.complete(taskId, true);
         
         // 渲染结果
         const resultsEl = document.getElementById('recall-temporal-results');
@@ -6600,6 +6772,7 @@ async function queryTemporalRange() {
     } catch (e) {
         console.warn('[Recall] 时间范围查询失败:', e);
         safeToastr.error('时间范围查询失败: ' + e.message);
+        taskTracker.complete(taskId, false, e.message);
     }
 }
 
@@ -6632,6 +6805,8 @@ async function traverseGraph() {
     
     const userId = currentCharacterId || 'default';
     
+    const taskId = taskTracker.add('query', '图遍历', entityName);
+    
     try {
         const response = await fetch(
             `${pluginSettings.apiUrl}/v1/graph/traverse`,
@@ -6651,6 +6826,8 @@ async function traverseGraph() {
         const data = await response.json();
         const nodes = data.nodes || [];
         const edges = data.edges || data.relations || [];
+        
+        taskTracker.complete(taskId, true);
         
         // 渲染结果
         const resultsEl = document.getElementById('recall-graph-results');
@@ -6700,6 +6877,7 @@ async function traverseGraph() {
     } catch (e) {
         console.warn('[Recall] 图遍历失败:', e);
         safeToastr.error('图遍历失败: ' + e.message);
+        taskTracker.complete(taskId, false, e.message);
     }
 }
 
@@ -6708,6 +6886,8 @@ async function traverseGraph() {
  */
 async function loadCommunities() {
     const userId = currentCharacterId || 'default';
+    
+    const taskId = taskTracker.add('load', '加载社区结构');
     
     try {
         const response = await fetch(
@@ -6739,10 +6919,11 @@ async function loadCommunities() {
         }
         
         listEl.style.display = 'block';
+        taskTracker.complete(taskId, true);
         
     } catch (e) {
-        console.warn('[Recall] 加载社区失败:', e);
-        safeToastr.error('社区检测失败: ' + e.message);
+        console.warn('[Recall] 加载社区失败:', e.message);
+        taskTracker.complete(taskId, false, e.message);
     }
 }
 
@@ -6750,6 +6931,8 @@ async function loadCommunities() {
  * 加载高级功能配置 (v4.0/v4.1)
  */
 async function loadAdvancedConfig() {
+    const taskId = taskTracker.add('load', '加载高级配置');
+    
     try {
         const response = await fetch(`${pluginSettings.apiUrl}/v1/config/full`);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -6774,11 +6957,11 @@ async function loadAdvancedConfig() {
         if (l4El) l4El.checked = config.RETRIEVAL_L4_ENTITY_ENABLED ?? true;
         if (l5El) l5El.checked = config.RETRIEVAL_L5_GRAPH_ENABLED ?? true;
         
-        safeToastr.success('高级配置已加载');
+        taskTracker.complete(taskId, true);
         
     } catch (e) {
         console.warn('[Recall] 加载高级配置失败:', e);
-        safeToastr.error('加载高级配置失败: ' + e.message);
+        taskTracker.complete(taskId, false, e.message);
     }
 }
 
@@ -6786,6 +6969,8 @@ async function loadAdvancedConfig() {
  * 保存高级功能配置到服务器
  */
 async function saveAdvancedConfig() {
+    const taskId = taskTracker.add('save', '保存高级配置');
+    
     try {
         const config = {
             // 核心功能开关
@@ -6810,6 +6995,7 @@ async function saveAdvancedConfig() {
         const result = await response.json();
         
         if (result.success || result.status === 'ok') {
+            taskTracker.complete(taskId, true);
             safeToastr.success('高级配置已保存到服务器');
         } else {
             throw new Error(result.message || '保存失败');
@@ -6817,7 +7003,7 @@ async function saveAdvancedConfig() {
         
     } catch (e) {
         console.warn('[Recall] 保存高级配置失败:', e);
-        safeToastr.error('保存高级配置失败: ' + e.message);
+        taskTracker.complete(taskId, false, e.message);
     }
 }
 
@@ -6832,6 +7018,8 @@ let currentSelectedEpisode = null;
  */
 async function loadEpisodes() {
     const userId = currentCharacterId || 'default';
+    
+    const taskId = taskTracker.add('load', '加载片段列表');
     
     try {
         const response = await fetch(
@@ -6872,9 +7060,11 @@ async function loadEpisodes() {
             });
         });
         
+        taskTracker.complete(taskId, true);
+        
     } catch (e) {
-        console.warn('[Recall] 加载 Episode 失败:', e);
-        safeToastr.error('加载片段失败: ' + e.message);
+        console.warn('[Recall] 加载片段失败:', e.message);
+        taskTracker.complete(taskId, false, e.message);
     }
 }
 
@@ -6916,6 +7106,8 @@ async function showEpisodeDetail(episode) {
     document.getElementById('recall-episode-detail-memory-count').textContent = 
         episode.memory_count || episode.memories?.length || 0;
     
+    const taskId = taskTracker.add('load', '加载片段详情', episodeId.substring(0, 8));
+    
     // 加载 Episode 详情（包含记忆列表）
     try {
         const userId = currentCharacterId || 'default';
@@ -6945,8 +7137,11 @@ async function showEpisodeDetail(episode) {
                 }
             }
         }
+        
+        taskTracker.complete(taskId, true);
     } catch (e) {
         console.warn('[Recall] 加载 Episode 详情失败:', e);
+        taskTracker.complete(taskId, false, e.message);
     }
     
     document.getElementById('recall-episode-detail-panel').style.display = 'block';
@@ -6972,6 +7167,8 @@ async function performAdvancedSearch() {
     const activeTab = document.querySelector('.recall-search-type-tab.active');
     const searchType = activeTab?.dataset?.type || 'hybrid';
     const hybridWeight = parseFloat(document.getElementById('recall-hybrid-weight')?.value || '0.6');
+    
+    const taskId = taskTracker.add('query', '高级搜索', `${searchType}: ${query.substring(0, 20)}`);
     
     try {
         let url, body;
@@ -7014,6 +7211,8 @@ async function performAdvancedSearch() {
         const data = await response.json();
         const results = data.results || data.memories || data || [];
         
+        taskTracker.complete(taskId, true);
+        
         // 更新结果计数
         document.getElementById('recall-search-result-count').textContent = `(${results.length})`;
         
@@ -7037,6 +7236,7 @@ async function performAdvancedSearch() {
     } catch (e) {
         console.warn('[Recall] 高级搜索失败:', e);
         safeToastr.error('搜索失败: ' + e.message);
+        taskTracker.complete(taskId, false, e.message);
     }
 }
 
