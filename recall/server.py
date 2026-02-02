@@ -2329,12 +2329,17 @@ async def update_foreshadowing(
 _background_analysis_tasks: set = set()
 
 
+def _get_llm_timeout() -> float:
+    """获取 LLM 超时配置（统一从环境变量读取）"""
+    return float(os.environ.get('LLM_TIMEOUT', '60'))
+
+
 async def _background_foreshadowing_analysis(engine: RecallEngine, content: str, role: str, user_id: str, character_id: str):
     """后台异步执行伏笔分析和条件提取
     
     这个函数在后台运行，不阻塞 API 响应。
     使用引擎的异步分析方法来避免阻塞事件循环。
-    设置 60 秒超时，防止 LLM 调用卡住导致线程池耗尽。
+    使用 LLM_TIMEOUT 环境变量配置超时，防止 LLM 调用卡住导致线程池耗尽。
     
     同时触发：
     1. 伏笔分析（ForeshadowingAnalyzer.on_turn）
@@ -2342,6 +2347,9 @@ async def _background_foreshadowing_analysis(engine: RecallEngine, content: str,
     
     两者使用相同的触发间隔机制，避免重复分析相同对话历史。
     """
+    # 统一使用 LLM_TIMEOUT 配置
+    llm_timeout = _get_llm_timeout()
+    
     try:
         content_preview = content[:60].replace('\n', ' ') if len(content) > 60 else content.replace('\n', ' ')
         _safe_print(f"[Recall][Analysis] 🔄 后台分析: user={user_id}, role={role}")
@@ -2360,7 +2368,7 @@ async def _background_foreshadowing_analysis(engine: RecallEngine, content: str,
                     character_id=character_id
                 )
             ),
-            timeout=60.0
+            timeout=llm_timeout
         )
         if foreshadow_result.triggered:
             _safe_print(f"[Recall][Foreshadow] ✅ 分析完成: 新伏笔={len(foreshadow_result.new_foreshadowings)}, 可能解决={len(foreshadow_result.potentially_resolved)}")
@@ -2378,7 +2386,7 @@ async def _background_foreshadowing_analysis(engine: RecallEngine, content: str,
                     None,
                     lambda: engine.context_tracker.on_turn(user_id, character_id)
                 ),
-                timeout=60.0
+                timeout=llm_timeout
             )
             if context_result.get('triggered'):
                 _safe_print(f"[Recall][Context] ✅ 提取完成: 新条件={context_result.get('extracted_count', 0)}")
@@ -2387,11 +2395,13 @@ async def _background_foreshadowing_analysis(engine: RecallEngine, content: str,
             else:
                 turns_left = context_result.get('turns_until_next', '?')
                 _safe_print(f"[Recall][Context] ⏭️ 未达触发条件 (还需 {turns_left} 轮)")
+        except asyncio.TimeoutError:
+            _safe_print(f"[Recall][Context] ⏱️ 条件提取超时 (>{llm_timeout}s)")
         except Exception as e:
             _safe_print(f"[Recall][Context] ⚠️ 条件提取失败: {e}")
             
     except asyncio.TimeoutError:
-        _safe_print(f"[Recall][Analysis] ⏱️ 分析超时 (>60s)")
+        _safe_print(f"[Recall][Analysis] ⏱️ 伏笔分析超时 (>{llm_timeout}s)")
     except Exception as e:
         _safe_print(f"[Recall][Analysis] ❌ 分析失败: {e}")
 

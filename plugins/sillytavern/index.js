@@ -4225,9 +4225,9 @@ async function loadForeshadowings() {
     if (!isConnected) return;
     
     try {
-        // 添加超时控制（8秒）
+        // 添加超时控制（15秒，避免服务器繁忙时误报）
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 8000);
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
         
         const userId = encodeURIComponent(currentCharacterId || 'default');
         const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing?user_id=${userId}&character_id=${userId}`, {
@@ -4308,9 +4308,9 @@ async function loadPersistentContexts() {
     const taskId = taskTracker.add('load', '加载持久条件');
     
     try {
-        // 添加超时控制（8秒）
+        // 添加超时控制（15秒，避免服务器繁忙时误报）
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 8000);
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
         
         const userId = encodeURIComponent(currentCharacterId || 'default');
         const response = await fetch(`${pluginSettings.apiUrl}/v1/persistent-contexts?user_id=${userId}&character_id=${userId}`, {

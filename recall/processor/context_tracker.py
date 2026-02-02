@@ -379,6 +379,9 @@ class ContextTracker:
             except Exception as e:
                 _safe_print(f"[Recall] 加载上下文数据失败 ({user_id}/{character_id}): {e}")
                 self.contexts[cache_key] = []
+        else:
+            # 文件不存在时，初始化为空列表（避免重复尝试加载）
+            self.contexts[cache_key] = []
     
     def _save_user(self, user_id: str, character_id: str = "default"):
         """保存用户/角色的上下文"""
