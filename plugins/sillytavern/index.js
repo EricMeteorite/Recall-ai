@@ -515,75 +515,48 @@
     window.recallTabClick = handleRecallTabClick;
     console.log('[Recall] handleRecallTabClick 已注入到 window._recallTabClickImpl 和 window.recallTabClick');
     
-    // ============== 终极方案：在 dialog 上使用事件委托 ==============
-    // SillyTavern 克隆 DOM 到 <dialog> 弹窗，克隆后的元素没有事件绑定
-    // 所以我们在 dialog 元素本身上监听，用事件委托来处理点击
+    // ============== 最终方案：window 级别 pointerdown 监听 ==============
+    // click 事件可能被其他脚本拦截，使用 pointerdown 更可靠
     
-    function setupDialogEventDelegation(dialog) {
-        if (dialog._recallDelegated) return;
-        dialog._recallDelegated = true;
-        
-        // 在 dialog 上监听点击（捕获阶段）
-        dialog.addEventListener('click', function(e) {
-            // 查找点击的目标是否是 .recall-tab 或其子元素
-            const tab = e.target.closest('.recall-tab');
-            if (tab) {
-                console.log('🎯🎯🎯 [Recall] Dialog 内标签点击:', tab.dataset?.tab);
-                e.preventDefault();
-                e.stopPropagation();
-                const tabName = tab.dataset?.tab || tab.getAttribute('data-tab');
-                if (tabName) {
-                    handleRecallTabClick(tabName);
-                }
-            }
-        }, true);  // 捕获阶段
-        
-        console.log('[Recall] 已在 dialog 上设置事件委托');
-    }
-    
-    // 监控 DOM 变化，当 dialog 出现时设置事件委托
-    const dialogObserver = new MutationObserver((mutations) => {
-        for (const mutation of mutations) {
-            for (const node of mutation.addedNodes) {
-                if (node.nodeType !== 1) continue;
-                
-                // 如果添加的是 dialog
-                if (node.tagName === 'DIALOG') {
-                    console.log('[Recall] 检测到新 dialog，设置事件委托...');
-                    setupDialogEventDelegation(node);
-                }
-                
-                // 检查子节点中的 dialog
-                if (node.querySelectorAll) {
-                    node.querySelectorAll('dialog').forEach(d => setupDialogEventDelegation(d));
-                }
-            }
-        }
-    });
-    
-    dialogObserver.observe(document.body, {
-        childList: true,
-        subtree: true
-    });
-    console.log('[Recall] Dialog MutationObserver 已启动');
-    
-    // 为现有的所有 dialog 设置事件委托
-    document.querySelectorAll('dialog').forEach(d => setupDialogEventDelegation(d));
-    
-    // 同时也在 document.body 上设置一个备用监听器
-    document.body.addEventListener('click', function(e) {
+    window.addEventListener('pointerdown', function(e) {
         const tab = e.target.closest('.recall-tab');
         if (tab) {
-            console.log('🎯 [Recall] Body 捕获到标签点击:', tab.dataset?.tab);
+            console.log('🎯🎯🎯 [Recall] Window pointerdown 捕获到标签:', tab.dataset?.tab);
             e.preventDefault();
             e.stopPropagation();
+            e.stopImmediatePropagation();
             const tabName = tab.dataset?.tab || tab.getAttribute('data-tab');
             if (tabName) {
                 handleRecallTabClick(tabName);
             }
         }
     }, true);  // 捕获阶段
-    console.log('[Recall] Body 级别事件委托已设置');
+    
+    // 同时监听 mousedown 作为备份
+    window.addEventListener('mousedown', function(e) {
+        const tab = e.target.closest('.recall-tab');
+        if (tab) {
+            console.log('🎯 [Recall] Window mousedown 捕获到标签:', tab.dataset?.tab);
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            const tabName = tab.dataset?.tab || tab.getAttribute('data-tab');
+            if (tabName) {
+                handleRecallTabClick(tabName);
+            }
+        }
+    }, true);
+    
+    console.log('[Recall] Window 级别 pointerdown/mousedown 监听已设置');
+    
+    // 添加全局点击诊断（仅记录前 10 次）
+    let clickLogCount = 0;
+    window.addEventListener('pointerdown', function(e) {
+        if (clickLogCount < 10) {
+            clickLogCount++;
+            console.log(`🔍 [全局点击 #${clickLogCount}]`, e.target.tagName, e.target.className?.substring?.(0, 30) || '', 'closest .recall-tab:', !!e.target.closest('.recall-tab'));
+        }
+    }, true);
     
     // ============== 暴露调试函数 ==============
     window.recallDebug = {
@@ -593,7 +566,8 @@
             tabs.forEach((t, i) => {
                 const rect = t.getBoundingClientRect();
                 const inDialog = !!t.closest('dialog');
-                console.log(`  ${i}: data-tab="${t.dataset?.tab}", 在dialog内=${inDialog}, 可见=${rect.width > 0 && rect.height > 0}, 位置=(${rect.left.toFixed(0)}, ${rect.top.toFixed(0)})`);
+                const style = window.getComputedStyle(t);
+                console.log(`  ${i}: data-tab="${t.dataset?.tab}", 在dialog=${inDialog}, 可见=${rect.width > 0}, pointer-events=${style.pointerEvents}, z-index=${style.zIndex}`);
             });
             return tabs;
         },
@@ -601,24 +575,35 @@
             console.log(`手动调用 handleRecallTabClick('${name}')`);
             handleRecallTabClick(name);
         },
-        checkDialogs: () => {
-            const dialogs = document.querySelectorAll('dialog');
-            console.log(`找到 ${dialogs.length} 个 dialog:`);
-            dialogs.forEach((d, i) => {
-                const hasTabs = d.querySelectorAll('.recall-tab').length;
-                console.log(`  ${i}: delegated=${!!d._recallDelegated}, 包含tabs=${hasTabs}, open=${d.open}`);
-            });
-            return dialogs;
+        checkPointerEvents: () => {
+            // 检查从 body 到 recall-tab 的整个路径上的 pointer-events
+            const tab = document.querySelector('.recall-tab[data-tab="contexts"]');
+            if (!tab) {
+                console.log('未找到 contexts 标签');
+                return;
+            }
+            let el = tab;
+            console.log('检查 pointer-events 继承链:');
+            while (el && el !== document.body) {
+                const style = window.getComputedStyle(el);
+                console.log(`  ${el.tagName}.${el.className?.substring?.(0, 20) || ''}: pointer-events=${style.pointerEvents}, display=${style.display}, visibility=${style.visibility}`);
+                el = el.parentElement;
+            }
         },
-        forceSetup: () => {
-            document.querySelectorAll('dialog').forEach(d => {
-                d._recallDelegated = false;  // 重置标记
-                setupDialogEventDelegation(d);
-            });
-            console.log('已强制重新设置所有 dialog 的事件委托');
+        simulateClick: () => {
+            const tab = document.querySelector('.recall-tab[data-tab="contexts"]');
+            if (tab) {
+                console.log('模拟 pointerdown 事件...');
+                const event = new PointerEvent('pointerdown', {
+                    bubbles: true,
+                    cancelable: true,
+                    view: window
+                });
+                tab.dispatchEvent(event);
+            }
         }
     };
-    console.log('[Recall] 调试函数: recallDebug.listTabs(), recallDebug.clickTab("contexts"), recallDebug.checkDialogs(), recallDebug.forceSetup()');
+    console.log('[Recall] 调试: recallDebug.listTabs(), recallDebug.clickTab("contexts"), recallDebug.checkPointerEvents(), recallDebug.simulateClick()');
 
     /**
      * 初始化插件
