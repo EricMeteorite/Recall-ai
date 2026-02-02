@@ -4221,26 +4221,49 @@ function updateLoadMoreButton() {
 /**
  * 加载伏笔列表
  * 添加防重入机制，避免多次并发请求
+ * 当角色变化时，取消之前的请求
  */
 let _loadForeshadowingsLoading = false;
+let _loadForeshadowingsController = null;
+let _loadForeshadowingsForUser = null;
 async function loadForeshadowings() {
     if (!isConnected) return;
     
-    // 防重入：如果正在加载，跳过
-    if (_loadForeshadowingsLoading) {
-        console.log('[Recall] 伏笔正在加载中，跳过重复请求');
+    const userId = encodeURIComponent(currentCharacterId || 'default');
+    
+    // 如果正在加载同一个角色的数据，跳过
+    if (_loadForeshadowingsLoading && _loadForeshadowingsForUser === userId) {
+        console.log('[Recall] 伏笔正在加载中（同一角色），跳过重复请求');
         return;
     }
+    
+    // 如果正在加载不同角色的数据，取消之前的请求
+    if (_loadForeshadowingsLoading && _loadForeshadowingsForUser !== userId) {
+        console.log(`[Recall] 角色已切换 (${_loadForeshadowingsForUser} -> ${userId})，取消之前的伏笔请求`);
+        if (_loadForeshadowingsController) {
+            _loadForeshadowingsController.abort();
+        }
+        // 重置标志，允许新请求
+        _loadForeshadowingsLoading = false;
+    }
+    
     _loadForeshadowingsLoading = true;
+    _loadForeshadowingsForUser = userId;
+    const startTime = Date.now();
     
     try {
         // 添加超时控制（30秒，避免网络延迟导致误报）
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 30000);
+        _loadForeshadowingsController = new AbortController();
+        const timeoutId = setTimeout(() => {
+            console.log('[Recall] 伏笔请求即将超时，触发 abort');
+            _loadForeshadowingsController.abort();
+        }, 30000);
         
-        const userId = encodeURIComponent(currentCharacterId || 'default');
-        const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing?user_id=${userId}&character_id=${userId}`, {
-            signal: controller.signal
+        const url = `${pluginSettings.apiUrl}/v1/foreshadowing?user_id=${userId}&character_id=${userId}`;
+        console.log('[Recall] 开始加载伏笔:', url);
+        
+        const response = await fetch(url, {
+            signal: _loadForeshadowingsController.signal
         });
         clearTimeout(timeoutId);
         
@@ -4269,11 +4292,21 @@ async function loadForeshadowings() {
         } catch (archivedErr) {
             // 忽略归档计数加载失败
         }
+        
+        console.log(`[Recall] 伏笔加载完成，总耗时 ${Date.now() - startTime}ms`);
         _loadForeshadowingsLoading = false;
+        _loadForeshadowingsController = null;
     } catch (e) {
-        const errMsg = e.name === 'AbortError' ? '请求超时' : e.message;
+        // 如果是因为角色切换而取消，静默处理
+        if (e.name === 'AbortError' && _loadForeshadowingsForUser !== userId) {
+            console.log('[Recall] 伏笔请求被取消（角色已切换）');
+            // 注意：不重置 loading 标志，因为新角色的请求应该已经在进行中
+            return;
+        }
+        const errMsg = e.name === 'AbortError' ? '请求超时（30s）' : e.message;
         console.error('[Recall] 加载伏笔失败:', errMsg);
         _loadForeshadowingsLoading = false;
+        _loadForeshadowingsController = null;
     }
 }
 
@@ -4313,67 +4346,120 @@ async function onClearAllForeshadowings() {
 /**
  * 加载持久条件列表
  * 添加防重入机制，避免多次并发请求
+ * 当角色变化时，取消之前的请求
  */
 let _loadPersistentContextsLoading = false;
+let _loadPersistentContextsController = null;  // 用于取消之前的请求
+let _loadPersistentContextsForUser = null;     // 记录当前请求的角色
 async function loadPersistentContexts() {
-    if (!isConnected) return;
-    
-    // 防重入：如果正在加载，跳过
-    if (_loadPersistentContextsLoading) {
-        console.log('[Recall] 持久条件正在加载中，跳过重复请求');
+    if (!isConnected) {
+        console.log('[Recall] 未连接，跳过加载持久条件');
         return;
     }
+    
+    const userId = encodeURIComponent(currentCharacterId || 'default');
+    
+    // 如果正在加载同一个角色的数据，跳过
+    if (_loadPersistentContextsLoading && _loadPersistentContextsForUser === userId) {
+        console.log('[Recall] 持久条件正在加载中（同一角色），跳过重复请求');
+        return;
+    }
+    
+    // 如果正在加载不同角色的数据，取消之前的请求
+    if (_loadPersistentContextsLoading && _loadPersistentContextsForUser !== userId) {
+        console.log(`[Recall] 角色已切换 (${_loadPersistentContextsForUser} -> ${userId})，取消之前的请求`);
+        if (_loadPersistentContextsController) {
+            _loadPersistentContextsController.abort();
+        }
+        // 重置标志，允许新请求
+        _loadPersistentContextsLoading = false;
+    }
+    
     _loadPersistentContextsLoading = true;
+    _loadPersistentContextsForUser = userId;
     
     const taskId = taskTracker.add('load', '加载持久条件');
     const startTime = Date.now();
     
     try {
         // 添加超时控制（30秒，避免网络延迟导致误报）
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 30000);
+        _loadPersistentContextsController = new AbortController();
+        const timeoutId = setTimeout(() => {
+            console.log('[Recall] 持久条件请求即将超时，触发 abort');
+            _loadPersistentContextsController.abort();
+        }, 30000);
         
-        const userId = encodeURIComponent(currentCharacterId || 'default');
         const url = `${pluginSettings.apiUrl}/v1/persistent-contexts?user_id=${userId}&character_id=${userId}`;
         console.log('[Recall] 开始加载持久条件:', url);
         
+        console.log('[Recall] 发起 fetch 请求...');
         const response = await fetch(url, {
-            signal: controller.signal
+            signal: _loadPersistentContextsController.signal
         });
         clearTimeout(timeoutId);
         
-        console.log(`[Recall] 持久条件请求完成，耗时 ${Date.now() - startTime}ms`);
+        // 检查请求是否被取消（角色已切换）
+        if (_loadPersistentContextsForUser !== userId) {
+            console.log('[Recall] 请求完成但角色已切换，忽略结果');
+            taskTracker.complete(taskId, true, '已切换角色');
+            // 注意：不重置 loading 标志，因为新角色的请求应该已经在进行中
+            return;
+        }
+        
+        console.log(`[Recall] 持久条件 fetch 完成，状态: ${response.status}，耗时 ${Date.now() - startTime}ms`);
         
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}`);
         }
         
+        console.log('[Recall] 解析 JSON...');
         const data = await response.json();
+        console.log(`[Recall] 持久条件数据: ${data.length} 条`);
+        
         displayPersistentContexts(data);
         
         // 更新活跃计数
         const countEl = document.getElementById('recall-context-count');
         if (countEl) countEl.textContent = data.length;
         
-        // 同时加载归档数量（只获取计数）
+        // 同时加载归档数量（只获取计数）- 添加超时控制
         try {
-            const archivedRes = await fetch(`${pluginSettings.apiUrl}/v1/persistent-contexts/archived?user_id=${userId}&character_id=${userId}&page=1&page_size=1`);
+            const archivedController = new AbortController();
+            const archivedTimeout = setTimeout(() => archivedController.abort(), 5000);
+            
+            const archivedRes = await fetch(
+                `${pluginSettings.apiUrl}/v1/persistent-contexts/archived?user_id=${userId}&character_id=${userId}&page=1&page_size=1`,
+                { signal: archivedController.signal }
+            );
+            clearTimeout(archivedTimeout);
+            
             if (archivedRes.ok) {
                 const archivedData = await archivedRes.json();
                 const archivedCountEl = document.getElementById('recall-context-archived-count');
                 if (archivedCountEl) archivedCountEl.textContent = archivedData.total || 0;
             }
         } catch (archivedErr) {
-            // 忽略归档计数加载失败
+            console.log('[Recall] 归档计数加载失败（忽略）:', archivedErr.message);
         }
         
+        console.log(`[Recall] 持久条件加载完成，总耗时 ${Date.now() - startTime}ms`);
         taskTracker.complete(taskId, true);
         _loadPersistentContextsLoading = false;
+        _loadPersistentContextsController = null;
     } catch (e) {
+        // 如果是因为角色切换而取消，不显示错误
+        if (e.name === 'AbortError' && _loadPersistentContextsForUser !== userId) {
+            console.log('[Recall] 请求被取消（角色已切换）');
+            taskTracker.complete(taskId, true, '已切换角色');
+            return;
+        }
+        
         const errMsg = e.name === 'AbortError' ? '请求超时（30s）' : e.message;
         console.error('[Recall] 加载持久条件失败:', errMsg, `耗时 ${Date.now() - startTime}ms`);
+        console.error('[Recall] 错误详情:', e);
         taskTracker.complete(taskId, false, errMsg);
         _loadPersistentContextsLoading = false;
+        _loadPersistentContextsController = null;
     }
 }
 
