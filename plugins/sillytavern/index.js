@@ -1888,12 +1888,11 @@ function createUI() {
             e.preventDefault();
             e.stopPropagation();
             const tabName = $(this).data('tab') || $(this).attr('data-tab');
-            console.log('🎯 [Recall] 标签点击 (jQuery 委托):', tabName);
-            if (tabName && typeof handleRecallTabClick === 'function') {
-                handleRecallTabClick(tabName);
+            // 使用全局函数，确保可访问
+            if (tabName && window.recallTabClick) {
+                window.recallTabClick(tabName);
             }
         });
-        console.log('[Recall] 已使用 jQuery 设置标签点击事件委托');
     }
     console.log('[Recall] UI 已创建');
     
