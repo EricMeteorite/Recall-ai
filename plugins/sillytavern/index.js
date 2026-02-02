@@ -1729,6 +1729,7 @@ function createUI() {
             console.log(`[Recall] 点击标签页: ${tabName}, isConnected: ${isConnected}`);
             if (tabName === 'contexts' && isConnected) {
                 console.log('[Recall] 点击条件标签，准备调用 loadPersistentContexts');
+                console.log('[Recall] 当前状态: currentCharacterId=' + currentCharacterId + ', loading=' + _loadPersistentContextsLoading + ', forUser=' + _loadPersistentContextsForUser);
                 loadPersistentContexts();
             } else if (tabName === 'foreshadowing' && isConnected) {
                 loadForeshadowings();
@@ -3089,76 +3090,130 @@ function startCharacterPolling() {
             const lastCharMsg = [...chat].reverse().find(m => !m.is_user && !m.is_system);
             const chatCharName = lastCharMsg?.name;
             
-            // 方式5: 从多个 DOM 选择器获取
+            // 方式5: 从多个 DOM 选择器获取（SillyTavern 特定选择器）
             const domSelectors = [
-                '#rm_button_selected_ch h2',
+                // 聊天消息中的角色名
+                '#chat .mes:not(.is_user) .name_text',
+                '#chat .mes[is_system="false"] .name_text',
+                // 角色信息面板
+                '#character_popup .ch_name',
+                '#selected_chat_pole .ch_name',
                 '.selected_chat_block .ch_name',
-                '#selected_chat_pole .ch_name', 
+                // 右侧面板角色名
+                '#rm_button_selected_ch h2',
+                '#rm_button_selected_ch .ch_name',
+                // 角色卡选中状态
                 '.character_select.selected .ch_name',
-                '#avatar_url_pole',
-                '.mes:last-child .name_text',
-                '#chat .mes:first-child .name_text'
+                '.character_select.is_fav .ch_name',
+                // 顶部角色名显示
+                '#character_name_block',
+                '.mes_block .name_text',
             ];
             let charNameFromDOM = '';
             for (const sel of domSelectors) {
-                const el = document.querySelector(sel);
-                if (el) {
-                    const text = el.textContent?.trim() || el.title?.trim() || '';
-                    if (text && text !== 'SillyTavern System') {
-                        charNameFromDOM = text;
-                        break;
+                try {
+                    const el = document.querySelector(sel);
+                    if (el) {
+                        const text = el.textContent?.trim() || el.title?.trim() || '';
+                        // 过滤无效值：空、默认值、模板占位符
+                        if (text && 
+                            text !== 'SillyTavern System' && 
+                            text !== 'Assistant' &&
+                            text !== 'User' &&
+                            !text.includes('${') &&  // 过滤模板占位符
+                            !text.includes('{{') &&  // 过滤 Handlebars 占位符
+                            text.length > 0 &&
+                            text.length < 100) {  // 角色名不应该太长
+                            charNameFromDOM = text;
+                            break;
+                        }
                     }
-                }
+                } catch (e) { /* 选择器可能无效 */ }
             }
             
-            // 方式6: 检查 URL hash
-            const urlHash = window.location.hash;
+            // 方式6: 检查是否在聊天界面（通过 DOM 状态）
+            const chatContainer = document.querySelector('#chat');
+            const hasChatMessages = chatContainer && chatContainer.querySelectorAll('.mes').length > 0;
+            const inChatView = hasChatMessages || document.querySelector('#sheld')?.classList.contains('openDrawer');
             
-            // 方式7: 检查是否在聊天界面（通过 DOM 状态）
-            const inChatView = document.querySelector('#chat')?.children.length > 0 || 
-                              document.querySelector('#sheld')?.classList.contains('openDrawer');
+            // 方式7: 从 SillyTavern 的 getCharacters() 获取选中的角色
+            let selectedCharFromList = '';
+            try {
+                const selectedEl = document.querySelector('.character_select.selected');
+                if (selectedEl) {
+                    const nameEl = selectedEl.querySelector('.ch_name');
+                    if (nameEl) {
+                        selectedCharFromList = nameEl.textContent?.trim() || '';
+                    }
+                }
+            } catch (e) { /* 忽略 */ }
             
             let detectedCharId = null;
             
+            // 辅助函数：检查是否为有效角色名
+            const isValidCharName = (name) => {
+                return name && 
+                       name !== 'SillyTavern System' && 
+                       name !== 'Assistant' &&
+                       name !== 'User' &&
+                       !name.includes('${') &&
+                       !name.includes('{{') &&
+                       name.length > 0 &&
+                       name.length < 100;
+            };
+            
             // 优先使用 window 全局变量
             if (windowThisChid !== undefined && windowCharacters?.[windowThisChid]) {
-                detectedCharId = windowCharacters[windowThisChid].name || `char_${windowThisChid}`;
+                const name = windowCharacters[windowThisChid].name;
+                if (isValidCharName(name)) {
+                    detectedCharId = name;
+                }
             }
             // 其次使用 context.this_chid
-            else if (this_chid !== undefined && characters[this_chid]) {
-                detectedCharId = characters[this_chid].name || `char_${this_chid}`;
+            if (!detectedCharId && this_chid !== undefined && characters[this_chid]) {
+                const name = characters[this_chid].name;
+                if (isValidCharName(name)) {
+                    detectedCharId = name;
+                }
             }
             // 使用 name2（但排除默认值）
-            else if (name2 && name2 !== 'SillyTavern System' && name2 !== 'Assistant') {
+            if (!detectedCharId && isValidCharName(name2)) {
                 detectedCharId = name2;
             }
             // 使用 window.name2
-            else if (windowName2 && windowName2 !== 'SillyTavern System' && windowName2 !== 'Assistant') {
+            if (!detectedCharId && isValidCharName(windowName2)) {
                 detectedCharId = windowName2;
             }
             // 使用 context.characterId
-            else if (contextChar) {
-                detectedCharId = contextChar.name || `char_${contextCharId}`;
+            if (!detectedCharId && contextChar) {
+                const name = contextChar.name;
+                if (isValidCharName(name)) {
+                    detectedCharId = name;
+                }
             }
             // 使用群组ID
-            else if (selected_group || windowSelectedGroup) {
+            if (!detectedCharId && (selected_group || windowSelectedGroup)) {
                 detectedCharId = `group_${selected_group || windowSelectedGroup}`;
             }
             // 从聊天记录获取
-            else if (chatCharName) {
+            if (!detectedCharId && isValidCharName(chatCharName)) {
                 detectedCharId = chatCharName;
             }
+            // 从选中的角色卡获取
+            if (!detectedCharId && isValidCharName(selectedCharFromList)) {
+                detectedCharId = selectedCharFromList;
+            }
             // 从 DOM 获取
-            else if (charNameFromDOM) {
+            if (!detectedCharId && isValidCharName(charNameFromDOM)) {
                 detectedCharId = charNameFromDOM;
             }
             // 默认
-            else {
+            if (!detectedCharId) {
                 detectedCharId = 'default';
             }
             
             // 每次轮询都打印当前状态（用于诊断）
-            console.log(`[Recall] [轮询] win.this_chid=${windowThisChid}, ctx.this_chid=${this_chid}, name2=${name2}, win.name2=${windowName2}, DOM=${charNameFromDOM}, inChat=${inChatView}, detected=${detectedCharId}, last=${_lastPolledCharacterId}`);
+            console.log(`[Recall] [轮询] win.this_chid=${windowThisChid}, ctx.this_chid=${this_chid}, name2=${name2}, win.name2=${windowName2}, DOM=${charNameFromDOM}, selectedChar=${selectedCharFromList}, hasMsgs=${hasChatMessages}, detected=${detectedCharId}, last=${_lastPolledCharacterId}`);
             
             // 如果角色变化了
             if (detectedCharId && detectedCharId !== _lastPolledCharacterId) {
@@ -4645,7 +4700,10 @@ let _loadPersistentContextsRequestId = 0;      // 请求ID，用于识别当前�
 let _loadPersistentContextsTaskId = null;      // 当前的 taskId
 async function loadPersistentContexts() {
     // 【诊断】函数入口
-    console.log('[Recall] ▶▶▶ loadPersistentContexts 被调用，currentCharacterId:', currentCharacterId);
+    const callStack = new Error().stack;
+    console.log('[Recall] ▶▶▶ loadPersistentContexts 被调用');
+    console.log('[Recall] 调用栈:', callStack?.split('\n').slice(1, 4).join(' <- '));
+    console.log('[Recall] currentCharacterId:', currentCharacterId);
     
     if (!isConnected) {
         console.log('[Recall] 未连接，跳过加载持久条件');
@@ -4653,11 +4711,12 @@ async function loadPersistentContexts() {
     }
     
     const userId = encodeURIComponent(currentCharacterId || 'default');
-    console.log('[Recall] userId:', userId, '_loadPersistentContextsLoading:', _loadPersistentContextsLoading, '_loadPersistentContextsForUser:', _loadPersistentContextsForUser);
+    console.log('[Recall] userId:', userId, '_loadPersistentContextsLoading:', _loadPersistentContextsLoading, '_loadPersistentContextsForUser:', _loadPersistentContextsForUser, '_loadPersistentContextsRequestId:', _loadPersistentContextsRequestId);
     
     // 如果正在加载同一个角色的数据，跳过
     if (_loadPersistentContextsLoading && _loadPersistentContextsForUser === userId) {
         console.log('[Recall] 持久条件正在加载中（同一角色），跳过重复请求');
+        console.log('[Recall] 当前 taskId:', _loadPersistentContextsTaskId, ', requestId:', _loadPersistentContextsRequestId);
         return;
     }
     
@@ -4692,7 +4751,15 @@ async function loadPersistentContexts() {
         // 添加超时控制（30秒）
         const controller = new AbortController();  // 使用局部变量，避免闭包问题
         _loadPersistentContextsController = controller;
+        
+        // 每5秒打印一次等待状态
+        const statusIntervalId = setInterval(() => {
+            const elapsed = Math.round((Date.now() - startTime) / 1000);
+            console.log(`[Recall] 持久条件请求等待中... ${elapsed}s (requestId=${currentRequestId})`);
+        }, 5000);
+        
         const timeoutId = setTimeout(() => {
+            clearInterval(statusIntervalId);
             console.log(`[Recall] 持久条件请求超时 (requestId=${currentRequestId})，触发 abort`);
             controller.abort();  // 使用局部变量
         }, 30000);
@@ -4709,13 +4776,16 @@ async function loadPersistentContexts() {
             mode: 'cors'  // 显式设置 CORS 模式
         });
         clearTimeout(timeoutId);
+        clearInterval(statusIntervalId);
         
         console.log(`[Recall] fetch 响应到达，耗时 ${Date.now() - fetchStartTime}ms`);
         
         // 检查是否是当前有效的请求
         if (_loadPersistentContextsRequestId !== currentRequestId) {
             console.log('[Recall] 持久条件请求完成但已被新请求取代，忽略结果');
-            // taskId 已在角色切换时被完成，无需再处理
+            // 重置状态，允许下一次请求
+            _loadPersistentContextsLoading = false;
+            _loadPersistentContextsController = null;
             return;
         }
         
