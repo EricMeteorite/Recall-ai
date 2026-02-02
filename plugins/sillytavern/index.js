@@ -1726,10 +1726,10 @@ function createUI() {
             document.getElementById(`recall-tab-${tabName}`)?.classList.add('active');
             
             // 根据标签页加载对应数据
-            console.log(`[Recall] 点击标签页: ${tabName}, isConnected: ${isConnected}`);
+            console.warn(`🔔🔔🔔 [Recall] 点击标签页: ${tabName}, isConnected: ${isConnected}`);
             if (tabName === 'contexts' && isConnected) {
-                console.log('[Recall] 点击条件标签，准备调用 loadPersistentContexts');
-                console.log('[Recall] 当前状态: currentCharacterId=' + currentCharacterId + ', loading=' + _loadPersistentContextsLoading + ', forUser=' + _loadPersistentContextsForUser);
+                console.warn('🔔🔔🔔 [Recall] 点击条件标签！准备调用 loadPersistentContexts');
+                console.warn('🔔🔔🔔 [Recall] 当前状态: currentCharacterId=' + currentCharacterId + ', loading=' + _loadPersistentContextsLoading + ', forUser=' + _loadPersistentContextsForUser);
                 loadPersistentContexts();
             } else if (tabName === 'foreshadowing' && isConnected) {
                 loadForeshadowings();
@@ -4701,9 +4701,9 @@ let _loadPersistentContextsTaskId = null;      // 当前的 taskId
 async function loadPersistentContexts() {
     // 【诊断】函数入口
     const callStack = new Error().stack;
-    console.log('[Recall] ▶▶▶ loadPersistentContexts 被调用');
-    console.log('[Recall] 调用栈:', callStack?.split('\n').slice(1, 4).join(' <- '));
-    console.log('[Recall] currentCharacterId:', currentCharacterId);
+    console.warn('⭐⭐⭐ [Recall] loadPersistentContexts 函数被调用！');
+    console.warn('⭐⭐⭐ [Recall] 调用栈:', callStack?.split('\n').slice(1, 4).join(' <- '));
+    console.warn('⭐⭐⭐ [Recall] currentCharacterId:', currentCharacterId);
     
     if (!isConnected) {
         console.log('[Recall] 未连接，跳过加载持久条件');
@@ -4715,8 +4715,8 @@ async function loadPersistentContexts() {
     
     // 如果正在加载同一个角色的数据，跳过
     if (_loadPersistentContextsLoading && _loadPersistentContextsForUser === userId) {
-        console.log('[Recall] 持久条件正在加载中（同一角色），跳过重复请求');
-        console.log('[Recall] 当前 taskId:', _loadPersistentContextsTaskId, ', requestId:', _loadPersistentContextsRequestId);
+        console.warn('⚠️⚠️⚠️ [Recall] 持久条件正在加载中（同一角色），跳过重复请求！');
+        console.warn('⚠️⚠️⚠️ [Recall] 当前 taskId:', _loadPersistentContextsTaskId, ', requestId:', _loadPersistentContextsRequestId);
         return;
     }
     
@@ -4760,7 +4760,7 @@ async function loadPersistentContexts() {
         
         const timeoutId = setTimeout(() => {
             clearInterval(statusIntervalId);
-            console.log(`[Recall] 持久条件请求超时 (requestId=${currentRequestId})，触发 abort`);
+            console.error(`❌❌❌ [Recall] 持久条件请求超时！(requestId=${currentRequestId})，触发 abort`);
             controller.abort();  // 使用局部变量
         }, 30000);
         
