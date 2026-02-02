@@ -3065,21 +3065,61 @@ function startCharacterPolling() {
     
     setInterval(() => {
         try {
+            // 尝试多种方式获取当前角色
             const context = SillyTavern.getContext();
-            const characterId = context.characterId;
-            const character = characterId !== undefined ? context.characters?.[characterId] : null;
+            
+            // 方式1: 从 context
+            const contextCharId = context.characterId;
+            const contextChar = contextCharId !== undefined ? context.characters?.[contextCharId] : null;
+            
+            // 方式2: 从 SillyTavern 全局导出 (更可靠)
+            const stExports = window.SillyTavern?.getContext?.() || {};
+            const this_chid = stExports.this_chid ?? context.this_chid;
+            const characters = stExports.characters ?? context.characters ?? [];
+            const name2 = stExports.name2 ?? context.name2;
+            const selected_group = stExports.selected_group ?? context.selected_group ?? context.groupId;
+            
+            // 方式3: 从 chat 数组获取角色名
+            const chat = context.chat || [];
+            const lastCharMsg = [...chat].reverse().find(m => !m.is_user && !m.is_system);
+            const chatCharName = lastCharMsg?.name;
+            
+            // 方式4: 从 DOM 获取
+            const charNameFromDOM = document.querySelector('#rm_button_selected_ch h2')?.textContent?.trim();
             
             let detectedCharId = null;
-            if (character) {
-                detectedCharId = character.name || `char_${characterId}`;
-            } else if (context.groupId) {
-                detectedCharId = `group_${context.groupId}`;
-            } else {
+            
+            // 优先使用 name2（当前对话角色名）
+            if (name2 && name2 !== 'SillyTavern System' && name2 !== 'Assistant') {
+                detectedCharId = name2;
+            }
+            // 其次使用 this_chid + characters
+            else if (this_chid !== undefined && characters[this_chid]) {
+                detectedCharId = characters[this_chid].name || `char_${this_chid}`;
+            }
+            // 然后使用 context.characterId
+            else if (contextChar) {
+                detectedCharId = contextChar.name || `char_${contextCharId}`;
+            }
+            // 使用群组ID
+            else if (selected_group) {
+                detectedCharId = `group_${selected_group}`;
+            }
+            // 从聊天记录获取
+            else if (chatCharName) {
+                detectedCharId = chatCharName;
+            }
+            // 从 DOM 获取
+            else if (charNameFromDOM) {
+                detectedCharId = charNameFromDOM;
+            }
+            // 默认
+            else {
                 detectedCharId = 'default';
             }
             
             // 每次轮询都打印当前状态（用于诊断）
-            console.log(`[Recall] [轮询] context.characterId=${characterId}, character=${character?.name}, detectedCharId=${detectedCharId}, lastPolled=${_lastPolledCharacterId}, currentCharacterId=${currentCharacterId}`);
+            console.log(`[Recall] [轮询] name2=${name2}, this_chid=${this_chid}, chatCharName=${chatCharName}, DOM=${charNameFromDOM}, detected=${detectedCharId}, last=${_lastPolledCharacterId}, current=${currentCharacterId}`);
             
             // 如果角色变化了
             if (detectedCharId && detectedCharId !== _lastPolledCharacterId) {
@@ -3093,7 +3133,7 @@ function startCharacterPolling() {
                 }
             }
         } catch (e) {
-            // 静默失败
+            console.warn('[Recall] [轮询] 错误:', e.message);
         }
     }, 1000); // 每1秒检查一次
 }
