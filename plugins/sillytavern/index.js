@@ -198,8 +198,45 @@
                 apiUrl: pluginSettings.apiUrl,
                 isConnected,
                 currentCharacterId,
-                isInitialized
+                isInitialized,
+                // 从全局变量获取加载状态（这些变量在 IIFE 外部定义）
+                persistentContexts: {
+                    loading: typeof _loadPersistentContextsLoading !== 'undefined' ? _loadPersistentContextsLoading : 'N/A',
+                    forUser: typeof _loadPersistentContextsForUser !== 'undefined' ? _loadPersistentContextsForUser : 'N/A',
+                    requestId: typeof _loadPersistentContextsRequestId !== 'undefined' ? _loadPersistentContextsRequestId : 'N/A',
+                    taskId: typeof _loadPersistentContextsTaskId !== 'undefined' ? _loadPersistentContextsTaskId : 'N/A'
+                },
+                foreshadowings: {
+                    loading: typeof _loadForeshadowingsLoading !== 'undefined' ? _loadForeshadowingsLoading : 'N/A',
+                    forUser: typeof _loadForeshadowingsForUser !== 'undefined' ? _loadForeshadowingsForUser : 'N/A',
+                    requestId: typeof _loadForeshadowingsRequestId !== 'undefined' ? _loadForeshadowingsRequestId : 'N/A'
+                }
             };
+        },
+        // 手动触发加载持久条件
+        loadContexts: function() {
+            console.log('[Recall Debug] 手动触发 loadPersistentContexts');
+            if (typeof loadPersistentContexts === 'function') {
+                loadPersistentContexts();
+            } else {
+                console.error('[Recall Debug] loadPersistentContexts 函数不可用');
+            }
+        },
+        // 重置加载状态（用于调试卡住的情况）
+        resetLoadingState: function() {
+            console.log('[Recall Debug] 重置加载状态');
+            if (typeof _loadPersistentContextsLoading !== 'undefined') {
+                _loadPersistentContextsLoading = false;
+                _loadPersistentContextsController = null;
+                _loadPersistentContextsForUser = null;
+                _loadPersistentContextsTaskId = null;
+            }
+            if (typeof _loadForeshadowingsLoading !== 'undefined') {
+                _loadForeshadowingsLoading = false;
+                _loadForeshadowingsController = null;
+                _loadForeshadowingsForUser = null;
+            }
+            console.log('[Recall Debug] 状态已重置');
         }
     };
 
