@@ -1881,18 +1881,20 @@ function createUI() {
         extensionContainer.insertAdjacentHTML('beforeend', extensionHtml);
     }
     
-    // 使用 jQuery 事件委托（SillyTavern 已加载 jQuery，比原生更可靠）
-    if (!window._recallTabClickBound && typeof $ !== 'undefined') {
+    // 使用捕获阶段的事件委托（某些父元素会阻止冒泡，所以必须用捕获阶段）
+    if (!window._recallTabClickBound) {
         window._recallTabClickBound = true;
-        $(document).on('click', '.recall-tab', function(e) {
-            e.preventDefault();
-            e.stopPropagation();
-            const tabName = $(this).data('tab') || $(this).attr('data-tab');
-            // 使用全局函数，确保可访问
-            if (tabName && window.recallTabClick) {
-                window.recallTabClick(tabName);
+        document.addEventListener('click', function(e) {
+            const tab = e.target.closest('.recall-tab');
+            if (tab) {
+                e.preventDefault();
+                e.stopPropagation();
+                const tabName = tab.dataset?.tab || tab.getAttribute('data-tab');
+                if (tabName && window.recallTabClick) {
+                    window.recallTabClick(tabName);
+                }
             }
-        });
+        }, true);  // 捕获阶段！
     }
     console.log('[Recall] UI 已创建');
     
