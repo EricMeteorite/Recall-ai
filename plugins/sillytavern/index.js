@@ -1881,8 +1881,19 @@ function createUI() {
         extensionContainer.insertAdjacentHTML('beforeend', extensionHtml);
     }
     
-    // 标签点击事件由全局 document mousedown 监听器处理，无需单独绑定
-    console.log('[Recall] UI 已创建，标签点击由全局 mousedown 监听器处理');
+    // 绑定标签点击事件（CSP 阻止 inline onclick，必须用 addEventListener）
+    document.querySelectorAll('.recall-tab').forEach(tab => {
+        tab.addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            const tabName = this.dataset?.tab || this.getAttribute('data-tab');
+            console.log('🎯 [Recall] 标签点击 (addEventListener):', tabName);
+            if (tabName && typeof handleRecallTabClick === 'function') {
+                handleRecallTabClick(tabName);
+            }
+        });
+    });
+    console.log('[Recall] UI 已创建，已为', document.querySelectorAll('.recall-tab').length, '个标签绑定 click 事件');
     
     // 辅助函数：防抖
     function debounce(fn, delay) {
