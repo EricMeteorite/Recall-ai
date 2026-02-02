@@ -515,46 +515,70 @@
     window.recallTabClick = handleRecallTabClick;
     console.log('[Recall] handleRecallTabClick 已注入到 window._recallTabClickImpl 和 window.recallTabClick');
     
-    // ============== 全局点击诊断 ==============
-    // 首先确认点击事件是否到达 document
-    document.addEventListener('click', function(e) {
-        // 记录所有点击
-        console.log('🌍 [全局点击]', e.target.tagName, e.target.className?.substring?.(0, 50) || '');
-    }, true);
+    // ============== 直接在 dialog 内绑定事件 ==============
+    // SillyTavern 把扩展设置放在 <dialog> 弹窗里，事件不会冒泡到 document
+    // 所以必须直接在 dialog 内部或标签本身绑定事件
     
-    // ============== 使用 jQuery 事件委托 ==============
-    jQuery(document).on('click', '.recall-tab', function(e) {
-        console.warn('🔥🔥🔥 [Recall] jQuery 委托点击:', this.dataset?.tab);
-        e.preventDefault();
-        e.stopPropagation();
-        const tabName = this.dataset?.tab || this.getAttribute('data-tab');
-        if (tabName) {
-            handleRecallTabClick(tabName);
+    function bindRecallTabEvents(container) {
+        const tabs = container.querySelectorAll('.recall-tab');
+        let bound = 0;
+        tabs.forEach(tab => {
+            if (tab._recallBound) return;
+            tab._recallBound = true;
+            bound++;
+            
+            // 直接绑定 click 事件
+            tab.addEventListener('click', function(e) {
+                console.log('🎯 [Recall] 标签点击:', this.dataset?.tab);
+                e.preventDefault();
+                e.stopPropagation();
+                const tabName = this.dataset?.tab || this.getAttribute('data-tab');
+                if (tabName) {
+                    handleRecallTabClick(tabName);
+                }
+            }, true);
+        });
+        if (bound > 0) {
+            console.log(`[Recall] 在容器内绑定了 ${bound} 个标签事件`);
         }
-        return false;
+    }
+    
+    // 监控 DOM 变化，当 dialog 打开时绑定事件
+    const dialogObserver = new MutationObserver((mutations) => {
+        for (const mutation of mutations) {
+            for (const node of mutation.addedNodes) {
+                if (node.nodeType !== 1) continue;
+                
+                // 检查是否是 dialog 或包含 recall-tab
+                if (node.tagName === 'DIALOG' || node.matches?.('dialog')) {
+                    console.log('[Recall] 检测到 dialog 打开，绑定事件...');
+                    bindRecallTabEvents(node);
+                }
+                
+                // 检查子元素
+                const dialogs = node.querySelectorAll?.('dialog');
+                dialogs?.forEach(d => bindRecallTabEvents(d));
+                
+                // 也检查 recall-tab 本身
+                if (node.classList?.contains('recall-tab')) {
+                    bindRecallTabEvents(node.parentElement || document);
+                }
+                const tabs = node.querySelectorAll?.('.recall-tab');
+                if (tabs?.length) {
+                    bindRecallTabEvents(node);
+                }
+            }
+        }
     });
-    console.log('[Recall] jQuery 事件委托已绑定到 document');
     
-    // ============== 强制 CSS 确保可点击 ==============
-    const forceClickableStyle = document.createElement('style');
-    forceClickableStyle.textContent = `
-        .recall-tab {
-            pointer-events: auto !important;
-            cursor: pointer !important;
-            position: relative !important;
-            z-index: 9999 !important;
-        }
-        .recall-tab:active {
-            background: red !important;
-        }
-        .recall-tabs {
-            pointer-events: auto !important;
-            position: relative !important;
-            z-index: 9998 !important;
-        }
-    `;
-    document.head.appendChild(forceClickableStyle);
-    console.log('[Recall] 强制可点击 CSS 已注入');
+    dialogObserver.observe(document.body, {
+        childList: true,
+        subtree: true
+    });
+    console.log('[Recall] Dialog MutationObserver 已启动');
+    
+    // 同时也绑定到现有的 dialog
+    document.querySelectorAll('dialog').forEach(d => bindRecallTabEvents(d));
     
     // ============== 暴露调试函数 ==============
     window.recallDebug = {
@@ -563,7 +587,7 @@
             console.log(`找到 ${tabs.length} 个 .recall-tab 元素:`);
             tabs.forEach((t, i) => {
                 const rect = t.getBoundingClientRect();
-                console.log(`  ${i}: data-tab="${t.dataset.tab}", 可见=${rect.width > 0 && rect.height > 0}, 位置=(${rect.left.toFixed(0)}, ${rect.top.toFixed(0)})`);
+                console.log(`  ${i}: data-tab="${t.dataset.tab}", bound=${!!t._recallBound}, 可见=${rect.width > 0 && rect.height > 0}, 位置=(${rect.left.toFixed(0)}, ${rect.top.toFixed(0)})`);
             });
             return tabs;
         },
@@ -571,17 +595,14 @@
             console.log(`手动调用 handleRecallTabClick('${name}')`);
             handleRecallTabClick(name);
         },
-        testClick: () => {
-            const tab = document.querySelector('.recall-tab[data-tab="contexts"]');
-            if (tab) {
-                console.log('模拟点击 contexts 标签');
-                tab.click();
-            } else {
-                console.log('未找到 contexts 标签');
-            }
+        bindAll: () => {
+            // 强制绑定所有标签
+            document.querySelectorAll('dialog, .popup, #recall-extension').forEach(c => bindRecallTabEvents(c));
+            bindRecallTabEvents(document.body);
+            console.log('已强制绑定所有标签');
         }
     };
-    console.log('[Recall] 调试函数已暴露: window.recallDebug.listTabs(), window.recallDebug.clickTab("contexts"), window.recallDebug.testClick()');
+    console.log('[Recall] 调试函数已暴露: recallDebug.listTabs(), recallDebug.clickTab("contexts"), recallDebug.bindAll()');
 
     /**
      * 初始化插件
