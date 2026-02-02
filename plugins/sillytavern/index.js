@@ -4220,14 +4220,23 @@ function updateLoadMoreButton() {
 
 /**
  * 加载伏笔列表
+ * 添加防重入机制，避免多次并发请求
  */
+let _loadForeshadowingsLoading = false;
 async function loadForeshadowings() {
     if (!isConnected) return;
     
+    // 防重入：如果正在加载，跳过
+    if (_loadForeshadowingsLoading) {
+        console.log('[Recall] 伏笔正在加载中，跳过重复请求');
+        return;
+    }
+    _loadForeshadowingsLoading = true;
+    
     try {
-        // 添加超时控制（15秒，避免服务器繁忙时误报）
+        // 添加超时控制（30秒，避免网络延迟导致误报）
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 15000);
+        const timeoutId = setTimeout(() => controller.abort(), 30000);
         
         const userId = encodeURIComponent(currentCharacterId || 'default');
         const response = await fetch(`${pluginSettings.apiUrl}/v1/foreshadowing?user_id=${userId}&character_id=${userId}`, {
@@ -4260,9 +4269,11 @@ async function loadForeshadowings() {
         } catch (archivedErr) {
             // 忽略归档计数加载失败
         }
+        _loadForeshadowingsLoading = false;
     } catch (e) {
         const errMsg = e.name === 'AbortError' ? '请求超时' : e.message;
         console.error('[Recall] 加载伏笔失败:', errMsg);
+        _loadForeshadowingsLoading = false;
     }
 }
 
@@ -4301,22 +4312,37 @@ async function onClearAllForeshadowings() {
 
 /**
  * 加载持久条件列表
+ * 添加防重入机制，避免多次并发请求
  */
+let _loadPersistentContextsLoading = false;
 async function loadPersistentContexts() {
     if (!isConnected) return;
     
+    // 防重入：如果正在加载，跳过
+    if (_loadPersistentContextsLoading) {
+        console.log('[Recall] 持久条件正在加载中，跳过重复请求');
+        return;
+    }
+    _loadPersistentContextsLoading = true;
+    
     const taskId = taskTracker.add('load', '加载持久条件');
+    const startTime = Date.now();
     
     try {
-        // 添加超时控制（15秒，避免服务器繁忙时误报）
+        // 添加超时控制（30秒，避免网络延迟导致误报）
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 15000);
+        const timeoutId = setTimeout(() => controller.abort(), 30000);
         
         const userId = encodeURIComponent(currentCharacterId || 'default');
-        const response = await fetch(`${pluginSettings.apiUrl}/v1/persistent-contexts?user_id=${userId}&character_id=${userId}`, {
+        const url = `${pluginSettings.apiUrl}/v1/persistent-contexts?user_id=${userId}&character_id=${userId}`;
+        console.log('[Recall] 开始加载持久条件:', url);
+        
+        const response = await fetch(url, {
             signal: controller.signal
         });
         clearTimeout(timeoutId);
+        
+        console.log(`[Recall] 持久条件请求完成，耗时 ${Date.now() - startTime}ms`);
         
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}`);
@@ -4342,10 +4368,12 @@ async function loadPersistentContexts() {
         }
         
         taskTracker.complete(taskId, true);
+        _loadPersistentContextsLoading = false;
     } catch (e) {
-        const errMsg = e.name === 'AbortError' ? '请求超时' : e.message;
-        console.error('[Recall] 加载持久条件失败:', errMsg);
+        const errMsg = e.name === 'AbortError' ? '请求超时（30s）' : e.message;
+        console.error('[Recall] 加载持久条件失败:', errMsg, `耗时 ${Date.now() - startTime}ms`);
         taskTracker.complete(taskId, false, errMsg);
+        _loadPersistentContextsLoading = false;
     }
 }
 
