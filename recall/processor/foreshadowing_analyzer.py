@@ -392,10 +392,13 @@ Important:
         
         try:
             from ..utils.llm_client import LLMClient
+            import os
+            llm_timeout = float(os.environ.get('LLM_TIMEOUT', '60'))
             self._llm_client = LLMClient(
                 model=self.config.llm_model,
                 api_key=self.config.llm_api_key,
-                api_base=self.config.llm_base_url
+                api_base=self.config.llm_base_url,
+                timeout=llm_timeout
             )
         except ImportError as e:
             _safe_print(f"[Recall] 警告：LLM 客户端初始化失败: {e}")

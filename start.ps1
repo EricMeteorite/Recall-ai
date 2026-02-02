@@ -137,7 +137,7 @@ function Import-ApiKeys {
         'EMBEDDING_RATE_LIMIT', 'EMBEDDING_RATE_WINDOW',
         'RECALL_EMBEDDING_MODE',
         # LLM 配置
-        'LLM_API_KEY', 'LLM_API_BASE', 'LLM_MODEL',
+        'LLM_API_KEY', 'LLM_API_BASE', 'LLM_MODEL', 'LLM_TIMEOUT',
         # 伏笔分析器配置
         'FORESHADOWING_LLM_ENABLED', 'FORESHADOWING_TRIGGER_INTERVAL',
         'FORESHADOWING_AUTO_PLANT', 'FORESHADOWING_AUTO_RESOLVE',
@@ -293,6 +293,10 @@ RECALL_EMBEDDING_MODE=auto
 LLM_API_KEY=
 LLM_API_BASE=
 LLM_MODEL=
+
+# LLM 请求超时时间（秒），复杂请求（如大量实体关系提取）可能需要更长时间
+# LLM request timeout (seconds), complex requests may need more time
+LLM_TIMEOUT=60
 
 # ╔══════════════════════════════════════════════════════════════════════════╗
 # ║  ⚙️ 可选配置 - OPTIONAL CONFIGURATION (以下内容可保持默认值)              ║

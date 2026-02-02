@@ -45,6 +45,7 @@ EMBEDDING_MODEL=text-embedding-3-small
 LLM_API_KEY=your-key
 LLM_API_BASE=https://api.openai.com/v1
 LLM_MODEL=gpt-4o-mini
+LLM_TIMEOUT=60  # LLM 请求超时时间（秒），复杂关系提取可能需要较长时间
 ```
 
 支持的 Embedding 服务: OpenAI / SiliconFlow / Ollama / 任何 OpenAI 兼容 API
