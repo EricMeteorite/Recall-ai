@@ -3007,6 +3007,10 @@ function registerEventHandlers(context) {
         CHARACTER_MESSAGE_RENDERED: event_types?.CHARACTER_MESSAGE_RENDERED,
     });
     
+    // 诊断：检查 eventSource 是否是 EventEmitter
+    console.log('[Recall] eventSource:', eventSource);
+    console.log('[Recall] eventSource.on 类型:', typeof eventSource?.on);
+    
     if (eventSource && event_types) {
         // 使用安全包装的事件处理器
         eventSource.on(event_types.MESSAGE_SENT, safeExecute(onMessageSent, '处理发送消息失败'));
@@ -3039,9 +3043,56 @@ function registerEventHandlers(context) {
         setTimeout(() => {
             initializeCurrentCharacter();
         }, 500);
+        
+        // 备用方案：轮询检测角色变化（每2秒检查一次）
+        // 因为事件系统似乎不总是工作
+        startCharacterPolling();
     } else {
-        console.warn('[Recall] SillyTavern 事件系统不可用，自动记忆功能将不可用');
+        console.warn('[Recall] SillyTavern 事件系统不可用，启用轮询模式');
+        // 即使事件系统不可用，也启动轮询
+        startCharacterPolling();
     }
+}
+
+// 用于轮询检测的上一个角色ID
+let _lastPolledCharacterId = null;
+
+/**
+ * 启动角色变化轮询检测
+ */
+function startCharacterPolling() {
+    console.log('[Recall] 启动角色变化轮询检测');
+    
+    setInterval(() => {
+        try {
+            const context = SillyTavern.getContext();
+            const characterId = context.characterId;
+            const character = characterId !== undefined ? context.characters?.[characterId] : null;
+            
+            let detectedCharId = null;
+            if (character) {
+                detectedCharId = character.name || `char_${characterId}`;
+            } else if (context.groupId) {
+                detectedCharId = `group_${context.groupId}`;
+            } else {
+                detectedCharId = 'default';
+            }
+            
+            // 如果角色变化了
+            if (detectedCharId && detectedCharId !== _lastPolledCharacterId) {
+                console.log(`[Recall] [轮询] 检测到角色变化: ${_lastPolledCharacterId} -> ${detectedCharId}`);
+                _lastPolledCharacterId = detectedCharId;
+                
+                // 触发角色切换处理
+                if (currentCharacterId !== detectedCharId) {
+                    console.log('[Recall] [轮询] 触发 onChatChanged');
+                    onChatChanged();
+                }
+            }
+        } catch (e) {
+            // 静默失败
+        }
+    }, 2000); // 每2秒检查一次
 }
 
 /**
