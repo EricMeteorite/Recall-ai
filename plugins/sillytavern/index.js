@@ -466,6 +466,7 @@
                 case 'sync': return '🔄';
                 case 'config': return '⚙️';
                 case 'load': return '📥';
+                case 'backend': return '⚙️';  // 后端任务通用图标
                 default: return '📋';
             }
         },
@@ -478,6 +479,177 @@
                 case 'error': return '失败';
                 default: return status;
             }
+        },
+        
+        // ========== 后端任务追踪 ==========
+        _backendPollingIntervalId: null,
+        _backendTasks: new Map(),  // 后端任务缓存
+        _backendPollingInterval: 300,  // 轮询间隔（毫秒）
+        
+        /**
+         * 启动后端任务轮询
+         */
+        startBackendPolling() {
+            if (this._backendPollingIntervalId) return;
+            
+            console.log('[Recall] [TaskTracker] 启动后端任务轮询');
+            this._backendPollingIntervalId = setInterval(() => {
+                this._fetchBackendTasks();
+            }, this._backendPollingInterval);
+            
+            // 立即执行一次
+            this._fetchBackendTasks();
+        },
+        
+        /**
+         * 停止后端任务轮询
+         */
+        stopBackendPolling() {
+            if (this._backendPollingIntervalId) {
+                clearInterval(this._backendPollingIntervalId);
+                this._backendPollingIntervalId = null;
+                console.log('[Recall] [TaskTracker] 停止后端任务轮询');
+            }
+        },
+        
+        /**
+         * 获取后端任务
+         */
+        async _fetchBackendTasks() {
+            // 检查 API URL 是否已配置
+            if (!pluginSettings.apiUrl) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${pluginSettings.apiUrl}/v1/tasks/active`, {
+                    method: 'GET',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                
+                if (!response.ok) return;
+                
+                const data = await response.json();
+                if (!data.success || !data.tasks) return;
+                
+                // 更新后端任务缓存
+                const newTaskIds = new Set();
+                for (const backendTask of data.tasks) {
+                    newTaskIds.add(backendTask.id);
+                    
+                    // 检查是否是新任务或状态变化
+                    const existing = this._backendTasks.get(backendTask.id);
+                    if (!existing || existing.status !== backendTask.status || existing.progress !== backendTask.progress) {
+                        this._backendTasks.set(backendTask.id, backendTask);
+                        this._syncBackendTaskToUI(backendTask);
+                    }
+                }
+                
+                // 移除已完成的后端任务
+                for (const [id, task] of this._backendTasks) {
+                    if (!newTaskIds.has(id)) {
+                        this._backendTasks.delete(id);
+                        // 从前端任务列表中移除对应的任务
+                        for (const [frontendId, frontendTask] of this.tasks) {
+                            if (frontendTask._backendTaskId === id) {
+                                this.complete(frontendId, true, task.message || '完成');
+                                break;
+                            }
+                        }
+                    }
+                }
+                
+                // 如果没有活动任务，停止轮询
+                if (data.tasks.length === 0 && this.getActiveCount() === 0) {
+                    this.stopBackendPolling();
+                }
+            } catch (e) {
+                // 静默失败，不影响 UI
+            }
+        },
+        
+        /**
+         * 同步后端任务到 UI
+         */
+        _syncBackendTaskToUI(backendTask) {
+            // 查找是否已有对应的前端任务
+            let frontendTaskId = null;
+            for (const [id, task] of this.tasks) {
+                if (task._backendTaskId === backendTask.id) {
+                    frontendTaskId = id;
+                    break;
+                }
+            }
+            
+            // 映射后端任务类型到前端显示类型
+            const typeMap = {
+                'dedup_check': 'backend',
+                'entity_extraction': 'backend',
+                'consistency_check': 'backend',
+                'contradiction_detection': 'backend',
+                'knowledge_graph': 'backend',
+                'index_update': 'backend',
+                'memory_save': 'backend',
+                'foreshadow_analysis': 'backend',
+                'context_extraction': 'backend',
+                'llm_call': 'backend',
+                'embedding': 'backend',
+                'search': 'backend',
+                'maintenance': 'backend'
+            };
+            
+            // 映射后端状态到前端状态
+            const statusMap = {
+                'pending': 'pending',
+                'running': 'running',
+                'completed': 'success',
+                'failed': 'error',
+                'cancelled': 'error'
+            };
+            
+            if (frontendTaskId) {
+                // 更新现有任务
+                this.update(frontendTaskId, {
+                    detail: backendTask.message || '',
+                    status: statusMap[backendTask.status] || 'running',
+                    progress: backendTask.progress
+                });
+            } else if (backendTask.status === 'running' || backendTask.status === 'pending') {
+                // 创建新的前端任务显示
+                const taskId = ++this.taskIdCounter;
+                this.tasks.set(taskId, {
+                    type: typeMap[backendTask.type] || 'backend',
+                    title: `[后端] ${backendTask.name}`,
+                    detail: backendTask.message || '',
+                    status: statusMap[backendTask.status] || 'running',
+                    startTime: backendTask.started_at ? backendTask.started_at * 1000 : Date.now(),
+                    progress: backendTask.progress,
+                    _backendTaskId: backendTask.id  // 标记为后端任务
+                });
+                this._updateUI();
+            }
+        },
+        
+        /**
+         * 获取后端任务图标
+         */
+        _getBackendIcon(backendType) {
+            const iconMap = {
+                'dedup_check': '🔍',
+                'entity_extraction': '🏷️',
+                'consistency_check': '⚖️',
+                'contradiction_detection': '⚡',
+                'knowledge_graph': '🕸️',
+                'index_update': '📊',
+                'memory_save': '💾',
+                'foreshadow_analysis': '🔮',
+                'context_extraction': '📋',
+                'llm_call': '🤖',
+                'embedding': '🧮',
+                'search': '🔎',
+                'maintenance': '🔧'
+            };
+            return iconMap[backendType] || '⚙️';
         }
     };
 
@@ -3856,6 +4028,9 @@ function notifyForeshadowingAnalyzer(content, role) {
     // 添加任务跟踪
     const taskId = taskTracker.add('foreshadow', '伏笔分析', role === 'user' ? '用户消息' : 'AI回复');
     
+    // 启动后端任务轮询（观察后端处理进度）
+    taskTracker.startBackendPolling();
+    
     fetch(`${pluginSettings.apiUrl}/v1/foreshadowing/analyze/turn`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -3940,6 +4115,9 @@ const memorySaveQueue = {
         
         // 添加任务跟踪
         const taskId = taskTracker.add('memory-save', '保存记忆', `队列剩余: ${this.queue.length}`);
+        
+        // 启动后端任务轮询（观察后端处理进度）
+        taskTracker.startBackendPolling();
         
         try {
             const response = await fetch(`${pluginSettings.apiUrl}/v1/memories`, {

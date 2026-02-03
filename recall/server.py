@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from .version import __version__
 from .engine import RecallEngine
+from .utils.task_manager import get_task_manager, TaskType
 
 # Windows GBK 编码兼容的安全打印函数
 def _safe_print(msg: str) -> None:
@@ -1353,6 +1354,141 @@ async def health():
     }
 
 
+# ==================== 任务追踪 API ====================
+
+@app.get("/v1/tasks/active", tags=["Tasks"])
+async def get_active_tasks(
+    user_id: Optional[str] = Query(default=None, description="按用户ID过滤"),
+    character_id: Optional[str] = Query(default=None, description="按角色ID过滤"),
+    task_type: Optional[str] = Query(default=None, description="按任务类型过滤")
+):
+    """获取当前活动任务列表
+    
+    返回后端正在执行的任务，包括：
+    - 去重检查 (dedup_check)
+    - 实体提取 (entity_extraction)
+    - 一致性检查 (consistency_check)
+    - 矛盾检测 (contradiction_detection)
+    - 知识图谱更新 (knowledge_graph)
+    - 索引更新 (index_update)
+    - 伏笔分析 (foreshadow_analysis)
+    - 条件提取 (context_extraction)
+    
+    前端可通过轮询此端点获取任务状态，建议轮询间隔 200-500ms。
+    """
+    task_manager = get_task_manager()
+    
+    # 解析任务类型
+    filter_type = None
+    if task_type:
+        try:
+            filter_type = TaskType(task_type)
+        except ValueError:
+            pass  # 忽略无效的任务类型
+    
+    tasks = task_manager.get_active_tasks(
+        user_id=user_id,
+        character_id=character_id,
+        task_type=filter_type
+    )
+    
+    return {
+        "success": True,
+        "tasks": [t.to_dict() for t in tasks],
+        "count": len(tasks),
+        "timestamp": time.time()
+    }
+
+
+@app.get("/v1/tasks/recent", tags=["Tasks"])
+async def get_recent_tasks(
+    limit: int = Query(default=20, description="返回数量限制", ge=1, le=100),
+    include_active: bool = Query(default=True, description="是否包含活动任务"),
+    include_completed: bool = Query(default=True, description="是否包含已完成任务")
+):
+    """获取最近的任务列表
+    
+    返回最近创建的任务（包括已完成的），用于查看历史任务状态。
+    """
+    task_manager = get_task_manager()
+    
+    tasks = task_manager.get_recent_tasks(
+        limit=limit,
+        include_active=include_active,
+        include_completed=include_completed
+    )
+    
+    return {
+        "success": True,
+        "tasks": [t.to_dict() for t in tasks],
+        "count": len(tasks),
+        "timestamp": time.time()
+    }
+
+
+@app.get("/v1/tasks/{task_id}", tags=["Tasks"])
+async def get_task(task_id: str):
+    """获取指定任务详情"""
+    task_manager = get_task_manager()
+    task = task_manager.get_task(task_id)
+    
+    if not task:
+        raise HTTPException(status_code=404, detail=f"任务不存在: {task_id}")
+    
+    return {
+        "success": True,
+        "task": task.to_dict()
+    }
+
+
+@app.delete("/v1/tasks/completed", tags=["Tasks"])
+async def clear_completed_tasks():
+    """清除已完成任务记录
+    
+    清除内存中的已完成任务记录，不影响活动任务。
+    """
+    task_manager = get_task_manager()
+    task_manager.clear_completed_tasks()
+    
+    return {
+        "success": True,
+        "message": "已完成任务记录已清除"
+    }
+
+
+@app.get("/v1/tasks/config", tags=["Tasks"])
+async def get_task_config():
+    """获取任务追踪配置"""
+    task_manager = get_task_manager()
+    
+    return {
+        "success": True,
+        "config": {
+            "enabled": task_manager.is_enabled(),
+            "max_completed_tasks": task_manager._max_completed_tasks
+        }
+    }
+
+
+@app.put("/v1/tasks/config", tags=["Tasks"])
+async def update_task_config(
+    enabled: Optional[bool] = Body(default=None, description="是否启用任务追踪")
+):
+    """更新任务追踪配置"""
+    task_manager = get_task_manager()
+    
+    if enabled is not None:
+        task_manager.set_enabled(enabled)
+        _safe_print(f"[Tasks] 任务追踪已{'启用' if enabled else '禁用'}")
+    
+    return {
+        "success": True,
+        "config": {
+            "enabled": task_manager.is_enabled()
+        }
+    }
+
+
 # ==================== 记忆管理 API ====================
 
 @app.post("/v1/memories", response_model=AddMemoryResponse, tags=["Memories"])
@@ -2349,6 +2485,17 @@ async def _background_foreshadowing_analysis(engine: RecallEngine, content: str,
     """
     # 统一使用 LLM_TIMEOUT 配置
     llm_timeout = _get_llm_timeout()
+    task_manager = get_task_manager()
+    
+    # 创建伏笔分析任务
+    foreshadow_task = task_manager.create_task(
+        task_type=TaskType.FORESHADOW_ANALYSIS,
+        name="伏笔分析",
+        user_id=user_id,
+        character_id=character_id,
+        metadata={'role': role, 'content_length': len(content)}
+    )
+    task_manager.start_task(foreshadow_task.id, "后台分析中...")
     
     try:
         content_preview = content[:60].replace('\n', ' ') if len(content) > 60 else content.replace('\n', ' ')
@@ -2358,6 +2505,7 @@ async def _background_foreshadowing_analysis(engine: RecallEngine, content: str,
         loop = asyncio.get_event_loop()
         
         # 1. 伏笔分析
+        task_manager.update_task(foreshadow_task.id, progress=0.3, message="执行伏笔分析...")
         foreshadow_result = await asyncio.wait_for(
             loop.run_in_executor(
                 None,
@@ -2374,12 +2522,30 @@ async def _background_foreshadowing_analysis(engine: RecallEngine, content: str,
             _safe_print(f"[Recall][Foreshadow] ✅ 分析完成: 新伏笔={len(foreshadow_result.new_foreshadowings)}, 可能解决={len(foreshadow_result.potentially_resolved)}")
             for f in foreshadow_result.new_foreshadowings[:2]:
                 _safe_print(f"[Recall][Foreshadow]    🌱 新伏笔: {f[:50]}..." if len(f) > 50 else f"[Recall][Foreshadow]    🌱 新伏笔: {f}")
+            task_manager.update_task(foreshadow_task.id, progress=0.6, message=f"发现 {len(foreshadow_result.new_foreshadowings)} 个新伏笔")
         else:
             _safe_print(f"[Recall][Foreshadow] ⏭️ 未达触发条件")
+            task_manager.update_task(foreshadow_task.id, progress=0.6, message="未达触发条件")
         if foreshadow_result.error:
             _safe_print(f"[Recall][Foreshadow] ⚠️ 警告: {foreshadow_result.error}")
         
+        # 完成伏笔分析任务
+        task_manager.complete_task(foreshadow_task.id, "伏笔分析完成", {
+            'triggered': foreshadow_result.triggered,
+            'new_count': len(foreshadow_result.new_foreshadowings),
+            'resolved_count': len(foreshadow_result.potentially_resolved)
+        })
+        
         # 2. 条件提取（使用同样的触发间隔机制）
+        # 创建条件提取任务
+        context_task = task_manager.create_task(
+            task_type=TaskType.CONTEXT_EXTRACTION,
+            name="条件提取",
+            user_id=user_id,
+            character_id=character_id
+        )
+        task_manager.start_task(context_task.id, "提取持久条件...")
+        
         try:
             context_result = await asyncio.wait_for(
                 loop.run_in_executor(
@@ -2392,18 +2558,30 @@ async def _background_foreshadowing_analysis(engine: RecallEngine, content: str,
                 _safe_print(f"[Recall][Context] ✅ 提取完成: 新条件={context_result.get('extracted_count', 0)}")
                 for ctx in context_result.get('extracted', [])[:3]:
                     _safe_print(f"[Recall][Context]    🌱 [{ctx['type']}] {ctx['content'][:40]}..." if len(ctx['content']) > 40 else f"[Recall][Context]    🌱 [{ctx['type']}] {ctx['content']}")
+                task_manager.complete_task(context_task.id, f"提取 {context_result.get('extracted_count', 0)} 个条件", {
+                    'triggered': True,
+                    'extracted_count': context_result.get('extracted_count', 0)
+                })
             else:
                 turns_left = context_result.get('turns_until_next', '?')
                 _safe_print(f"[Recall][Context] ⏭️ 未达触发条件 (还需 {turns_left} 轮)")
+                task_manager.complete_task(context_task.id, f"未达触发条件 (还需 {turns_left} 轮)", {
+                    'triggered': False,
+                    'turns_until_next': turns_left
+                })
         except asyncio.TimeoutError:
             _safe_print(f"[Recall][Context] ⏱️ 条件提取超时 (>{llm_timeout}s)")
+            task_manager.fail_task(context_task.id, f"超时 (>{llm_timeout}s)")
         except Exception as e:
             _safe_print(f"[Recall][Context] ⚠️ 条件提取失败: {e}")
+            task_manager.fail_task(context_task.id, str(e))
             
     except asyncio.TimeoutError:
         _safe_print(f"[Recall][Analysis] ⏱️ 伏笔分析超时 (>{llm_timeout}s)")
+        task_manager.fail_task(foreshadow_task.id, f"超时 (>{llm_timeout}s)")
     except Exception as e:
         _safe_print(f"[Recall][Analysis] ❌ 分析失败: {e}")
+        task_manager.fail_task(foreshadow_task.id, str(e))
 
 
 @app.post("/v1/foreshadowing/analyze/turn", response_model=ForeshadowingAnalysisResult, tags=["Foreshadowing Analysis"])

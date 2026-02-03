@@ -38,6 +38,7 @@ from .utils import (
     EnvironmentManager
 )
 from .utils.perf_monitor import MetricType
+from .utils.task_manager import TaskManager, TaskType, get_task_manager
 from .embedding import EmbeddingConfig
 from .embedding.base import EmbeddingBackendType
 
@@ -1258,6 +1259,20 @@ class RecallEngine:
         start_time = time.time()
         consistency_warnings = []  # 收集一致性警告
         
+        # 获取任务管理器
+        task_manager = get_task_manager()
+        character_id = metadata.get('character_id', 'default') if metadata else 'default'
+        
+        # 创建父任务 - 记忆处理流程
+        parent_task = task_manager.create_task(
+            task_type=TaskType.MEMORY_SAVE,
+            name="保存记忆",
+            user_id=user_id,
+            character_id=character_id,
+            metadata={'content_length': len(content)}
+        )
+        task_manager.start_task(parent_task.id, "开始处理记忆...")
+        
         # === Recall 4.1: 创建 Episode（如果启用）===
         current_episode = None
         if self._episode_tracking_enabled and self.episode_store:
@@ -1277,6 +1292,16 @@ class RecallEngine:
         
         try:
             # 【升级】去重检查：优先使用三阶段去重器（Phase 2），回退到简单字符串匹配
+            # 任务追踪：去重检查
+            dedup_task = task_manager.create_task(
+                task_type=TaskType.DEDUP_CHECK,
+                name="去重检查",
+                user_id=user_id,
+                character_id=character_id,
+                parent_task_id=parent_task.id
+            )
+            task_manager.start_task(dedup_task.id, "检查重复记忆...")
+            
             scope = self.storage.get_scope(user_id)
             existing_memories = scope.get_all(limit=100)  # 检查最近100条
             content_normalized = content.strip()
@@ -1284,6 +1309,7 @@ class RecallEngine:
             # 尝试使用三阶段去重器
             if self.deduplicator is not None and existing_memories:
                 try:
+                    task_manager.update_task(dedup_task.id, progress=0.3, message="三阶段去重分析...")
                     from .processor.three_stage_deduplicator import DedupItem
                     import uuid as uuid_module
                     
@@ -1315,6 +1341,8 @@ class RecallEngine:
                         if dedup_result.matches:
                             match = dedup_result.matches[0]
                             _safe_print(f"[Recall] 三阶段去重发现重复: type={match.match_type.value}, conf={match.confidence:.2f}, reason={match.reason}")
+                            task_manager.complete_task(dedup_task.id, "发现重复记忆")
+                            task_manager.complete_task(parent_task.id, "记忆已存在，跳过保存")
                             return AddResult(
                                 id=match.matched_item.id if match.matched_item else 'unknown',
                                 success=False,
@@ -1329,6 +1357,8 @@ class RecallEngine:
                 existing_content = mem.get('content', '').strip()
                 if existing_content == content_normalized:
                     _safe_print(f"[Recall] 跳过重复记忆: content_len={len(content)}, user={user_id}")
+                    task_manager.complete_task(dedup_task.id, "发现重复记忆")
+                    task_manager.complete_task(parent_task.id, "记忆已存在，跳过保存")
                     return AddResult(
                         id=mem.get('metadata', {}).get('id', 'unknown'),
                         success=False,
@@ -1336,24 +1366,41 @@ class RecallEngine:
                         message="记忆内容已存在，跳过重复保存"
                     )
             
+            # 去重检查完成，无重复
+            task_manager.complete_task(dedup_task.id, "无重复记忆")
+            
             # 1. 提取实体（优先使用 SmartExtractor，回退到 EntityExtractor）
+            # 任务追踪：实体提取
+            entity_task = task_manager.create_task(
+                task_type=TaskType.ENTITY_EXTRACTION,
+                name="实体提取",
+                user_id=user_id,
+                character_id=character_id,
+                parent_task_id=parent_task.id
+            )
+            task_manager.start_task(entity_task.id, "分析文本实体...")
+            
             extraction_result = None
             if self.smart_extractor is not None:
                 try:
+                    task_manager.update_task(entity_task.id, progress=0.3, message="SmartExtractor 分析中...")
                     extraction_result = self.smart_extractor.extract(content)
                     entities = extraction_result.entities
                     entity_names = [e.name for e in entities]
                     keywords = extraction_result.keywords
                     _safe_print(f"[Recall] SmartExtractor: mode={extraction_result.mode_used.value}, entities={len(entities)}, complexity={extraction_result.complexity_score:.2f}")
+                    task_manager.complete_task(entity_task.id, f"提取 {len(entities)} 个实体", {'entities': entity_names, 'mode': extraction_result.mode_used.value})
                 except Exception as e:
                     _safe_print(f"[Recall] SmartExtractor 失败，回退到默认抽取器: {e}")
                     extraction_result = None
             
             if extraction_result is None:
                 # 回退到默认的 EntityExtractor
+                task_manager.update_task(entity_task.id, progress=0.5, message="规则提取器分析中...")
                 entities = self.entity_extractor.extract(content)
                 entity_names = [e.name for e in entities]
                 keywords = self.entity_extractor.extract_keywords(content)
+                task_manager.complete_task(entity_task.id, f"提取 {len(entities)} 个实体", {'entities': entity_names, 'mode': 'rule'})
             
             # 2. 提取关键词（如果 SmartExtractor 未处理）
             if extraction_result is None:
@@ -1361,10 +1408,22 @@ class RecallEngine:
             
             # 3. 一致性检查（分两阶段：正则规则 + 可选LLM深度检测）
             if check_consistency:
+                # 任务追踪：一致性检查
+                consistency_task = task_manager.create_task(
+                    task_type=TaskType.CONSISTENCY_CHECK,
+                    name="一致性检查",
+                    user_id=user_id,
+                    character_id=character_id,
+                    parent_task_id=parent_task.id
+                )
+                task_manager.start_task(consistency_task.id, "检查记忆一致性...")
+                
                 existing_memories = self.search(content, user_id=user_id, top_k=5)
                 _safe_print(f"[Recall] 一致性检查: 找到 {len(existing_memories)} 条相关记忆")
                 for i, m in enumerate(existing_memories):
                     _safe_print(f"[Recall]   [{i+1}] {m.content[:30]}...")
+                
+                task_manager.update_task(consistency_task.id, progress=0.3, message=f"规则检测 {len(existing_memories)} 条相关记忆...")
                 
                 # 阶段1：正则规则检测（快速）
                 consistency = self.consistency_checker.check(
@@ -1441,6 +1500,16 @@ class RecallEngine:
                         
                         # 只有当策略是 LLM/MIXED/AUTO 时才进行深度检测
                         if self.contradiction_manager.strategy != DetectionStrategy.RULE:
+                            # 任务追踪：LLM 矛盾检测
+                            contradiction_task = task_manager.create_task(
+                                task_type=TaskType.CONTRADICTION_DETECTION,
+                                name="LLM矛盾检测",
+                                user_id=user_id,
+                                character_id=character_id,
+                                parent_task_id=parent_task.id
+                            )
+                            task_manager.start_task(contradiction_task.id, f"LLM深度矛盾检测 (策略: {self.contradiction_manager.strategy.value})...")
+                            
                             _safe_print(f"[Recall] 启用LLM深度矛盾检测 (策略: {self.contradiction_manager.strategy.value})")
                             
                             # 创建新事实的 TemporalFact
@@ -1461,6 +1530,8 @@ class RecallEngine:
                                     user_id=user_id
                                 ))
                             
+                            task_manager.update_task(contradiction_task.id, progress=0.5, message="调用LLM分析...")
+                            
                             # 调用 ContradictionManager.detect() 进行深度检测
                             llm_contradictions = self.contradiction_manager.detect(
                                 new_fact=new_fact,
@@ -1477,8 +1548,17 @@ class RecallEngine:
                             
                             if llm_contradictions:
                                 _safe_print(f"[Recall] LLM深度检测发现 {len(llm_contradictions)} 个额外矛盾")
+                            
+                            task_manager.complete_task(contradiction_task.id, f"发现 {len(llm_contradictions)} 个矛盾", {'count': len(llm_contradictions)})
                     except Exception as e:
                         _safe_print(f"[Recall] LLM矛盾检测失败（不影响主流程）: {e}")
+                        try:
+                            task_manager.fail_task(contradiction_task.id, str(e))
+                        except:
+                            pass  # contradiction_task 可能未定义
+                
+                # 一致性检查完成
+                task_manager.complete_task(consistency_task.id, f"检查完成，{len(consistency_warnings)} 个警告", {'warnings': len(consistency_warnings)})
             
             # 4. 生成ID并存储
             memory_id = f"mem_{uuid.uuid4().hex[:12]}"
@@ -1519,8 +1599,19 @@ class RecallEngine:
                 _safe_print(f"[Recall] Archive保存失败（不影响主流程）: {e}")
             
             # 5. 更新索引（失败不影响主流程）
+            # 任务追踪：索引更新
+            index_task = task_manager.create_task(
+                task_type=TaskType.INDEX_UPDATE,
+                name="索引更新",
+                user_id=user_id,
+                character_id=character_id,
+                parent_task_id=parent_task.id
+            )
+            task_manager.start_task(index_task.id, "更新检索索引...")
+            
             try:
                 if self._entity_index:
+                    task_manager.update_task(index_task.id, progress=0.2, message="更新实体索引...")
                     for entity in entities:
                         # 获取实体类型，兼容不同的实体对象格式
                         entity_type = getattr(entity, 'entity_type', None)
@@ -1551,20 +1642,26 @@ class RecallEngine:
                         )
                 
                 if self._inverted_index:
+                    task_manager.update_task(index_task.id, progress=0.4, message="更新倒排索引...")
                     self._inverted_index.add_batch(keywords, memory_id)
                 
                 if self._ngram_index:
+                    task_manager.update_task(index_task.id, progress=0.6, message="更新N-gram索引...")
                     # NgamIndex.add 接受 (turn_id, content)
                     self._ngram_index.add(memory_id, content)
                 
                 if self._vector_index:
+                    task_manager.update_task(index_task.id, progress=0.8, message="更新向量索引...")
                     # VectorIndex.add_text 接受 (turn_id, text)
                     self._vector_index.add_text(memory_id, content)
+                
+                task_manager.complete_task(index_task.id, "索引更新完成")
             except Exception as e:
                 # 打印更详细的错误信息
                 import traceback
                 _safe_print(f"[Recall] 索引更新失败（不影响主流程）: {type(e).__name__}: {e}")
                 traceback.print_exc()
+                task_manager.fail_task(index_task.id, str(e))
             
             # 5.5 缓存内容到检索器（确保检索时能获取内容）
             try:
@@ -1616,12 +1713,24 @@ class RecallEngine:
                 _safe_print(f"[Recall] 长期记忆更新失败（不影响主流程）: {e}")
             
             # 6. 更新知识图谱（失败不影响主流程）
+            # 任务追踪：知识图谱更新
+            kg_task = task_manager.create_task(
+                task_type=TaskType.KNOWLEDGE_GRAPH,
+                name="知识图谱更新",
+                user_id=user_id,
+                character_id=character_id,
+                parent_task_id=parent_task.id
+            )
+            task_manager.start_task(kg_task.id, "提取关系并更新图谱...")
+            
             try:
                 # === Recall 4.1: 优先使用 LLM 关系提取器（如果启用）===
                 if self._llm_relation_extractor:
+                    task_manager.update_task(kg_task.id, progress=0.3, message="LLM 关系提取中...")
                     _safe_print(f"[Recall][关系] 使用 LLM 关系提取器, 实体数={len(entities)}")
                     relations_v2 = self._llm_relation_extractor.extract(content, 0, entities)
                     _safe_print(f"[Recall][关系] LLM 提取完成, 关系数={len(relations_v2)}")
+                    task_manager.update_task(kg_task.id, progress=0.7, message=f"存储 {len(relations_v2)} 条关系...")
                     for rel in relations_v2:
                         self.knowledge_graph.add_relation(
                             source_id=rel.source_id,
@@ -1636,11 +1745,14 @@ class RecallEngine:
                     # 转换为兼容格式供后续使用
                     relations = [rel.to_legacy_tuple() for rel in relations_v2]
                     _safe_print(f"[Recall][关系] 已存储到知识图谱, 总关系数={sum(len(v) for v in self.knowledge_graph.outgoing.values())}")
+                    task_manager.complete_task(kg_task.id, f"提取 {len(relations_v2)} 条关系", {'relations': len(relations_v2), 'mode': 'llm'})
                 else:
                     # 使用传统规则提取器
+                    task_manager.update_task(kg_task.id, progress=0.3, message="规则关系提取中...")
                     _safe_print(f"[Recall][关系] 使用规则提取器, 实体数={len(entities)}")
                     relations = self.relation_extractor.extract(content, 0, entities=entities)
                     _safe_print(f"[Recall][关系] 规则提取完成, 关系数={len(relations)}")
+                    task_manager.update_task(kg_task.id, progress=0.7, message=f"存储 {len(relations)} 条关系...")
                     for rel in relations:
                         source_id, relation_type, target_id, source_text = rel
                         self.knowledge_graph.add_relation(
@@ -1650,11 +1762,13 @@ class RecallEngine:
                             source_text=source_text
                         )
                     _safe_print(f"[Recall][关系] 已存储到知识图谱, 总关系数={sum(len(v) for v in self.knowledge_graph.outgoing.values())}")
+                    task_manager.complete_task(kg_task.id, f"提取 {len(relations)} 条关系", {'relations': len(relations), 'mode': 'rule'})
             except Exception as e:
                 import traceback
                 _safe_print(f"[Recall] 知识图谱更新失败（不影响主流程）: {e}")
                 traceback.print_exc()
                 relations = []  # 确保 relations 变量存在
+                task_manager.fail_task(kg_task.id, str(e))
             
             # 6.5 更新全文索引 BM25（Phase 1 功能）
             if self.fulltext_index is not None:
@@ -1662,6 +1776,7 @@ class RecallEngine:
                     self.fulltext_index.add(memory_id, content)
                 except Exception as e:
                     _safe_print(f"[Recall] 全文索引更新失败（不影响主流程）: {e}")
+            
             
             # 6.6 时态图谱更新 - 已整合到统一图谱中
             # 注意：knowledge_graph 和 temporal_graph 现在是同一个 TemporalKnowledgeGraph 实例，
@@ -1719,6 +1834,14 @@ class RecallEngine:
             except Exception:
                 pass  # 忽略性能监控错误
             
+            # 完成父任务
+            elapsed_ms = (time.time() - start_time) * 1000
+            task_manager.complete_task(
+                parent_task.id, 
+                f"记忆保存完成 ({elapsed_ms:.0f}ms)",
+                {'memory_id': memory_id, 'entities': entity_names, 'elapsed_ms': elapsed_ms}
+            )
+            
             return AddResult(
                 id=memory_id,
                 success=True,
@@ -1731,6 +1854,8 @@ class RecallEngine:
             _safe_print(f"[Recall] 添加记忆异常: {type(e).__name__}: {e}")
             import traceback
             traceback.print_exc()
+            # 标记父任务失败
+            task_manager.fail_task(parent_task.id, str(e))
             return AddResult(
                 id="",
                 success=False,

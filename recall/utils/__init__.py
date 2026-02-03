@@ -14,6 +14,16 @@ from .budget_manager import (
     UsageRecord
 )
 
+# v4.x 新增: 任务追踪管理器
+from .task_manager import (
+    TaskManager,
+    Task,
+    TaskType,
+    TaskStatus,
+    TaskContext,
+    get_task_manager
+)
+
 __all__ = [
     'LLMClient',
     'LLMResponse',
@@ -28,4 +38,12 @@ __all__ = [
     'BudgetConfig',
     'BudgetPeriod',
     'UsageRecord',
+    
+    # v4.x 新增导出 - 任务追踪
+    'TaskManager',
+    'Task',
+    'TaskType',
+    'TaskStatus',
+    'TaskContext',
+    'get_task_manager',
 ]
