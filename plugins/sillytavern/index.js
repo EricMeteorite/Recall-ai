@@ -5168,8 +5168,8 @@ async function loadPersistentContexts() {
         // 检查是否是当前有效的请求
         if (_loadPersistentContextsRequestId !== currentRequestId) {
             console.log('[Recall] 持久条件请求完成但已被新请求取代，忽略结果');
-            _loadPersistentContextsLoading = false;
-            _loadPersistentContextsController = null;
+            taskTracker.complete(taskId, true, '已被新请求取代');
+            // 注意：不重置 loading 标志，因为新请求正在执行
             return;
         }
         
