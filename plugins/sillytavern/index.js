@@ -584,11 +584,22 @@
     
     // ============== 最终方案：window 级别 pointerdown 监听 ==============
     // click 事件可能被其他脚本拦截，使用 pointerdown 更可靠
+    // 注意：只使用 pointerdown，不再使用 mousedown，避免重复触发
+    
+    let _lastTabClickEventTime = 0;  // 防止同一次点击的多个事件触发
     
     window.addEventListener('pointerdown', function(e) {
         const tab = e.target.closest('.recall-tab');
         if (tab) {
-            console.log('🎯🎯🎯 [Recall] Window pointerdown 捕获到标签:', tab.dataset?.tab);
+            // 防止同一次点击被多个事件重复处理
+            const now = Date.now();
+            if (now - _lastTabClickEventTime < 100) {
+                console.log('[Recall] 标签点击事件被去重过滤');
+                return;
+            }
+            _lastTabClickEventTime = now;
+            
+            console.log('🎯 [Recall] Window pointerdown 捕获到标签:', tab.dataset?.tab);
             e.preventDefault();
             e.stopPropagation();
             e.stopImmediatePropagation();
@@ -599,22 +610,7 @@
         }
     }, true);  // 捕获阶段
     
-    // 同时监听 mousedown 作为备份
-    window.addEventListener('mousedown', function(e) {
-        const tab = e.target.closest('.recall-tab');
-        if (tab) {
-            console.log('🎯 [Recall] Window mousedown 捕获到标签:', tab.dataset?.tab);
-            e.preventDefault();
-            e.stopPropagation();
-            e.stopImmediatePropagation();
-            const tabName = tab.dataset?.tab || tab.getAttribute('data-tab');
-            if (tabName) {
-                handleRecallTabClick(tabName);
-            }
-        }
-    }, true);
-    
-    console.log('[Recall] Window 级别 pointerdown/mousedown 监听已设置');
+    console.log('[Recall] Window 级别 pointerdown 监听已设置（已移除重复的 mousedown）');
     
     // 添加全局点击诊断（仅记录前 10 次）
     let clickLogCount = 0;
