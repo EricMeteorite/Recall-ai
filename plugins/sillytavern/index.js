@@ -178,6 +178,28 @@
     let isConnected = false;
     let currentCharacterId = null;
     let isInitialized = false;
+    
+    // 加载状态标志（防止重复加载）
+    let _loadMemoriesLoading = false;
+    let _loadForeshadowingsLoading = false;
+    let _loadPersistentContextsLoading = false;
+    let _loadEntitiesLoading = false;
+    let _loadContradictionsLoading = false;
+    let _loadEpisodesLoading = false;
+    
+    // 数据已加载标志（追踪当前角色的数据是否已加载）
+    let _memoriesLoaded = false;
+    let _foreshadowingsLoaded = false;
+    let _persistentContextsLoaded = false;
+    let _entitiesLoaded = false;
+    let _contradictionsLoaded = false;
+    let _episodesLoaded = false;
+    let _temporalStatsLoaded = false;
+    
+    // 请求ID（用于在角色切换时取消旧请求）
+    let _loadMemoriesRequestId = 0;
+    let _loadMemoriesController = null;
+    let _loadMemoriesForUser = null;
 
     /**
      * 🔧 调试函数：测试 API 连接
@@ -213,6 +235,12 @@
                 currentCharacterId,
                 isInitialized,
                 // 从全局变量获取加载状态（这些变量在 IIFE 外部定义）
+                memories: {
+                    loading: _loadMemoriesLoading,
+                    loaded: _memoriesLoaded,
+                    forUser: _loadMemoriesForUser,
+                    requestId: _loadMemoriesRequestId
+                },
                 persistentContexts: {
                     loading: typeof _loadPersistentContextsLoading !== 'undefined' ? _loadPersistentContextsLoading : 'N/A',
                     forUser: typeof _loadPersistentContextsForUser !== 'undefined' ? _loadPersistentContextsForUser : 'N/A',
@@ -238,6 +266,11 @@
         // 重置加载状态（用于调试卡住的情况）
         resetLoadingState: function() {
             console.log('[Recall Debug] 重置加载状态');
+            if (typeof _loadMemoriesLoading !== 'undefined') {
+                _loadMemoriesLoading = false;
+                _loadMemoriesController = null;
+                _loadMemoriesForUser = null;
+            }
             if (typeof _loadPersistentContextsLoading !== 'undefined') {
                 _loadPersistentContextsLoading = false;
                 _loadPersistentContextsController = null;
@@ -463,8 +496,20 @@
     }
 
     // ============== 核心：标签点击处理函数 ==============
+    // 防抖标志，防止 pointerdown 和 mousedown 重复触发
+    let _lastTabClickTime = 0;
+    const TAB_CLICK_DEBOUNCE = 100; // 100ms 内的重复点击会被忽略
+    
     function handleRecallTabClick(tabName) {
-        console.warn(`🔥 [Recall] 标签点击: ${tabName}`);
+        // 防抖处理
+        const now = Date.now();
+        if (now - _lastTabClickTime < TAB_CLICK_DEBOUNCE) {
+            console.log(`[Recall] 标签点击被防抖过滤: ${tabName}`);
+            return;
+        }
+        _lastTabClickTime = now;
+        
+        console.log(`[Recall] 标签点击: ${tabName}`);
         
         // 切换标签按钮状态（所有实例，包括弹窗中的）
         document.querySelectorAll('.recall-tab').forEach(t => t.classList.remove('active'));
@@ -476,53 +521,57 @@
         
         // 根据标签页加载对应数据
         if (!isConnected) {
-            console.warn('[Recall] 未连接，跳过数据加载');
+            console.log('[Recall] 未连接，跳过数据加载');
             return;
         }
         
+        // 【优化】所有标签都只在数据未加载时才自动加载，避免重复请求
         switch(tabName) {
-            case 'contexts':
-                // 【优化】不再每次点击都加载，只在数据为空或用户手动刷新时加载
-                // 这与伏笔等其他标签的行为保持一致
-                console.log('[Recall] 切换到条件标签，检查是否需要加载数据');
-                // 只有当列表为空且没有正在加载时才自动加载
-                const contextList = document.getElementById('recall-context-list');
-                const isEmpty = !contextList || contextList.children.length === 0 || 
-                               (contextList.children.length === 1 && contextList.querySelector('.recall-context-empty'));
-                if (isEmpty && !_loadPersistentContextsLoading) {
-                    console.log('[Recall] 持久条件列表为空，自动加载');
+            case 'contexts': {
+                if (!_persistentContextsLoaded && !_loadPersistentContextsLoading) {
                     loadPersistentContexts();
-                } else {
-                    console.log('[Recall] 持久条件已有数据或正在加载，跳过');
                 }
                 break;
-            case 'foreshadowing':
-                // 【优化】只在数据为空或用户手动刷新时加载
-                const foreshadowingList = document.getElementById('recall-foreshadowing-list');
-                const isForeshadowingEmpty = !foreshadowingList || foreshadowingList.children.length === 0 || 
-                                            (foreshadowingList.children.length === 1 && foreshadowingList.querySelector('.recall-foreshadowing-empty, .recall-empty-state'));
-                if (isForeshadowingEmpty && !_loadForeshadowingsLoading) {
-                    console.log('[Recall] 伏笔列表为空，自动加载');
+            }
+            case 'foreshadowing': {
+                if (!_foreshadowingsLoaded && !_loadForeshadowingsLoading) {
                     loadForeshadowings();
                 }
                 break;
+            }
+            case 'memories': {
+                if (!_memoriesLoaded && !_loadMemoriesLoading) {
+                    loadMemories();
+                }
+                break;
+            }
+            case 'entities': {
+                if (!_entitiesLoaded && !_loadEntitiesLoading) {
+                    loadEntities();
+                }
+                break;
+            }
+            case 'contradictions': {
+                if (!_contradictionsLoaded && !_loadContradictionsLoading) {
+                    loadContradictions();
+                }
+                break;
+            }
+            case 'temporal': {
+                if (!_temporalStatsLoaded) {
+                    loadTemporalStats();
+                }
+                break;
+            }
+            case 'episodes': {
+                if (!_episodesLoaded && !_loadEpisodesLoading) {
+                    loadEpisodes();
+                }
+                break;
+            }
             case 'core-settings':
+                // 设置页面每次都需要加载最新配置
                 loadCoreSettings();
-                break;
-            case 'entities':
-                loadEntities();
-                break;
-            case 'contradictions':
-                loadContradictions();
-                break;
-            case 'temporal':
-                loadTemporalStats();
-                break;
-            case 'episodes':
-                loadEpisodes();
-                break;
-            case 'memories':
-                loadMemories();
                 break;
         }
     }
@@ -2060,7 +2109,8 @@ function createUI() {
     document.getElementById('recall-entity-search-input')?.addEventListener('input', debounce(() => loadEntities(), 500));
     document.getElementById('recall-entity-type-filter')?.addEventListener('change', () => loadEntities());
     document.getElementById('recall-entity-detail-close')?.addEventListener('click', () => {
-        document.getElementById('recall-entity-detail-panel').style.display = 'none';
+        const panel = document.getElementById('recall-entity-detail-panel');
+        if (panel) panel.style.display = 'none';
     });
     document.getElementById('recall-generate-entity-summary')?.addEventListener('click', safeExecute(generateEntitySummary, '生成摘要失败'));
     
@@ -2068,7 +2118,8 @@ function createUI() {
     document.getElementById('recall-refresh-contradictions-btn')?.addEventListener('click', safeExecute(loadContradictions, '刷新矛盾失败'));
     document.getElementById('recall-contradiction-status-filter')?.addEventListener('change', () => loadContradictions());
     document.getElementById('recall-contradiction-detail-close')?.addEventListener('click', () => {
-        document.getElementById('recall-contradiction-detail-panel').style.display = 'none';
+        const panel = document.getElementById('recall-contradiction-detail-panel');
+        if (panel) panel.style.display = 'none';
     });
     document.getElementById('recall-resolve-keep-a')?.addEventListener('click', () => resolveContradiction('keep_first'));
     document.getElementById('recall-resolve-keep-b')?.addEventListener('click', () => resolveContradiction('keep_second'));
@@ -2097,7 +2148,8 @@ function createUI() {
     // Episode 片段事件绑定
     document.getElementById('recall-refresh-episodes-btn')?.addEventListener('click', safeExecute(loadEpisodes, '刷新片段失败'));
     document.getElementById('recall-episode-detail-close')?.addEventListener('click', () => {
-        document.getElementById('recall-episode-detail-panel').style.display = 'none';
+        const panel = document.getElementById('recall-episode-detail-panel');
+        if (panel) panel.style.display = 'none';
     });
     
     // 高级搜索事件绑定
@@ -2106,7 +2158,8 @@ function createUI() {
         if (e.key === 'Enter') performAdvancedSearch();
     });
     document.getElementById('recall-hybrid-weight')?.addEventListener('input', (e) => {
-        document.getElementById('recall-hybrid-weight-value').textContent = e.target.value;
+        const valueEl = document.getElementById('recall-hybrid-weight-value');
+        if (valueEl) valueEl.textContent = e.target.value;
     });
     
     // 搜索类型切换
@@ -4243,6 +4296,9 @@ async function onChatChanged() {
         console.warn('[Recall] 清除旧注入失败:', e);
     }
     
+    // 【重要】角色切换时，清空所有列表数据，确保新角色数据能正确加载
+    clearAllListsForCharacterSwitch();
+    
     if (character) {
         currentCharacterId = character.name || `char_${characterId}`;
         console.log(`[Recall] 切换到角色: ${currentCharacterId}`);
@@ -4266,6 +4322,69 @@ async function onChatChanged() {
     } catch (e) {
         console.warn('[Recall] onChatChanged - 部分数据加载失败:', e);
     }
+}
+
+/**
+ * 角色切换时清空所有列表，重置 loading 标志和已加载标志
+ */
+function clearAllListsForCharacterSwitch() {
+    // 重置所有 loading 标志
+    _loadMemoriesLoading = false;
+    _loadForeshadowingsLoading = false;
+    _loadPersistentContextsLoading = false;
+    _loadEntitiesLoading = false;
+    _loadContradictionsLoading = false;
+    _loadEpisodesLoading = false;
+    
+    // 取消进行中的请求并重置额外状态
+    _loadMemoriesForUser = null;
+    if (_loadMemoriesController) {
+        _loadMemoriesController.abort();
+        _loadMemoriesController = null;
+    }
+    
+    // 注意：_loadForeshadowingsController 和 _loadPersistentContextsController 
+    // 在函数内部已有角色切换检测，这里只需重置 forUser 即可
+    // 它们会在下次调用时自动处理
+    
+    // 重置所有"已加载"标志（角色切换后需要重新加载数据）
+    _memoriesLoaded = false;
+    _foreshadowingsLoaded = false;
+    _persistentContextsLoaded = false;
+    _entitiesLoaded = false;
+    _contradictionsLoaded = false;
+    _episodesLoaded = false;
+    _temporalStatsLoaded = false;
+    
+    // 清空记忆列表
+    const memoryList = document.getElementById('recall-memory-list');
+    if (memoryList) memoryList.innerHTML = '';
+    
+    // 清空伏笔列表
+    const foreshadowingList = document.getElementById('recall-foreshadowing-list');
+    if (foreshadowingList) foreshadowingList.innerHTML = '';
+    
+    // 清空条件列表
+    const contextList = document.getElementById('recall-context-list');
+    if (contextList) contextList.innerHTML = '';
+    
+    // 清空实体列表
+    const entityList = document.getElementById('recall-entity-list');
+    if (entityList) entityList.innerHTML = '';
+    
+    // 清空矛盾列表
+    const contradictionList = document.getElementById('recall-contradiction-list');
+    if (contradictionList) contradictionList.innerHTML = '';
+    
+    // 清空片段列表
+    const episodeList = document.getElementById('recall-episode-list');
+    if (episodeList) episodeList.innerHTML = '';
+    
+    // 重置时态统计
+    const temporalCount = document.getElementById('recall-temporal-record-count');
+    if (temporalCount) temporalCount.textContent = '-';
+    
+    console.log('[Recall] 已清空所有列表数据，准备加载新角色数据');
 }
 
 /**
@@ -4345,9 +4464,33 @@ function getInjectionDepth() {
 
 /**
  * 加载记忆列表
+ * 添加防重入机制，避免多次并发请求
+ * 当角色变化时，取消之前的请求
  */
 async function loadMemories() {
     if (!isConnected) return;
+    
+    const userId = encodeURIComponent(currentCharacterId || 'default');
+    
+    // 如果正在加载同一个角色的数据，跳过
+    if (_loadMemoriesLoading && _loadMemoriesForUser === userId) {
+        console.log('[Recall] 记忆正在加载中（同一角色），跳过重复请求');
+        return;
+    }
+    
+    // 如果正在加载不同角色的数据，取消之前的请求
+    if (_loadMemoriesLoading && _loadMemoriesForUser !== userId) {
+        console.log(`[Recall] 角色已切换 (${_loadMemoriesForUser} -> ${userId})，取消之前的记忆请求`);
+        if (_loadMemoriesController) {
+            _loadMemoriesController.abort();
+            _loadMemoriesController = null;
+        }
+        _loadMemoriesLoading = false;
+    }
+    
+    _loadMemoriesLoading = true;
+    _loadMemoriesForUser = userId;
+    const currentRequestId = ++_loadMemoriesRequestId;
     
     // 重置分页状态
     currentMemoryOffset = 0;
@@ -4357,14 +4500,26 @@ async function loadMemories() {
     try {
         // 添加超时控制（10秒）
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000);
+        _loadMemoriesController = controller;
+        const timeoutId = setTimeout(() => {
+            console.log('[Recall] 记忆请求超时，触发 abort');
+            controller.abort();
+        }, 10000);
         
         // 获取记忆列表（明确传入 offset=0）
         const response = await fetch(
-            `${pluginSettings.apiUrl}/v1/memories?user_id=${encodeURIComponent(currentCharacterId || 'default')}&limit=${MEMORIES_PER_PAGE}&offset=0`,
+            `${pluginSettings.apiUrl}/v1/memories?user_id=${userId}&limit=${MEMORIES_PER_PAGE}&offset=0`,
             { signal: controller.signal }
         );
         clearTimeout(timeoutId);
+        
+        // 检查请求是否已被新请求取代（角色切换等情况）
+        if (_loadMemoriesRequestId !== currentRequestId) {
+            console.log('[Recall] 记忆请求完成但已被新请求取代，忽略结果');
+            taskTracker.complete(taskId, true, '已被新请求取代');
+            // 注意：不重置 loading 标志，因为新请求正在执行
+            return;
+        }
         
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}`);
@@ -4388,11 +4543,24 @@ async function loadMemories() {
         
         console.log('[Recall] 记忆加载完成:', { count: data.count, total: data.total, hasMore: hasMoreMemories });
         taskTracker.complete(taskId, true);
+        _loadMemoriesLoading = false;
+        _loadMemoriesController = null;
+        _memoriesLoaded = true;  // 标记已加载
         
     } catch (e) {
-        const errMsg = e.name === 'AbortError' ? '请求超时' : e.message;
+        // 检查是否是当前有效的请求
+        if (_loadMemoriesRequestId !== currentRequestId) {
+            console.log(`[Recall] 记忆请求异常但已被新请求取代 (requestId=${currentRequestId})，忽略`);
+            taskTracker.complete(taskId, true, '已被新请求取代');
+            // 注意：不重置 loading 标志，因为新请求正在执行
+            return;
+        }
+        
+        const errMsg = e.name === 'AbortError' ? '请求超时（10s）' : e.message;
         console.warn('[Recall] 加载记忆失败:', errMsg);
         taskTracker.complete(taskId, false, errMsg);
+        _loadMemoriesLoading = false;
+        _loadMemoriesController = null;
     }
 }
 
@@ -4766,7 +4934,6 @@ function updateLoadMoreButton() {
  * 添加防重入机制，避免多次并发请求
  * 当角色变化时，取消之前的请求
  */
-let _loadForeshadowingsLoading = false;
 let _loadForeshadowingsController = null;
 let _loadForeshadowingsForUser = null;
 let _loadForeshadowingsRequestId = 0;  // 请求ID，用于识别当前有效请求
@@ -4819,6 +4986,7 @@ async function loadForeshadowings() {
         if (_loadForeshadowingsRequestId !== currentRequestId) {
             console.log('[Recall] 伏笔请求完成但已被新请求取代，忽略结果');
             taskTracker.complete(taskId, true, '已被新请求取代');
+            // 注意：不重置 loading 标志，因为新请求正在执行
             return;
         }
         
@@ -4860,10 +5028,13 @@ async function loadForeshadowings() {
         taskTracker.complete(taskId, true);
         _loadForeshadowingsLoading = false;
         _loadForeshadowingsController = null;
+        _foreshadowingsLoaded = true;  // 标记已加载
     } catch (e) {
         // 检查是否是当前有效的请求
         if (_loadForeshadowingsRequestId !== currentRequestId) {
             console.log(`[Recall] 伏笔请求异常但已被新请求取代 (requestId=${currentRequestId})，忽略`);
+            taskTracker.complete(taskId, true, '已被新请求取代');
+            // 注意：不重置 loading 标志，因为新请求正在执行
             return;
         }
         
@@ -4933,7 +5104,6 @@ async function onClearAllForeshadowings() {
  * 添加防重入机制，避免多次并发请求
  * 当角色变化时，取消之前的请求
  */
-let _loadPersistentContextsLoading = false;
 let _loadPersistentContextsController = null;
 let _loadPersistentContextsForUser = null;
 let _loadPersistentContextsRequestId = 0;      // 请求ID，用于识别当前有效请求
@@ -5040,10 +5210,13 @@ async function loadPersistentContexts() {
         _loadPersistentContextsLoading = false;
         _loadPersistentContextsController = null;
         _loadPersistentContextsTaskId = null;
+        _persistentContextsLoaded = true;  // 标记已加载
     } catch (e) {
         // 检查是否是当前有效的请求
         if (_loadPersistentContextsRequestId !== currentRequestId) {
             console.log('[Recall] 持久条件请求异常但已被新请求取代，忽略');
+            taskTracker.complete(taskId, true, '已被新请求取代');
+            // 注意：不重置 loading 标志，因为新请求正在执行
             return;
         }
         
@@ -6275,6 +6448,9 @@ let currentSelectedContradiction = null;
  * 加载实体列表
  */
 async function loadEntities() {
+    if (_loadEntitiesLoading) return;
+    _loadEntitiesLoading = true;
+    
     const userId = currentCharacterId || 'default';
     const searchInput = document.getElementById('recall-entity-search-input');
     const typeFilter = document.getElementById('recall-entity-type-filter');
@@ -6301,11 +6477,16 @@ async function loadEntities() {
         }
         
         // 更新计数
-        document.getElementById('recall-entity-count').textContent = entities.length;
+        const entityCountEl = document.getElementById('recall-entity-count');
+        if (entityCountEl) entityCountEl.textContent = entities.length;
         
         // 渲染列表
         const listEl = document.getElementById('recall-entity-list');
-        if (!listEl) return;
+        if (!listEl) {
+            taskTracker.complete(taskId, true);
+            _entitiesLoaded = true;  // 即使 DOM 元素不存在也标记已加载
+            return;
+        }
         
         if (entities.length === 0) {
             listEl.innerHTML = `
@@ -6315,6 +6496,8 @@ async function loadEntities() {
                     <small>对话时会自动提取实体</small>
                 </div>
             `;
+            taskTracker.complete(taskId, true);
+            _entitiesLoaded = true;  // 空列表也标记已加载
             return;
         }
         
@@ -6329,10 +6512,13 @@ async function loadEntities() {
         });
         
         taskTracker.complete(taskId, true);
+        _entitiesLoaded = true;  // 标记已加载
         
     } catch (e) {
         console.warn('[Recall] 加载实体失败:', e.message);
         taskTracker.complete(taskId, false, e.message);
+    } finally {
+        _loadEntitiesLoading = false;
     }
 }
 
@@ -6405,33 +6591,42 @@ async function showEntityDetail(entityName) {
             console.warn('[Recall] 获取相关实体失败:', e);
         }
         
-        // 填充详情面板
-        document.getElementById('recall-entity-detail-name').textContent = entityName;
-        document.getElementById('recall-entity-detail-type').textContent = entity.entity_type || entity.type || '-';
-        document.getElementById('recall-entity-detail-summary').textContent = entity.summary || '暂无摘要';
-        document.getElementById('recall-entity-detail-count').textContent = entity.mention_count || entity.count || '-';
+        // 填充详情面板（添加空检查）
+        const nameEl = document.getElementById('recall-entity-detail-name');
+        const typeEl = document.getElementById('recall-entity-detail-type');
+        const summaryEl = document.getElementById('recall-entity-detail-summary');
+        const countEl = document.getElementById('recall-entity-detail-count');
+        const relationsEl = document.getElementById('recall-entity-detail-relations');
+        const panelEl = document.getElementById('recall-entity-detail-panel');
+        
+        if (nameEl) nameEl.textContent = entityName;
+        if (typeEl) typeEl.textContent = entity.entity_type || entity.type || '-';
+        if (summaryEl) summaryEl.textContent = entity.summary || '暂无摘要';
+        if (countEl) countEl.textContent = entity.mention_count || entity.count || '-';
         
         // 显示相关实体
-        if (relatedEntities.length > 0) {
-            const relatedHtml = relatedEntities.slice(0, 10).map(r => {
-                const name = r.name || r.entity_name || r;
-                const relation = r.relation || r.relation_type || '';
-                return `<span class="recall-related-entity" data-name="${escapeHtml(name)}">${escapeHtml(name)}${relation ? ` (${relation})` : ''}</span>`;
-            }).join(' ');
-            document.getElementById('recall-entity-detail-relations').innerHTML = relatedHtml;
-            
-            // 绑定相关实体点击事件
-            document.querySelectorAll('.recall-related-entity').forEach(el => {
-                el.addEventListener('click', () => {
-                    showEntityDetail(el.dataset.name);
+        if (relationsEl) {
+            if (relatedEntities.length > 0) {
+                const relatedHtml = relatedEntities.slice(0, 10).map(r => {
+                    const name = r.name || r.entity_name || r;
+                    const relation = r.relation || r.relation_type || '';
+                    return `<span class="recall-related-entity" data-name="${escapeHtml(name)}">${escapeHtml(name)}${relation ? ` (${relation})` : ''}</span>`;
+                }).join(' ');
+                relationsEl.innerHTML = relatedHtml;
+                
+                // 绑定相关实体点击事件
+                document.querySelectorAll('.recall-related-entity').forEach(el => {
+                    el.addEventListener('click', () => {
+                        showEntityDetail(el.dataset.name);
+                    });
                 });
-            });
-        } else {
-            document.getElementById('recall-entity-detail-relations').textContent = '暂无关系';
+            } else {
+                relationsEl.textContent = '暂无关系';
+            }
         }
         
         // 显示面板
-        document.getElementById('recall-entity-detail-panel').style.display = 'block';
+        if (panelEl) panelEl.style.display = 'block';
         
         taskTracker.complete(taskId, true);
         
@@ -6450,6 +6645,8 @@ async function generateEntitySummary() {
     
     const userId = currentCharacterId || 'default';
     const btn = document.getElementById('recall-generate-entity-summary');
+    if (!btn) return;
+    
     const originalText = btn.innerHTML;
     btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 生成中...';
     btn.disabled = true;
@@ -6465,7 +6662,8 @@ async function generateEntitySummary() {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const result = await response.json();
         
-        document.getElementById('recall-entity-detail-summary').textContent = result.summary || '生成失败';
+        const summaryEl = document.getElementById('recall-entity-detail-summary');
+        if (summaryEl) summaryEl.textContent = result.summary || '生成失败';
         safeToastr.success('摘要已生成');
         
         taskTracker.complete(taskId, true);
@@ -6484,6 +6682,9 @@ async function generateEntitySummary() {
  * 加载矛盾列表
  */
 async function loadContradictions() {
+    if (_loadContradictionsLoading) return;
+    _loadContradictionsLoading = true;
+    
     const userId = currentCharacterId || 'default';
     const statusFilter = document.getElementById('recall-contradiction-status-filter');
     const status = statusFilter?.value || '';
@@ -6501,11 +6702,16 @@ async function loadContradictions() {
         const contradictions = data.contradictions || data || [];
         
         // 更新计数
-        document.getElementById('recall-contradiction-count').textContent = contradictions.length;
+        const contradictionCountEl = document.getElementById('recall-contradiction-count');
+        if (contradictionCountEl) contradictionCountEl.textContent = contradictions.length;
         
         // 渲染列表
         const listEl = document.getElementById('recall-contradiction-list');
-        if (!listEl) return;
+        if (!listEl) {
+            taskTracker.complete(taskId, true);
+            _contradictionsLoaded = true;  // 即使 DOM 元素不存在也标记已加载
+            return;
+        }
         
         if (contradictions.length === 0) {
             listEl.innerHTML = `
@@ -6515,6 +6721,8 @@ async function loadContradictions() {
                     <small>系统会自动检测事实冲突</small>
                 </div>
             `;
+            taskTracker.complete(taskId, true);
+            _contradictionsLoaded = true;  // 空列表也标记已加载
             return;
         }
         
@@ -6530,10 +6738,13 @@ async function loadContradictions() {
         });
         
         taskTracker.complete(taskId, true);
+        _contradictionsLoaded = true;  // 标记已加载
         
     } catch (e) {
         console.warn('[Recall] 加载矛盾失败:', e.message);
         taskTracker.complete(taskId, false, e.message);
+    } finally {
+        _loadContradictionsLoading = false;
     }
 }
 
@@ -6606,7 +6817,8 @@ async function resolveContradiction(resolution) {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         
         safeToastr.success('矛盾已解决');
-        document.getElementById('recall-contradiction-detail-panel').style.display = 'none';
+        const panelEl = document.getElementById('recall-contradiction-detail-panel');
+        if (panelEl) panelEl.style.display = 'none';
         currentSelectedContradiction = null;
         taskTracker.complete(taskId, true);
         loadContradictions();
@@ -6634,12 +6846,13 @@ async function loadTemporalStats() {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const stats = await response.json();
         
-        document.getElementById('recall-temporal-record-count').textContent = 
-            stats.total_records || stats.record_count || 0;
-        document.getElementById('recall-temporal-span').textContent = 
-            stats.time_span || stats.span || '-';
+        const recordCountEl = document.getElementById('recall-temporal-record-count');
+        const spanEl = document.getElementById('recall-temporal-span');
+        if (recordCountEl) recordCountEl.textContent = stats.total_records || stats.record_count || 0;
+        if (spanEl) spanEl.textContent = stats.time_span || stats.span || '-';
         
         taskTracker.complete(taskId, true);
+        _temporalStatsLoaded = true;  // 标记已加载
         
     } catch (e) {
         console.warn('[Recall] 加载时态统计失败:', e.message);
@@ -7017,6 +7230,9 @@ let currentSelectedEpisode = null;
  * 加载 Episode 列表
  */
 async function loadEpisodes() {
+    if (_loadEpisodesLoading) return;
+    _loadEpisodesLoading = true;
+    
     const userId = currentCharacterId || 'default';
     
     const taskId = taskTracker.add('load', '加载片段列表');
@@ -7032,11 +7248,16 @@ async function loadEpisodes() {
         const episodes = data.episodes || data || [];
         
         // 更新计数
-        document.getElementById('recall-episode-count').textContent = episodes.length;
+        const episodeCountEl = document.getElementById('recall-episode-count');
+        if (episodeCountEl) episodeCountEl.textContent = episodes.length;
         
         // 渲染列表
         const listEl = document.getElementById('recall-episode-list');
-        if (!listEl) return;
+        if (!listEl) {
+            taskTracker.complete(taskId, true);
+            _episodesLoaded = true;  // 即使 DOM 元素不存在也标记已加载
+            return;
+        }
         
         if (episodes.length === 0) {
             listEl.innerHTML = `
@@ -7046,6 +7267,8 @@ async function loadEpisodes() {
                     <small>对话时会自动组织成片段</small>
                 </div>
             `;
+            taskTracker.complete(taskId, true);
+            _episodesLoaded = true;  // 空列表也标记已加载
             return;
         }
         
@@ -7061,10 +7284,13 @@ async function loadEpisodes() {
         });
         
         taskTracker.complete(taskId, true);
+        _episodesLoaded = true;  // 标记已加载
         
     } catch (e) {
         console.warn('[Recall] 加载片段失败:', e.message);
         taskTracker.complete(taskId, false, e.message);
+    } finally {
+        _loadEpisodesLoading = false;
     }
 }
 
@@ -7098,13 +7324,15 @@ async function showEpisodeDetail(episode) {
     currentSelectedEpisode = episode;
     const episodeId = episode.uuid || episode.id || episode.episode_id;
     
-    document.getElementById('recall-episode-detail-id').textContent = episodeId;
-    document.getElementById('recall-episode-detail-start').textContent = 
-        formatTimelineDate(episode.start_time || episode.created_at);
-    document.getElementById('recall-episode-detail-end').textContent = 
-        formatTimelineDate(episode.end_time || episode.updated_at);
-    document.getElementById('recall-episode-detail-memory-count').textContent = 
-        episode.memory_count || episode.memories?.length || 0;
+    const idEl = document.getElementById('recall-episode-detail-id');
+    const startEl = document.getElementById('recall-episode-detail-start');
+    const endEl = document.getElementById('recall-episode-detail-end');
+    const memCountEl = document.getElementById('recall-episode-detail-memory-count');
+    
+    if (idEl) idEl.textContent = episodeId;
+    if (startEl) startEl.textContent = formatTimelineDate(episode.start_time || episode.created_at);
+    if (endEl) endEl.textContent = formatTimelineDate(episode.end_time || episode.updated_at);
+    if (memCountEl) memCountEl.textContent = episode.memory_count || episode.memories?.length || 0;
     
     const taskId = taskTracker.add('load', '加载片段详情', episodeId.substring(0, 8));
     
@@ -7144,7 +7372,8 @@ async function showEpisodeDetail(episode) {
         taskTracker.complete(taskId, false, e.message);
     }
     
-    document.getElementById('recall-episode-detail-panel').style.display = 'block';
+    const panelEl = document.getElementById('recall-episode-detail-panel');
+    if (panelEl) panelEl.style.display = 'block';
 }
 
 // ============================================================================
@@ -7214,7 +7443,8 @@ async function performAdvancedSearch() {
         taskTracker.complete(taskId, true);
         
         // 更新结果计数
-        document.getElementById('recall-search-result-count').textContent = `(${results.length})`;
+        const countEl = document.getElementById('recall-search-result-count');
+        if (countEl) countEl.textContent = `(${results.length})`;
         
         // 渲染结果
         const resultsEl = document.getElementById('recall-advanced-search-results');
