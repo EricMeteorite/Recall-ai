@@ -127,7 +127,105 @@
     }
 
     /**
-     * 过滤掉AI回复中的思考过程
+     * 从DOM元素中智能提取用户可见的纯文本
+     * 只移除真正隐藏的内容，保留正常的代码块
+     * @param {Element} element - 消息的.mes_text元素
+     * @returns {string} 用户实际看到的纯文本
+     */
+    function extractVisibleTextFromDOM(element) {
+        if (!element) return null;
+        
+        // 克隆元素以避免修改原始DOM
+        const clone = element.cloneNode(true);
+        
+        // 【重要】只移除真正不可见/隐藏的元素
+        // 不要移除正常的 pre/code，那些是用户能看到的代码块！
+        const selectorsToRemove = [
+            // 通用隐藏元素
+            '[style*="display: none"]',
+            '[style*="display:none"]',
+            '[hidden]',
+            '.hidden',
+            
+            // SillyTavern 特定的隐藏类
+            '.mes_hide',            // SillyTavern隐藏的内容
+            
+            // 折叠/收起的内容（用户看不到的）
+            '.toggle-drawer:not(.open)',    // 未展开的折叠面板
+            '.inline-drawer:not(.open)',    // 未展开的内联折叠面板
+            'details:not([open])',          // 未展开的details元素
+            '.spoiler:not(.open)',          // 未展开的剧透
+            '.collapsed',                   // 已折叠的内容
+            '.collapsed-content',           // 折叠内容
+            
+            // 思维链特定容器（某些预设/扩展可能使用）
+            '.thinking-content',
+            '.thought-process',
+            '.reasoning-block',
+            '.thinking-block',
+            '.inner-thoughts',
+            
+            // iframe 通常用于隔离渲染思维链
+            'iframe',
+        ];
+        
+        for (const selector of selectorsToRemove) {
+            try {
+                const elements = clone.querySelectorAll(selector);
+                elements.forEach(el => el.remove());
+            } catch (e) {
+                // 某些选择器可能无效，忽略
+            }
+        }
+        
+        // 【特殊处理】检查代码块是否包含思维链HTML标签
+        // 如果代码块的内容看起来像是思维链HTML，移除它
+        const codeBlocks = clone.querySelectorAll('pre');
+        codeBlocks.forEach(pre => {
+            const codeContent = pre.textContent || '';
+            // 如果代码块内容包含思维链HTML标签，说明这是被转换成代码块的思维链
+            if (/<think>|<\/think>|<thinking>|<\/thinking>|<thought>|<\/thought>/i.test(codeContent)) {
+                pre.remove();
+            }
+        });
+        
+        // 获取纯文本，保留基本格式
+        let text = clone.innerText || clone.textContent || '';
+        
+        // 清理多余空白
+        text = text.replace(/\n{3,}/g, '\n\n').trim();
+        
+        return text;
+    }
+
+    /**
+     * 根据消息索引从DOM获取渲染后的文本
+     * @param {number} messageIndex - 消息在chat数组中的索引
+     * @returns {string|null} 渲染后的文本，如果获取失败则返回null
+     */
+    function getRenderedTextByIndex(messageIndex) {
+        try {
+            // SillyTavern使用mesid属性标识消息
+            const mesElement = document.querySelector(`#chat .mes[mesid="${messageIndex}"] .mes_text`);
+            if (mesElement) {
+                return extractVisibleTextFromDOM(mesElement);
+            }
+            
+            // 备用：尝试通过其他方式定位
+            const allMessages = document.querySelectorAll('#chat .mes .mes_text');
+            if (allMessages[messageIndex]) {
+                return extractVisibleTextFromDOM(allMessages[messageIndex]);
+            }
+            
+            return null;
+        } catch (e) {
+            console.warn('[Recall] DOM文本提取失败:', e);
+            return null;
+        }
+    }
+
+    /**
+     * 过滤掉AI回复中的思考过程（作为fallback）
      * 支持多种常见格式：<thinking>, <thought>, <reasoning>, 【思考】等
      */
     function filterThinkingContent(text) {
@@ -4392,13 +4490,33 @@ async function onMessageReceived(messageIndex) {
         
         if (!message || !message.mes) return;
         
-        // 过滤掉思考过程，只保留最终结果
-        let contentToSave = message.mes;
+        // 【核心改进】优先从DOM获取用户实际看到的内容
+        // 这样可以确保：不管用户用什么预设、什么正则、什么思维链格式，
+        // 保存的都是用户真正看到的内容
+        let contentToSave = null;
+        
         if (pluginSettings.filterThinking) {
-            contentToSave = filterThinkingContent(message.mes);
-            if (contentToSave !== message.mes) {
-                console.log('[Recall] 已过滤AI思考过程');
+            // 方案1（推荐）：稍等DOM渲染完成后，从DOM提取
+            // SillyTavern在MESSAGE_RECEIVED后会渲染消息
+            // 我们给它一点时间完成渲染
+            await new Promise(resolve => setTimeout(resolve, 100));
+            
+            const domText = getRenderedTextByIndex(messageIndex);
+            if (domText && domText.trim().length > 0) {
+                contentToSave = domText;
+                console.log('[Recall] ✓ 从DOM提取用户可见内容');
+            } else {
+                // 方案2（fallback）：DOM提取失败，使用正则过滤
+                contentToSave = filterThinkingContent(message.mes);
+                if (contentToSave !== message.mes) {
+                    console.log('[Recall] ⚠ DOM提取失败，已使用正则过滤思维链');
+                } else {
+                    console.log('[Recall] ⚠ DOM提取失败，使用原始内容');
+                }
             }
+        } else {
+            // 用户关闭了过滤功能，保存原始内容
+            contentToSave = message.mes;
         }
         
         // 如果过滤后内容为空，则跳过保存
