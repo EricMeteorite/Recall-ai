@@ -1273,22 +1273,8 @@ class RecallEngine:
         )
         task_manager.start_task(parent_task.id, "开始处理记忆...")
         
-        # === Recall 4.1: 创建 Episode（如果启用）===
+        # === Recall 4.1: Episode 变量声明（创建移到去重检查通过后）===
         current_episode = None
-        if self._episode_tracking_enabled and self.episode_store:
-            try:
-                from .models.temporal import EpisodicNode, EpisodeType
-                current_episode = EpisodicNode(
-                    source_type=EpisodeType.MESSAGE,
-                    content=content,
-                    user_id=user_id,
-                    source_description=f"User: {user_id}",
-                )
-                self.episode_store.save(current_episode)
-                _safe_print(f"[Recall] Episode 已创建: {current_episode.uuid}")
-            except Exception as e:
-                _safe_print(f"[Recall] Episode 创建失败（不影响主流程）: {e}")
-                current_episode = None
         
         try:
             # 【升级】去重检查：优先使用三阶段去重器（Phase 2），回退到简单字符串匹配
@@ -1368,6 +1354,22 @@ class RecallEngine:
             
             # 去重检查完成，无重复
             task_manager.complete_task(dedup_task.id, "无重复记忆")
+            
+            # === Recall 4.1: 创建 Episode（去重通过后才创建，避免重复内容产生多个片段）===
+            if self._episode_tracking_enabled and self.episode_store:
+                try:
+                    from .models.temporal import EpisodicNode, EpisodeType
+                    current_episode = EpisodicNode(
+                        source_type=EpisodeType.MESSAGE,
+                        content=content,
+                        user_id=user_id,
+                        source_description=f"User: {user_id}",
+                    )
+                    self.episode_store.save(current_episode)
+                    _safe_print(f"[Recall] Episode 已创建: {current_episode.uuid}")
+                except Exception as e:
+                    _safe_print(f"[Recall] Episode 创建失败（不影响主流程）: {e}")
+                    current_episode = None
             
             # 1. 提取实体（优先使用 SmartExtractor，回退到 EntityExtractor）
             # 任务追踪：实体提取
