@@ -436,7 +436,10 @@
                 } else {
                     const taskHtml = [];
                     for (const [id, task] of this.tasks) {
-                        const icon = this._getIcon(task.type, task.status);
+                        // 如果是后端任务，使用专门的后端图标
+                        const icon = task._backendType 
+                            ? this._getBackendIcon(task._backendType) 
+                            : this._getIcon(task.type, task.status);
                         const statusText = this._getStatusText(task.status);
                         const elapsed = Math.round((Date.now() - task.startTime) / 1000);
                         
@@ -624,7 +627,8 @@
                     status: statusMap[backendTask.status] || 'running',
                     startTime: backendTask.started_at ? backendTask.started_at * 1000 : Date.now(),
                     progress: backendTask.progress,
-                    _backendTaskId: backendTask.id  // 标记为后端任务
+                    _backendTaskId: backendTask.id,  // 标记为后端任务
+                    _backendType: backendTask.type   // 保存后端任务类型用于图标显示
                 });
                 this._updateUI();
             }
@@ -973,18 +977,19 @@ function createUI() {
                 </div>
                 
                 <!-- 标签页导航 -->
+                <!-- 注：移除了 onclick 处理器，统一由 window 级别 pointerdown 监听器处理，避免重复触发 -->
                 <div class="recall-tabs recall-tabs-scrollable">
-                    <button class="recall-tab active" data-tab="memories" onclick="window.recallTabClick && window.recallTabClick('memories')">📚 记忆</button>
-                    <button class="recall-tab" data-tab="entities" onclick="window.recallTabClick && window.recallTabClick('entities')">🏷️ 实体</button>
-                    <button class="recall-tab" data-tab="contexts" onclick="window.recallTabClick && window.recallTabClick('contexts')">📌 条件</button>
-                    <button class="recall-tab" data-tab="foreshadowing" onclick="window.recallTabClick && window.recallTabClick('foreshadowing')">🎭 伏笔</button>
-                    <button class="recall-tab" data-tab="contradictions" onclick="window.recallTabClick && window.recallTabClick('contradictions')">⚔️ 矛盾</button>
-                    <button class="recall-tab" data-tab="temporal" onclick="window.recallTabClick && window.recallTabClick('temporal')">⏱️ 时态</button>
-                    <button class="recall-tab" data-tab="graph" onclick="window.recallTabClick && window.recallTabClick('graph')">🕸️ 图谱</button>
-                    <button class="recall-tab" data-tab="episodes" onclick="window.recallTabClick && window.recallTabClick('episodes')">📖 片段</button>
-                    <button class="recall-tab" data-tab="search" onclick="window.recallTabClick && window.recallTabClick('search')">🔍 搜索</button>
-                    <button class="recall-tab" data-tab="core-settings" onclick="window.recallTabClick && window.recallTabClick('core-settings')">⚠️ 规则</button>
-                    <button class="recall-tab" data-tab="settings" onclick="window.recallTabClick && window.recallTabClick('settings')">⚙️ 设置</button>
+                    <button class="recall-tab active" data-tab="memories">📚 记忆</button>
+                    <button class="recall-tab" data-tab="entities">🏷️ 实体</button>
+                    <button class="recall-tab" data-tab="contexts">📌 条件</button>
+                    <button class="recall-tab" data-tab="foreshadowing">🎭 伏笔</button>
+                    <button class="recall-tab" data-tab="contradictions">⚔️ 矛盾</button>
+                    <button class="recall-tab" data-tab="temporal">⏱️ 时态</button>
+                    <button class="recall-tab" data-tab="graph">🕸️ 图谱</button>
+                    <button class="recall-tab" data-tab="episodes">📖 片段</button>
+                    <button class="recall-tab" data-tab="search">🔍 搜索</button>
+                    <button class="recall-tab" data-tab="core-settings">⚠️ 规则</button>
+                    <button class="recall-tab" data-tab="settings">⚙️ 设置</button>
                 </div>
                 
                 <!-- 记忆标签页 -->
