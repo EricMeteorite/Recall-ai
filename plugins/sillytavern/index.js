@@ -126,71 +126,242 @@
         return candidates[0];
     }
 
+    // 【新增】待处理的AI消息队列（等待渲染完成）
+    const pendingAIMessages = new Map();
+    
     /**
-     * 从DOM元素中智能提取用户可见的纯文本
-     * 只移除真正隐藏的内容，保留正常的代码块
+     * 处理渲染完成的消息
+     * 在 character_message_rendered 事件触发后调用
+     */
+    async function processPendingMessage(mesId) {
+        // 【关键】统一转为数字类型，与 onMessageReceived 保持一致
+        const messageIndex = typeof mesId === 'number' ? mesId : parseInt(mesId, 10);
+        if (isNaN(messageIndex)) {
+            console.warn('[Recall] processPendingMessage: 无效的 mesId:', mesId);
+            return;
+        }
+        
+        // 检查是否有待处理的消息
+        if (!pendingAIMessages.has(messageIndex)) {
+            return; // 这条消息不需要处理（可能不是通过 MESSAGE_RECEIVED 触发的）
+        }
+        
+        const pendingData = pendingAIMessages.get(messageIndex);
+        pendingAIMessages.delete(messageIndex);
+        
+        console.log(`[Recall] 处理渲染完成的消息 #${messageIndex}`);
+        
+        try {
+            await saveAIMessageWithDOMExtraction(messageIndex, pendingData);
+        } catch (e) {
+            console.warn('[Recall] 处理渲染完成消息失败:', e);
+        }
+    }
+    
+    /**
+     * 从DOM提取内容并保存AI消息
+     */
+    async function saveAIMessageWithDOMExtraction(messageIndex, messageData) {
+        const { message } = messageData;
+        
+        let contentToSave = null;
+        
+        if (pluginSettings.filterThinking) {
+            // 现在消息已经渲染完成，可以安全地从DOM提取
+            const domText = getRenderedTextByIndex(messageIndex);
+            if (domText && domText.trim().length > 0) {
+                contentToSave = domText;
+                console.log('[Recall] ✓ 从DOM提取用户可见内容（渲染完成后）');
+            } else {
+                // fallback：DOM提取失败，使用正则过滤
+                contentToSave = filterThinkingContent(message.mes);
+                if (contentToSave !== message.mes) {
+                    console.log('[Recall] ⚠ DOM提取失败，已使用正则过滤思维链');
+                } else {
+                    console.log('[Recall] ⚠ DOM提取失败，使用原始内容');
+                }
+            }
+        } else {
+            contentToSave = message.mes;
+        }
+        
+        // 如果过滤后内容为空，跳过
+        if (!contentToSave || contentToSave.trim().length === 0) {
+            console.log('[Recall] 过滤后内容为空，跳过保存');
+            return;
+        }
+        
+        // 长文本分段处理
+        const chunkSize = pluginSettings.chunkSize || 2000;
+        const shouldChunk = pluginSettings.autoChunkLongText && contentToSave.length > chunkSize;
+        const chunks = shouldChunk ? chunkLongText(contentToSave, chunkSize) : [contentToSave];
+        
+        if (chunks.length > 1) {
+            console.log(`[Recall] 长文本(${contentToSave.length}字)分成${chunks.length}段保存`);
+        }
+        
+        const timestamp = Date.now();
+        let firstChunkPromise = null;
+        
+        for (let i = 0; i < chunks.length; i++) {
+            const chunk = chunks[i];
+            const isMultiPart = chunks.length > 1;
+            
+            const promise = memorySaveQueue.add({
+                content: chunk,
+                user_id: currentCharacterId || 'default',
+                metadata: { 
+                    role: 'assistant', 
+                    source: 'sillytavern',
+                    character: message.name || 'AI',
+                    character_id: currentCharacterId || 'default',
+                    timestamp: timestamp,
+                    ...(isMultiPart && {
+                        chunk_index: i + 1,
+                        chunk_total: chunks.length,
+                        original_length: contentToSave.length
+                    })
+                }
+            });
+            
+            if (i === 0) {
+                firstChunkPromise = promise;
+            }
+        }
+        
+        console.log(`[Recall] AI响应已加入保存队列 (${chunks.length}段, 共${contentToSave.length}字)`);
+        
+        if (firstChunkPromise) {
+            firstChunkPromise.then(result => {
+                if (result.success) {
+                    notifyForeshadowingAnalyzer(contentToSave, 'assistant');
+                } else {
+                    console.log('[Recall] AI响应跳过伏笔分析（重复内容）');
+                }
+            }).catch(err => {
+                console.warn('[Recall] 保存AI响应失败:', err);
+            });
+        }
+    }
+
+    /**
+     * 从DOM元素中提取用户真正能看到的文本
+     * 【通用方案】基于实际渲染状态判断，不依赖任何特定的CSS类名
      * @param {Element} element - 消息的.mes_text元素
      * @returns {string} 用户实际看到的纯文本
      */
     function extractVisibleTextFromDOM(element) {
         if (!element) return null;
         
-        // 克隆元素以避免修改原始DOM
-        const clone = element.cloneNode(true);
-        
-        // 【重要】只移除真正不可见/隐藏的元素
-        // 不要移除正常的 pre/code，那些是用户能看到的代码块！
-        const selectorsToRemove = [
-            // 通用隐藏元素
-            '[style*="display: none"]',
-            '[style*="display:none"]',
-            '[hidden]',
-            '.hidden',
+        /**
+         * 检查元素是否真正可见（基于计算样式）
+         * 注意：不处理 details 元素的特殊逻辑，那在 extractText 中单独处理
+         */
+        function isBasicVisible(el) {
+            if (!el || el.nodeType !== Node.ELEMENT_NODE) return true;
             
-            // SillyTavern 特定的隐藏类
-            '.mes_hide',            // SillyTavern隐藏的内容
-            
-            // 折叠/收起的内容（用户看不到的）
-            '.toggle-drawer:not(.open)',    // 未展开的折叠面板
-            '.inline-drawer:not(.open)',    // 未展开的内联折叠面板
-            'details:not([open])',          // 未展开的details元素
-            '.spoiler:not(.open)',          // 未展开的剧透
-            '.collapsed',                   // 已折叠的内容
-            '.collapsed-content',           // 折叠内容
-            
-            // 思维链特定容器（某些预设/扩展可能使用）
-            '.thinking-content',
-            '.thought-process',
-            '.reasoning-block',
-            '.thinking-block',
-            '.inner-thoughts',
-            
-            // iframe 通常用于隔离渲染思维链
-            'iframe',
-        ];
-        
-        for (const selector of selectorsToRemove) {
             try {
-                const elements = clone.querySelectorAll(selector);
-                elements.forEach(el => el.remove());
+                const style = window.getComputedStyle(el);
+                
+                // 检查各种隐藏方式
+                if (style.display === 'none') return false;
+                if (style.visibility === 'hidden') return false;
+                if (style.opacity === '0') return false;
+                
+                // 检查尺寸为0的情况（常见的隐藏技巧）
+                if (parseFloat(style.height) === 0 && style.overflow === 'hidden') return false;
+                if (parseFloat(style.width) === 0 && style.overflow === 'hidden') return false;
+                
+                return true;
             } catch (e) {
-                // 某些选择器可能无效，忽略
+                // getComputedStyle 可能在某些情况下失败
+                return true;
             }
         }
         
-        // 【特殊处理】检查代码块是否包含思维链HTML标签
-        // 如果代码块的内容看起来像是思维链HTML，移除它
-        const codeBlocks = clone.querySelectorAll('pre');
-        codeBlocks.forEach(pre => {
-            const codeContent = pre.textContent || '';
-            // 如果代码块内容包含思维链HTML标签，说明这是被转换成代码块的思维链
-            if (/<think>|<\/think>|<thinking>|<\/thinking>|<thought>|<\/thought>/i.test(codeContent)) {
-                pre.remove();
+        /**
+         * 递归提取可见文本
+         * 递归保证：只有当父元素可见时，子元素才会被处理
+         */
+        function extractText(node) {
+            // 文本节点：直接返回内容（父元素可见性已在上层检查）
+            if (node.nodeType === Node.TEXT_NODE) {
+                return node.textContent || '';
             }
-        });
+            
+            // 非元素节点：跳过
+            if (node.nodeType !== Node.ELEMENT_NODE) {
+                return '';
+            }
+            
+            // 基本可见性检查
+            if (!isBasicVisible(node)) {
+                return '';
+            }
+            
+            // 跳过不应提取的元素
+            const skipTags = ['IFRAME', 'SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE'];
+            if (skipTags.includes(node.tagName)) {
+                return '';
+            }
+            
+            // 跳过 aria-hidden="true" 的元素（无障碍隐藏）
+            if (node.getAttribute('aria-hidden') === 'true') {
+                return '';
+            }
+            
+            // 特殊处理：未展开的 <details> 元素
+            // 只提取 <summary> 内容，跳过其他子元素
+            if (node.tagName === 'DETAILS' && !node.hasAttribute('open')) {
+                let text = '';
+                for (const child of node.children) {
+                    if (child.tagName === 'SUMMARY') {
+                        text += extractText(child);
+                        break;
+                    }
+                }
+                return text + '\n';
+            }
+            
+            // 【修复】检查是否在未展开的 details 中（且不是 summary 或其子元素）
+            // 注意：这个检查只对非 details 元素生效（因为 details 在上面已经处理过了）
+            if (node.tagName !== 'DETAILS') {
+                const parentDetails = node.closest('details:not([open])');
+                if (parentDetails) {
+                    // 检查是否在 summary 内部
+                    const parentSummary = node.closest('summary');
+                    // 如果有 parentSummary 且它是这个 parentDetails 的子元素，则允许提取
+                    if (!parentSummary || !parentDetails.contains(parentSummary)) {
+                        return '';
+                    }
+                }
+            }
+            
+            // 普通元素：递归处理所有子节点
+            let text = '';
+            for (const child of node.childNodes) {
+                text += extractText(child);
+            }
+            
+            // 在块级元素后添加换行
+            try {
+                const display = window.getComputedStyle(node).display;
+                if (display === 'block' || display === 'flex' || display === 'grid' || 
+                    node.tagName === 'BR' || node.tagName === 'P' || node.tagName === 'DIV' ||
+                    node.tagName === 'LI' || node.tagName === 'H1' || node.tagName === 'H2' ||
+                    node.tagName === 'H3' || node.tagName === 'H4' || node.tagName === 'H5' ||
+                    node.tagName === 'H6' || node.tagName === 'BLOCKQUOTE' || node.tagName === 'PRE') {
+                    text += '\n';
+                }
+            } catch (e) {
+                // 忽略
+            }
+            
+            return text;
+        }
         
-        // 获取纯文本，保留基本格式
-        let text = clone.innerText || clone.textContent || '';
+        // 提取可见文本
+        let text = extractText(element);
         
         // 清理多余空白
         text = text.replace(/\n{3,}/g, '\n\n').trim();
@@ -3575,6 +3746,8 @@ function registerEventHandlers(context) {
         });
         eventSource.on('character_message_rendered', (mesId) => {
             console.log('[Recall] ▶▶▶ character_message_rendered 事件触发，mesId:', mesId);
+            // 【新增】消息渲染完成后，处理待保存的消息
+            processPendingMessage(mesId);
         });
         
         console.log('[Recall] 事件监听器已注册');
@@ -4371,10 +4544,17 @@ async function onMessageSent(messageIndex) {
         return;
     }
     
+    // 【一致性】统一转为数字类型
+    const numericIndex = typeof messageIndex === 'number' ? messageIndex : parseInt(messageIndex, 10);
+    if (isNaN(numericIndex)) {
+        console.warn('[Recall] onMessageSent: 无效的消息索引:', messageIndex);
+        return;
+    }
+    
     try {
         const context = SillyTavern.getContext();
         const chat = context.chat;
-        const message = chat[messageIndex];
+        const message = chat[numericIndex];
         
         console.log(`[Recall] 获取到消息:`, {
             hasMessage: !!message,
@@ -4478,109 +4658,118 @@ function chunkLongText(text, maxSize = 2000) {
 
 /**
  * 消息接收时
- * 【优化】使用队列保存，不阻塞 AI 响应显示
+ * 【重构】不直接处理，而是等待 character_message_rendered 事件
  */
 async function onMessageReceived(messageIndex) {
     if (!pluginSettings.enabled || !isConnected) return;
     
+    // 【关键】统一将 messageIndex 转为数字，确保 Map 键类型一致
+    const numericIndex = typeof messageIndex === 'number' ? messageIndex : parseInt(messageIndex, 10);
+    if (isNaN(numericIndex)) {
+        console.warn('[Recall] 无效的消息索引:', messageIndex);
+        return;
+    }
+    
     try {
         const context = SillyTavern.getContext();
         const chat = context.chat;
-        const message = chat[messageIndex];
+        const message = chat[numericIndex];
         
         if (!message || !message.mes) return;
         
-        // 【核心改进】优先从DOM获取用户实际看到的内容
-        // 这样可以确保：不管用户用什么预设、什么正则、什么思维链格式，
-        // 保存的都是用户真正看到的内容
-        let contentToSave = null;
-        
+        // 如果启用了思维链过滤，等待渲染完成后再处理
         if (pluginSettings.filterThinking) {
-            // 方案1（推荐）：稍等DOM渲染完成后，从DOM提取
-            // SillyTavern在MESSAGE_RECEIVED后会渲染消息
-            // 我们给它一点时间完成渲染
-            await new Promise(resolve => setTimeout(resolve, 100));
+            // 将消息加入待处理队列，等待 character_message_rendered 事件
+            pendingAIMessages.set(numericIndex, { message });
+            console.log(`[Recall] AI消息 #${numericIndex} 已加入待处理队列，等待渲染完成...`);
             
-            const domText = getRenderedTextByIndex(messageIndex);
-            if (domText && domText.trim().length > 0) {
-                contentToSave = domText;
-                console.log('[Recall] ✓ 从DOM提取用户可见内容');
-            } else {
-                // 方案2（fallback）：DOM提取失败，使用正则过滤
-                contentToSave = filterThinkingContent(message.mes);
-                if (contentToSave !== message.mes) {
-                    console.log('[Recall] ⚠ DOM提取失败，已使用正则过滤思维链');
-                } else {
-                    console.log('[Recall] ⚠ DOM提取失败，使用原始内容');
+            // 设置超时：如果 5 秒内没有收到渲染完成事件，就用 fallback 方案
+            setTimeout(() => {
+                if (pendingAIMessages.has(numericIndex)) {
+                    console.log(`[Recall] ⚠ 消息 #${numericIndex} 渲染超时，使用 fallback 方案`);
+                    pendingAIMessages.delete(numericIndex);
+                    saveAIMessageFallback(numericIndex, message);
                 }
-            }
+            }, 5000);
         } else {
-            // 用户关闭了过滤功能，保存原始内容
-            contentToSave = message.mes;
-        }
-        
-        // 如果过滤后内容为空，则跳过保存
-        if (!contentToSave || contentToSave.trim().length === 0) {
-            console.log('[Recall] 过滤后内容为空，跳过保存');
-            return;
-        }
-        
-        // 长文本分段处理
-        const chunkSize = pluginSettings.chunkSize || 2000;
-        const shouldChunk = pluginSettings.autoChunkLongText && contentToSave.length > chunkSize;
-        const chunks = shouldChunk ? chunkLongText(contentToSave, chunkSize) : [contentToSave];
-        
-        if (chunks.length > 1) {
-            console.log(`[Recall] 长文本(${contentToSave.length}字)分成${chunks.length}段保存`);
-        }
-        
-        // 【修复】使用队列保存，并跟踪第一段的保存结果来决定是否触发伏笔分析
-        const timestamp = Date.now();
-        let firstChunkPromise = null;
-        
-        for (let i = 0; i < chunks.length; i++) {
-            const chunk = chunks[i];
-            const isMultiPart = chunks.length > 1;
-            
-            const promise = memorySaveQueue.add({
-                content: chunk,
-                user_id: currentCharacterId || 'default',
-                metadata: { 
-                    role: 'assistant', 
-                    source: 'sillytavern',
-                    character: message.name || 'AI',
-                    character_id: currentCharacterId || 'default',
-                    timestamp: timestamp,
-                    // 分段信息
-                    ...(isMultiPart && {
-                        chunk_index: i + 1,
-                        chunk_total: chunks.length,
-                        original_length: contentToSave.length
-                    })
-                }
-            });
-            
-            // 保存第一段的 Promise
-            if (i === 0) {
-                firstChunkPromise = promise;
-            }
-        }
-        
-        console.log(`[Recall] AI响应已加入保存队列 (${chunks.length}段, 共${contentToSave.length}字)`);
-        
-        // 【修复】等待第一段保存结果，只有成功（非重复）才触发伏笔分析
-        if (firstChunkPromise) {
-            firstChunkPromise.then(result => {
-                if (result.success) {
-                    // 记忆保存成功（非重复），触发伏笔分析
-                    notifyForeshadowingAnalyzer(contentToSave, 'assistant');
-                } else {
-                    console.log('[Recall] AI响应跳过伏笔分析（重复内容）');
-                }
-            });
+            // 用户关闭了过滤功能，直接保存原始内容
+            saveAIMessageDirect(numericIndex, message, message.mes);
         }
     } catch (e) {
         console.warn('[Recall] 处理AI响应失败:', e);
+    }
+}
+
+/**
+ * Fallback：使用正则过滤保存消息
+ */
+async function saveAIMessageFallback(messageIndex, message) {
+    let contentToSave = filterThinkingContent(message.mes);
+    if (contentToSave !== message.mes) {
+        console.log('[Recall] 使用正则过滤思维链（fallback）');
+    }
+    await saveAIMessageDirect(messageIndex, message, contentToSave);
+}
+
+/**
+ * 直接保存AI消息（已处理好的内容）
+ */
+async function saveAIMessageDirect(messageIndex, message, contentToSave) {
+    if (!contentToSave || contentToSave.trim().length === 0) {
+        console.log('[Recall] 内容为空，跳过保存');
+        return;
+    }
+    
+    // 长文本分段处理
+    const chunkSize = pluginSettings.chunkSize || 2000;
+    const shouldChunk = pluginSettings.autoChunkLongText && contentToSave.length > chunkSize;
+    const chunks = shouldChunk ? chunkLongText(contentToSave, chunkSize) : [contentToSave];
+    
+    if (chunks.length > 1) {
+        console.log(`[Recall] 长文本(${contentToSave.length}字)分成${chunks.length}段保存`);
+    }
+    
+    const timestamp = Date.now();
+    let firstChunkPromise = null;
+    
+    for (let i = 0; i < chunks.length; i++) {
+        const chunk = chunks[i];
+        const isMultiPart = chunks.length > 1;
+        
+        const promise = memorySaveQueue.add({
+            content: chunk,
+            user_id: currentCharacterId || 'default',
+            metadata: { 
+                role: 'assistant', 
+                source: 'sillytavern',
+                character: message.name || 'AI',
+                character_id: currentCharacterId || 'default',
+                timestamp: timestamp,
+                ...(isMultiPart && {
+                    chunk_index: i + 1,
+                    chunk_total: chunks.length,
+                    original_length: contentToSave.length
+                })
+            }
+        });
+        
+        if (i === 0) {
+            firstChunkPromise = promise;
+        }
+    }
+    
+    console.log(`[Recall] AI响应已加入保存队列 (${chunks.length}段, 共${contentToSave.length}字)`);
+    
+    if (firstChunkPromise) {
+        firstChunkPromise.then(result => {
+            if (result.success) {
+                notifyForeshadowingAnalyzer(contentToSave, 'assistant');
+            } else {
+                console.log('[Recall] AI响应跳过伏笔分析（重复内容）');
+            }
+        }).catch(err => {
+            console.warn('[Recall] 保存AI响应失败:', err);
+        });
     }
 }
 
@@ -4639,6 +4828,10 @@ async function onChatChanged() {
  * 角色切换时清空所有列表，重置 loading 标志和已加载标志
  */
 function clearAllListsForCharacterSwitch() {
+    // 【重要】清空待处理的AI消息队列，避免旧消息保存到新角色
+    pendingAIMessages.clear();
+    console.log('[Recall] 已清空待处理消息队列');
+    
     // 重置所有 loading 标志
     _loadMemoriesLoading = false;
     _loadForeshadowingsLoading = false;
