@@ -196,6 +196,11 @@
     let _episodesLoaded = false;
     let _temporalStatsLoaded = false;
     
+    // 角色切换时间戳（用于检测 greeting 消息）
+    let _lastCharacterSwitchTime = 0;
+    // 角色切换时的聊天记录长度（用于判断新消息）
+    let _chatLengthAtSwitch = 0;
+    
     // 请求ID（用于在角色切换时取消旧请求）
     let _loadMemoriesRequestId = 0;
     let _loadMemoriesController = null;
@@ -3678,9 +3683,16 @@ function startCharacterPolling() {
  */
 async function initializeCurrentCharacter() {
     try {
+        // 【重要】记录初始化时间，用于检测 greeting 消息
+        _lastCharacterSwitchTime = Date.now();
+        
         const context = SillyTavern.getContext();
         const characterId = context.characterId;
         const character = characterId !== undefined ? context.characters[characterId] : null;
+        
+        // 【关键】记录初始化时的聊天记录长度
+        _chatLengthAtSwitch = context.chat?.length || 0;
+        console.log(`[Recall] initializeCurrentCharacter - 记录聊天长度: ${_chatLengthAtSwitch}`);
         
         if (character) {
             currentCharacterId = character.name || `char_${characterId}`;
@@ -4392,6 +4404,23 @@ async function onMessageReceived(messageIndex) {
         
         if (!message || !message.mes) return;
         
+        // 【核心修复】检测是否是角色切换时加载的旧消息（greeting 等）
+        // 原理：记录切换角色时的聊天长度，只有 index >= 该长度的才是真正新消息
+        // 这样无论过多久重新打开角色卡，已有的消息都不会被重复保存
+        
+        // 【边界情况】如果 _chatLengthAtSwitch 还没初始化（= 0），需要延迟处理
+        // 因为 initializeCurrentCharacter 是 500ms 延迟执行的
+        if (_chatLengthAtSwitch === 0 && _lastCharacterSwitchTime === 0) {
+            // 还没初始化，先更新一下当前聊天长度作为基准
+            _chatLengthAtSwitch = chat.length;
+            console.log(`[Recall] 首次收到消息，初始化 chatLengthAtSwitch=${_chatLengthAtSwitch}`);
+        }
+        
+        if (messageIndex < _chatLengthAtSwitch) {
+            console.log(`[Recall] 跳过已有消息 (index=${messageIndex} < chatLengthAtSwitch=${_chatLengthAtSwitch})，可能是 greeting 或历史消息`);
+            return;
+        }
+        
         // 过滤掉思考过程，只保留最终结果
         let contentToSave = message.mes;
         if (pluginSettings.filterThinking) {
@@ -4472,10 +4501,17 @@ async function onMessageReceived(messageIndex) {
 async function onChatChanged() {
     console.log('[Recall] ▶▶▶ onChatChanged 被触发');
     
+    // 【重要】记录角色切换时间和当前聊天长度，用于检测 greeting 消息
+    _lastCharacterSwitchTime = Date.now();
+    
     // 获取当前角色信息
     const context = SillyTavern.getContext();
     const characterId = context.characterId;
     const character = characterId !== undefined ? context.characters[characterId] : null;
+    
+    // 【关键】记录切换时的聊天记录长度，只有 index >= 这个值的消息才是新消息
+    _chatLengthAtSwitch = context.chat?.length || 0;
+    console.log(`[Recall] onChatChanged - 记录聊天长度: ${_chatLengthAtSwitch}`);
     
     console.log('[Recall] onChatChanged - characterId:', characterId, 'character:', character?.name, 'groupId:', context.groupId);
     
