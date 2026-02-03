@@ -672,18 +672,20 @@
     }
 
     // ============== 核心：标签点击处理函数 ==============
-    // 防抖标志，防止 pointerdown 和 mousedown 重复触发
+    // 防抖标志，防止 pointerdown 和其他事件重复触发
     let _lastTabClickTime = 0;
-    const TAB_CLICK_DEBOUNCE = 100; // 100ms 内的重复点击会被忽略
+    let _lastTabClickName = '';
+    const TAB_CLICK_DEBOUNCE = 300; // 300ms 内的同一标签重复点击会被忽略
     
     function handleRecallTabClick(tabName) {
-        // 防抖处理
+        // 防抖处理 - 同一标签在短时间内只处理一次
         const now = Date.now();
-        if (now - _lastTabClickTime < TAB_CLICK_DEBOUNCE) {
-            console.log(`[Recall] 标签点击被防抖过滤: ${tabName}`);
+        if (now - _lastTabClickTime < TAB_CLICK_DEBOUNCE && _lastTabClickName === tabName) {
+            console.log(`[Recall] 标签点击被防抖过滤: ${tabName} (${now - _lastTabClickTime}ms)`);
             return;
         }
         _lastTabClickTime = now;
+        _lastTabClickName = tabName;
         
         console.log(`[Recall] 标签点击: ${tabName}`);
         
@@ -3120,11 +3122,21 @@ async function onSaveForeshadowingAnalyzerConfig() {
 
 // ==================== 绝对规则功能（ST 补充功能） ====================
 
+// 加载状态标志，防止重复加载
+let _loadCoreSettingsLoading = false;
+
 /**
  * 加载绝对规则
  * 注：角色卡/世界观/写作风格请使用 SillyTavern 自带功能
  */
 async function loadCoreSettings() {
+    // 防止重复加载
+    if (_loadCoreSettingsLoading) {
+        console.log('[Recall] loadCoreSettings 正在加载中，跳过重复调用');
+        return;
+    }
+    _loadCoreSettingsLoading = true;
+    
     const taskId = taskTracker.add('load', '加载绝对规则');
     
     try {
@@ -3155,6 +3167,8 @@ async function loadCoreSettings() {
     } catch (e) {
         taskTracker.complete(taskId, false, e.message);
         console.error('[Recall] 加载绝对规则失败:', e);
+    } finally {
+        _loadCoreSettingsLoading = false;
     }
 }
 
