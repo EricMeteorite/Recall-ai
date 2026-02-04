@@ -1111,7 +1111,8 @@
             }
             
             // 跳过不应提取的元素
-            const skipTags = ['IFRAME', 'SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE'];
+            // 【重要】包含 PRE 和 CODE 标签，避免提取代码/思考内容
+            const skipTags = ['IFRAME', 'SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'PRE', 'CODE', 'SVG', 'CANVAS'];
             if (skipTags.includes(node.tagName)) {
                 return '';
             }
@@ -1242,131 +1243,122 @@
     function extractSemanticContent(mesText) {
         if (!mesText) return '';
         
-        // 应该跳过的类名关键词（思考/推理相关）
-        const SKIP_CLASS_KEYWORDS = [
-            'think', 'thought', 'reasoning', 'reflection',
-            'cot', 'chain-of-thought',
-            'inner', 'internal',
-            'hidden', 'collapsed', 'folded',
-            'monologue'
-        ];
-        
-        // 应该跳过的标签
-        const SKIP_TAGS = new Set([
-            'SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE',
-            'IFRAME', 'SVG', 'CANVAS', 'VIDEO', 'AUDIO',
-            'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA'
-        ]);
-        
-        /**
-         * 检查元素是否应该被移除
-         */
-        function shouldRemove(el) {
-            if (!el || el.nodeType !== Node.ELEMENT_NODE) return false;
-            
-            const tagName = el.tagName;
-            
-            // DETAILS 元素特殊处理：
-            // - 未展开的 details：不直接移除整个元素，而是在后面单独处理其内部非 summary 内容
-            // - 展开的 details：正常处理
-            // 注意：这里不返回 true，让后面的代码单独处理未展开 details 的内容
-            
-            // SUMMARY：不移除，因为它是用户可见的（作为折叠标题）
-            // 无论 details 是否展开，summary 都是可见的
-            
-            // 跳过特定标签
-            if (SKIP_TAGS.has(tagName)) return true;
-            
-            // 检查 hidden 属性
-            if (el.hidden) return true;
-            if (el.getAttribute('aria-hidden') === 'true') return true;
-            
-            // 检查类名是否包含思考相关关键词
-            let classStr = '';
-            if (el.className) {
-                if (typeof el.className === 'string') {
-                    classStr = el.className.toLowerCase();
-                } else if (el.className.baseVal) {
-                    classStr = el.className.baseVal.toLowerCase();
-                }
-            }
-            const idStr = (el.id || '').toLowerCase();
-            const combined = classStr + ' ' + idStr;
-            
-            for (const keyword of SKIP_CLASS_KEYWORDS) {
-                if (combined.includes(keyword)) return true;
-            }
-            
-            // 检查用户自定义的过滤选择器
-            if (Array.isArray(pluginSettings.customFilterSelectors)) {
-                for (const selector of pluginSettings.customFilterSelectors) {
-                    try {
-                        if (selector && el.matches(selector)) return true;
-                    } catch (e) {}
-                }
-            }
-            
-            return false;
-        }
-        
-        // 【方法】克隆 DOM 树，移除思考容器，然后提取文本
+        // ★★★ 核心策略：正向提取用户可见的文本内容 ★★★
+        // 支持的元素：<p>、<ul>、<ol>、<blockquote>、<h1>-<h6>、<details>（展开或 summary）
+        // 无论使用什么预设都适用
         try {
-            // 1. 克隆 DOM 树（深拷贝）
-            const clone = mesText.cloneNode(true);
+            // 【辅助函数】获取清理后的完整文本（用于兜底和比较）
+            function getCleanedFullText() {
+                const clone = mesText.cloneNode(true);
+                
+                // 移除所有可能的隐藏/代码/思考容器
+                const removeSelectors = [
+                    'pre', 'code', 'iframe', 'script', 'style', 'svg', 'canvas',
+                    '[class*="hidden"]', '[class*="think"]', '[class*="reasoning"]',
+                    '[class*="TH-"]', '[class*="cot"]', '[class*="collapsed"]',
+                    '[aria-hidden="true"]', '[hidden]'
+                ].join(', ');
+                
+                const toRemove = clone.querySelectorAll(removeSelectors);
+                for (const el of toRemove) {
+                    el.remove();
+                }
+                
+                let text = clone.textContent || '';
+                text = text.replace(/[ \t]+/g, ' ');
+                text = text.replace(/\n[ \t]+/g, '\n');
+                text = text.replace(/[ \t]+\n/g, '\n');
+                text = text.replace(/\n{3,}/g, '\n\n');
+                text = text.trim();
+                
+                return text;
+            }
             
-            // 2. 特殊处理：未展开的 <details> 元素
-            // 只保留 <summary> 内容，移除其他子元素
-            const closedDetails = clone.querySelectorAll('details:not([open])');
-            for (const details of closedDetails) {
-                // 保留 summary，移除其他所有子元素
-                const children = Array.from(details.children);
-                for (const child of children) {
-                    if (child.tagName !== 'SUMMARY') {
-                        child.remove();
+            const textParts = [];
+            
+            // 1. 获取所有直接子元素中的常见正文标签
+            //    使用 :scope > xxx 只选择直接子元素，避免选中嵌套在代码容器内的内容
+            const contentSelectors = ':scope > p, :scope > ul, :scope > ol, :scope > blockquote, :scope > h1, :scope > h2, :scope > h3, :scope > h4, :scope > h5, :scope > h6';
+            const directContent = mesText.querySelectorAll(contentSelectors);
+            for (const el of directContent) {
+                const text = el.textContent?.trim();
+                if (text) {
+                    textParts.push(text);
+                }
+            }
+            
+            // 2. 处理直接子元素中的 <details>
+            //    - 展开的 details：提取全部内容
+            //    - 未展开的 details：只提取 summary
+            const directDetails = mesText.querySelectorAll(':scope > details');
+            for (const details of directDetails) {
+                if (details.hasAttribute('open')) {
+                    // 展开状态：提取全部内容
+                    const text = details.textContent?.trim();
+                    if (text) {
+                        textParts.push(text);
+                    }
+                } else {
+                    // 未展开状态：只提取 summary
+                    const summary = details.querySelector('summary');
+                    if (summary) {
+                        const text = summary.textContent?.trim();
+                        if (text) {
+                            textParts.push(text);
+                        }
                     }
                 }
             }
             
-            // 3. 收集所有需要移除的元素
-            const toRemove = [];
-            const allElements = clone.querySelectorAll('*');
-            console.log(`[Recall] 语义提取: 检查 ${allElements.length} 个元素`);
-            
-            for (const el of allElements) {
-                if (shouldRemove(el)) {
-                    toRemove.push(el);
-                    console.log(`[Recall] 语义提取: 将移除 <${el.tagName.toLowerCase()}> class="${el.className}"`);
-                }
-            }
-            
-            console.log(`[Recall] 语义提取: 共移除 ${toRemove.length} 个元素`);
-            
-            // 4. 移除收集到的元素（从后往前移除，避免索引问题）
-            for (let i = toRemove.length - 1; i >= 0; i--) {
-                const el = toRemove[i];
-                if (el.parentNode) {
+            // 3. 如果直接子元素没有找到内容，尝试更宽泛的选择
+            //    但要排除在 pre、code、iframe 等内部的内容
+            if (textParts.length === 0) {
+                // 克隆并移除不需要的容器
+                const clone = mesText.cloneNode(true);
+                
+                // 移除所有 pre、code、iframe、script、style 等
+                const removeSelectors = 'pre, code, iframe, script, style, svg, canvas, [class*="hidden"], [class*="think"], [class*="reasoning"]';
+                const toRemove = clone.querySelectorAll(removeSelectors);
+                for (const el of toRemove) {
                     el.remove();
                 }
+                
+                // 再次尝试获取内容元素
+                const contentElements = clone.querySelectorAll('p, ul, ol, blockquote, h1, h2, h3, h4, h5, h6');
+                for (const el of contentElements) {
+                    const text = el.textContent?.trim();
+                    if (text) {
+                        textParts.push(text);
+                    }
+                }
             }
             
-            // 5. 获取剩余内容的文本
-            let text = clone.textContent || '';
-            
-            // 6. 清理：多余空白、连续换行
-            text = text.replace(/[ \t]+/g, ' ');  // 合并连续空格
-            text = text.replace(/\n[ \t]+/g, '\n');  // 移除行首空白
-            text = text.replace(/[ \t]+\n/g, '\n');  // 移除行尾空白
-            text = text.replace(/\n{3,}/g, '\n\n');  // 最多两个连续换行
-            text = text.trim();
-            
-            console.log(`[Recall] 语义提取: 原始DOM ${mesText.textContent?.length || 0} 字 → 过滤后 ${text.length} 字`);
-            
-            // 【调试】显示提取结果的前 200 字
-            if (text.length > 0) {
-                console.log(`[Recall] 语义提取预览: ${text.substring(0, 200)}${text.length > 200 ? '...' : ''}`);
+            // 4. 如果还是没有内容，最后尝试获取所有文本（排除隐藏内容）
+            if (textParts.length === 0) {
+                const fallbackText = getCleanedFullText();
+                if (fallbackText) {
+                    return fallbackText;
+                }
             }
             
-            return text;
+            // 5. 合并所有提取的文本
+            let result = textParts.join('\n\n');
+            result = result.replace(/[ \t]+/g, ' ');
+            result = result.replace(/\n[ \t]+/g, '\n');
+            result = result.replace(/[ \t]+\n/g, '\n');
+            result = result.replace(/\n{3,}/g, '\n\n');
+            result = result.trim();
+            
+            // 6. 【安全检查】如果提取的内容明显少于完整文本，使用兜底方案
+            //    这可以防止混合内容（部分有标签、部分没有）导致的内容丢失
+            const cleanedFullText = getCleanedFullText();
+            // 条件：完整文本比提取内容长 20% 以上，且差距超过 5 字符
+            if (result.length > 0 && cleanedFullText.length > result.length * 1.2 && cleanedFullText.length - result.length > 5) {
+                // 说明可能有内容被遗漏，使用完整文本
+                return cleanedFullText;
+            }
+            
+            return result;
             
         } catch (e) {
             console.warn('[Recall] 语义提取失败:', e);
