@@ -718,10 +718,12 @@
                     console.log('[Recall] ⚠ DOM提取失败，使用原始内容');
                 }
             }
+        } else {
+            // 用户关闭了过滤功能，直接使用原始内容
+            // 注意：这个分支理论上不会触发，因为调用者会检查 filterThinking
+            contentToSave = message.mes;
+            console.log('[Recall] 未启用智能提取，使用原始内容');
         }
-        
-        // 【重要】无论哪种路径，都确保应用自定义选择器
-        // 因为这个函数只在 filterThinking=true 时被调用，所以到这里 contentToSave 已经被处理过了
         
         // 如果过滤后内容为空，跳过
         if (!contentToSave || contentToSave.trim().length === 0) {
@@ -799,19 +801,26 @@
             const tempDiv = document.createElement('div');
             tempDiv.innerHTML = cleaned;
             
-            // 查找并移除所有"思考容器"（只用通用语义关键词）
+            // 查找并移除所有"思考容器"
+            // 【注意】这里使用更保守的选择器，因为这是 fallback 路径
+            // 只移除明显是思考内容容器的元素，避免误删正常内容
             const thinkingSelectors = [
+                // 思考内容容器（必须同时包含关键词和"content"）
                 '[class*="think"][class*="content"]',
                 '[class*="thought"][class*="content"]',
                 '[class*="reasoning"][class*="content"]',
                 '[class*="cot"][class*="content"]',
                 '[class*="reflection"][class*="content"]',
                 '[class*="inner"][class*="content"]',
+                '[class*="monologue"][class*="content"]',
+                // 折叠容器
                 '[class*="collapse"][class*="content"]',
-                '[id*="think"]',
-                '[id*="thought"]',
-                '[id*="reasoning"]',
-                '[id*="cot-"]',
+                '[class*="fold"][class*="content"]',
+                // 通过 ID 匹配思考容器
+                '[id*="think-content"]',
+                '[id*="thought-content"]',
+                '[id*="reasoning-content"]',
+                '[id*="cot-content"]',
             ];
             
             // 【关键】添加用户自定义的选择器（一键学习功能）
@@ -1058,20 +1067,20 @@
             const idName = (node.id || '').toLowerCase();
             const combinedNames = className + ' ' + idName;
             
-            // 思考容器的关键词（通用语义关键词，不包含任何预设名称）
+            // 思考容器的关键词（与 extractSemanticContent 保持一致）
+            // 平衡策略：保留常见的思考容器关键词，但移除过于宽泛的（如 reason）
             const thinkingKeywords = [
-                'think', 'thought', 'reasoning', 'reflection', 'internal',
-                'cot', 'chain-of-thought', 'inner-monologue', 'hidden-content',
-                'collapsible-content', 'fold-content', 'collapsed'
+                'think', 'thought', 'reasoning', 'reflection',  // 思考相关
+                'cot', 'chain-of-thought',                       // CoT 相关
+                'inner', 'internal',                             // 内部思考
+                'hidden', 'collapsed', 'folded',                 // 隐藏/折叠状态
+                'monologue'                                      // 独白
             ];
             
-            // 检测是否是思考容器（但不是 summary/header）
-            // 我们跳过内容容器，但保留标题（用户能看到标题）
+            // 【统一】使用与 extractSemanticContent 相同的直接包含检查
+            // 如果类名或ID中包含任何思考关键词，则跳过
             const isThinkingContainer = thinkingKeywords.some(keyword => 
-                combinedNames.includes(keyword + '-content') ||
-                combinedNames.includes(keyword + 'content') ||
-                combinedNames.includes('content-' + keyword) ||
-                (combinedNames.includes(keyword) && combinedNames.includes('inner'))
+                combinedNames.includes(keyword)
             );
             
             if (isThinkingContainer) {
@@ -1139,6 +1148,194 @@
     }
 
     /**
+     * 【核心】从 .mes_text 中提取语义内容
+     * 
+     * 原理：无论什么预设，AI 的"正文内容"总是在语义标签中：
+     * - p 段落
+     * - ul/ol/li 列表
+     * - blockquote 引用
+     * - h1-h6 标题
+     * - table 表格
+     * 
+     * 而"思考内容"通常在：
+     * - details 折叠面板
+     * - div.think/div.reason 等特殊容器
+     * - pre/code 代码块（某些预设用来显示思考）
+     * 
+     * 这个函数通过"正向提取语义标签"来获取内容，天然排除了思考内容。
+     * 
+     * @param {Element} mesText - .mes_text 元素
+     * @returns {string} 提取的语义内容文本
+     */
+    function extractSemanticContent(mesText) {
+        if (!mesText) return '';
+        
+        const contentParts = [];
+        
+        // 语义内容标签（白名单）
+        const SEMANTIC_TAGS = new Set([
+            'P', 'UL', 'OL', 'LI', 'BLOCKQUOTE',
+            'H1', 'H2', 'H3', 'H4', 'H5', 'H6',
+            'TABLE', 'THEAD', 'TBODY', 'TR', 'TD', 'TH', 'CAPTION',
+            'DL', 'DT', 'DD',  // 定义列表
+            'FIGURE', 'FIGCAPTION',
+            'PRE', 'CODE'  // 代码块（会根据类名判断是否跳过）
+        ]);
+        
+        // 应该跳过的容器标签
+        // 注意：DETAILS 和 SUMMARY 在 shouldSkip 中单独处理（根据 open 属性判断）
+        // 注意：PRE 不再无条件跳过，而是在 shouldSkip 中根据类名判断
+        const SKIP_TAGS = new Set([
+            'SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE',
+            'IFRAME', 'SVG', 'CANVAS', 'VIDEO', 'AUDIO',
+            'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA'
+        ]);
+        
+        // 应该跳过的类名关键词（思考/推理相关）
+        // 平衡策略：保留常见的思考容器关键词，但移除过于宽泛的（如 reason）
+        const SKIP_CLASS_KEYWORDS = [
+            'think', 'thought', 'reasoning', 'reflection',  // 思考相关
+            'cot', 'chain-of-thought',                       // CoT 相关
+            'inner', 'internal',                             // 内部思考
+            'hidden', 'collapsed', 'folded',                 // 隐藏/折叠状态
+            'monologue'                                      // 独白
+        ];
+        
+        /**
+         * 安全获取元素的类名字符串
+         */
+        function getClassString(el) {
+            if (!el || !el.className) return '';
+            if (typeof el.className === 'string') return el.className.toLowerCase();
+            if (el.className.baseVal) return el.className.baseVal.toLowerCase();
+            return '';
+        }
+        
+        /**
+         * 检查元素是否应该被跳过
+         */
+        function shouldSkip(el) {
+            if (!el || el.nodeType !== Node.ELEMENT_NODE) return false;
+            
+            const tagName = el.tagName;
+            
+            // 【特殊处理】DETAILS 标签：只有未展开的才跳过
+            // 如果用户展开了 details（设置了 open 属性），应该提取内容
+            if (tagName === 'DETAILS') {
+                // 未展开的 details 跳过（用户看不到内容）
+                if (!el.hasAttribute('open')) return true;
+                // 展开的 details 不跳过，继续检查类名
+            }
+            
+            // SUMMARY 总是跳过（它是 details 的标题，不是正文内容）
+            if (tagName === 'SUMMARY') return true;
+            
+            // 跳过特定标签
+            if (SKIP_TAGS.has(tagName)) return true;
+            
+            // 检查 hidden 属性
+            if (el.hidden) return true;
+            
+            // 检查 aria-hidden
+            if (el.getAttribute('aria-hidden') === 'true') return true;
+            
+            // 检查 display:none
+            try {
+                if (window.getComputedStyle(el).display === 'none') return true;
+            } catch (e) {}
+            
+            // 检查类名是否包含思考相关关键词
+            const classStr = getClassString(el);
+            const idStr = (el.id || '').toLowerCase();
+            const combined = classStr + ' ' + idStr;
+            
+            for (const keyword of SKIP_CLASS_KEYWORDS) {
+                if (combined.includes(keyword)) return true;
+            }
+            
+            // 【关键】检查用户自定义的过滤选择器
+            if (Array.isArray(pluginSettings.customFilterSelectors)) {
+                for (const selector of pluginSettings.customFilterSelectors) {
+                    try {
+                        if (selector && el.matches(selector)) return true;
+                    } catch (e) {}
+                }
+            }
+            
+            return false;
+        }
+        
+        /**
+         * 从元素中提取纯文本（递归处理内联元素）
+         */
+        function getTextFromElement(el) {
+            if (!el) return '';
+            
+            // 如果整个元素应该跳过
+            if (shouldSkip(el)) return '';
+            
+            // 直接获取文本内容，但要递归检查子元素是否需要跳过
+            let text = '';
+            for (const child of el.childNodes) {
+                if (child.nodeType === Node.TEXT_NODE) {
+                    text += child.textContent || '';
+                } else if (child.nodeType === Node.ELEMENT_NODE) {
+                    // BR 标签转换为换行
+                    if (child.tagName === 'BR') {
+                        text += '\n';
+                        continue;
+                    }
+                    // 递归检查子元素
+                    if (!shouldSkip(child)) {
+                        text += getTextFromElement(child);
+                    }
+                }
+            }
+            return text;
+        }
+        
+        /**
+         * 递归遍历并提取语义内容
+         */
+        function traverseWithText(parent) {
+            for (const child of parent.childNodes) {
+                if (child.nodeType === Node.TEXT_NODE) {
+                    // 直接文本节点
+                    const text = child.textContent.trim();
+                    if (text) {
+                        contentParts.push(text);
+                    }
+                } else if (child.nodeType === Node.ELEMENT_NODE) {
+                    // 元素节点
+                    if (shouldSkip(child)) continue;
+                    
+                    const tagName = child.tagName;
+                    
+                    if (SEMANTIC_TAGS.has(tagName)) {
+                        // 语义标签：提取全部文本
+                        const text = getTextFromElement(child).trim();
+                        if (text) {
+                            contentParts.push(text);
+                        }
+                    } else {
+                        // 其他容器：递归
+                        traverseWithText(child);
+                    }
+                }
+            }
+        }
+        
+        // 开始遍历 .mes_text 的子节点（包括文本节点和元素节点）
+        traverseWithText(mesText);
+        
+        // 合并并清理
+        let result = contentParts.join('\n\n');
+        result = result.replace(/\n{3,}/g, '\n\n').trim();
+        
+        return result;
+    }
+
+    /**
      * 根据消息索引从DOM获取渲染后的文本
      * @param {number} messageIndex - 消息在chat数组中的索引
      * @returns {string|null} 渲染后的文本，如果获取失败则返回null
@@ -1146,18 +1343,28 @@
     function getRenderedTextByIndex(messageIndex) {
         try {
             // SillyTavern使用mesid属性标识消息
-            const mesElement = document.querySelector(`#chat .mes[mesid="${messageIndex}"] .mes_text`);
-            if (mesElement) {
-                return extractVisibleTextFromDOM(mesElement);
+            let mesElement = document.querySelector(`#chat .mes[mesid="${messageIndex}"] .mes_text`);
+            if (!mesElement) {
+                // 备用：尝试通过索引定位
+                const allMessages = document.querySelectorAll('#chat .mes .mes_text');
+                if (!allMessages[messageIndex]) {
+                    return null;
+                }
+                mesElement = allMessages[messageIndex];
             }
             
-            // 备用：尝试通过其他方式定位
-            const allMessages = document.querySelectorAll('#chat .mes .mes_text');
-            if (allMessages[messageIndex]) {
-                return extractVisibleTextFromDOM(allMessages[messageIndex]);
+            // 【优先】使用语义内容提取（更智能、更通用）
+            const semanticText = extractSemanticContent(mesElement);
+            
+            if (semanticText && semanticText.trim().length > 0) {
+                console.log('[Recall] ✓ 语义内容提取成功');
+                return semanticText;
             }
             
-            return null;
+            // 【备用】如果语义提取没有结果，回退到完整 DOM 遍历
+            console.log('[Recall] ⚠ 语义提取无结果，使用完整DOM遍历');
+            return extractVisibleTextFromDOM(mesElement);
+            
         } catch (e) {
             console.warn('[Recall] DOM文本提取失败:', e);
             return null;
@@ -2628,15 +2835,19 @@ function createUI() {
                         <div class="recall-setting-group">
                             <label class="recall-setting-label">
                                 <input type="checkbox" id="recall-filter-thinking" ${pluginSettings.filterThinking ? 'checked' : ''}>
-                                <span>过滤AI思考过程</span>
+                                <span>智能内容提取</span>
                             </label>
-                            <div class="recall-setting-hint">只保存AI的最终回复，不保存&lt;thinking&gt;等思考内容</div>
+                            <div class="recall-setting-hint">
+                                ✨ 自动提取正文内容（p、列表、标题等语义标签）<br>
+                                ✨ 自动跳过思考区域（details折叠面板、think类容器等）<br>
+                                无需手动配置，适用于所有预设
+                            </div>
                         </div>
                         
                         <!-- 选择器学习功能 -->
                         <div class="recall-setting-group" id="recall-selector-learning-group">
-                            <label class="recall-setting-title">🎯 自定义过滤区域</label>
-                            <div class="recall-setting-hint">点击学习你想过滤的思考区域，无需知道CSS</div>
+                            <label class="recall-setting-title">🎯 额外排除区域（可选）</label>
+                            <div class="recall-setting-hint">如果智能提取仍包含不需要的内容，可点击学习额外排除</div>
                             <div class="recall-selector-buttons">
                                 <button type="button" id="recall-learn-selector-btn" class="menu_button">
                                     🎯 点击学习
