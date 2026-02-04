@@ -37,11 +37,11 @@
         injectDepth: 1,             // 注入深度，0=最新位置，1=倒数第一条后
         showPanel: true,
         language: 'zh-CN',
-        filterThinking: true,  // 过滤AI思考过程
+        filterThinking: true,  // 过滤AI思考过程（基于可见性）
         previewLength: 200,    // 记忆预览字数
         autoChunkLongText: true,  // 自动分段长文本
         chunkSize: 2000,       // 分段大小（字符数）
-        customFilterSelectors: []  // 用户自定义的思考内容过滤选择器
+        contentSelector: '.mes_text'  // 内容选择器（用户可自定义以适应不同预设）
     };
     
     /**
@@ -129,525 +129,6 @@
 
     // 【新增】待处理的AI消息队列（等待渲染完成）
     const pendingAIMessages = new Map();
-    
-    // 【新增】选择器学习模式状态
-    let selectorLearningMode = false;
-    let learningModeCleanup = null;
-    let learningModeTimeout = null;  // 用于取消自动停止的 timeout
-    
-    /**
-     * 开始选择器学习模式
-     */
-    function startSelectorLearning() {
-        if (selectorLearningMode) return;
-        selectorLearningMode = true;
-        
-        // 【重要】自动收起扩展设置面板，让用户能看到聊天区域
-        const recallExtension = document.getElementById('recall-extension');
-        if (recallExtension) {
-            const drawerContent = recallExtension.querySelector('.inline-drawer-content');
-            const drawerIcon = recallExtension.querySelector('.inline-drawer-icon');
-            if (drawerContent) {
-                drawerContent.style.display = 'none';
-            }
-            if (drawerIcon) {
-                drawerIcon.classList.remove('up');
-                drawerIcon.classList.add('down');
-            }
-        }
-        
-        // 同时收起整个扩展侧边栏（如果是移动端或窄屏）
-        const extensionsMenu = document.getElementById('extensionsMenu');
-        if (extensionsMenu && extensionsMenu.classList.contains('openDrawer')) {
-            extensionsMenu.classList.remove('openDrawer');
-        }
-        
-        const statusEl = document.getElementById('recall-learning-status');
-        if (statusEl) {
-            statusEl.style.display = 'block';
-            statusEl.className = 'recall-learning-status active';
-            statusEl.textContent = '🎯 学习模式已开启 - 点击聊天中的思考区域 (ESC取消)';
-        }
-        
-        // 创建顶部提示条（更醒目）
-        const banner = document.createElement('div');
-        banner.className = 'recall-learning-banner';
-        banner.id = 'recall-learning-banner';
-        banner.innerHTML = `
-            <div class="recall-learning-banner-content">
-                <span class="recall-learning-banner-icon">🎯</span>
-                <span class="recall-learning-banner-text">
-                    <strong>选择器学习模式</strong><br>
-                    <small>点击聊天区域中你想过滤的思考内容（如折叠的思考面板）</small>
-                </span>
-            </div>
-            <div class="recall-learning-banner-result" id="recall-learning-result" style="display:none;">
-                <span class="recall-learning-result-label">已学习:</span>
-                <code class="recall-learning-result-selector"></code>
-            </div>
-            <button id="recall-cancel-learning" class="recall-learning-cancel-btn">✕ 取消 (ESC)</button>
-        `;
-        document.body.appendChild(banner);
-        
-        // 获取聊天区域
-        const chatArea = document.getElementById('chat');
-        if (!chatArea) {
-            showLearningError('找不到聊天区域');
-            // 需要手动清理已创建的 banner
-            const existingBanner = document.getElementById('recall-learning-banner');
-            if (existingBanner) existingBanner.remove();
-            selectorLearningMode = false;
-            const statusEl2 = document.getElementById('recall-learning-status');
-            if (statusEl2) statusEl2.style.display = 'none';
-            return;
-        }
-        
-        // 辅助函数：安全获取 className 字符串
-        function getClassNameString(el) {
-            if (!el || !el.className) return '';
-            if (typeof el.className === 'string') return el.className;
-            if (el.className.baseVal) return el.className.baseVal;
-            return '';
-        }
-        
-        // 鼠标移动高亮
-        const onMouseOver = (e) => {
-            if (!selectorLearningMode) return;
-            const target = e.target;
-            // 只高亮聊天消息内的元素
-            if (chatArea.contains(target) && target.closest('.mes_text')) {
-                // 移除之前的高亮
-                document.querySelectorAll('.recall-learning-highlight').forEach(el => {
-                    el.classList.remove('recall-learning-highlight');
-                });
-                target.classList.add('recall-learning-highlight');
-            }
-        };
-        
-        const onMouseOut = (e) => {
-            if (!selectorLearningMode) return;
-            e.target.classList.remove('recall-learning-highlight');
-        };
-        
-        // 点击选择
-        const onClick = (e) => {
-            if (!selectorLearningMode) return;
-            const target = e.target;
-            
-            // 检查是否点击了取消按钮
-            if (target.id === 'recall-cancel-learning' || target.closest('#recall-cancel-learning')) {
-                e.preventDefault();
-                e.stopPropagation();
-                stopSelectorLearning();
-                return;
-            }
-            
-            // 只处理聊天消息内的元素
-            if (chatArea.contains(target) && target.closest('.mes_text')) {
-                e.preventDefault();
-                e.stopPropagation();
-                
-                // 向上查找有类名的元素（用户可能点击了纯文本）
-                // 跳过 mes_text 本身和它的直接包装器，因为它们是通用容器
-                let targetElement = target;
-                const mesText = target.closest('.mes_text');
-                
-                while (targetElement && targetElement !== chatArea && targetElement !== mesText) {
-                    const classStr = getClassNameString(targetElement);
-                    // 找到有非通用类名的元素
-                    if (classStr && classStr.trim()) {
-                        const classes = classStr.split(/\s+/).filter(c => 
-                            c && c.length > 2 && 
-                            !c.startsWith('recall-') &&
-                            !['mes_text', 'mes', 'mes_block', 'mes_text_wrapper'].includes(c)
-                        );
-                        if (classes.length > 0) {
-                            break;  // 找到有意义的类名
-                        }
-                    }
-                    targetElement = targetElement.parentElement;
-                }
-                
-                // 如果没找到有效元素（走到了 mes_text 或更上层）
-                if (!targetElement || targetElement === chatArea || targetElement === mesText) {
-                    showLearningError('请点击有特定样式的区域（如折叠面板），而不是普通文本');
-                    return;
-                }
-                
-                // 生成选择器
-                const selector = generateSmartSelector(targetElement);
-                if (selector) {
-                    addLearnedSelector(selector, targetElement);
-                } else {
-                    showLearningError('无法为此元素生成选择器');
-                }
-            }
-        };
-        
-        // ESC 取消
-        const onKeyDown = (e) => {
-            if (e.key === 'Escape') {
-                stopSelectorLearning();
-            }
-        };
-        
-        // 添加事件监听
-        document.addEventListener('mouseover', onMouseOver, true);
-        document.addEventListener('mouseout', onMouseOut, true);
-        document.addEventListener('click', onClick, true);
-        document.addEventListener('keydown', onKeyDown);
-        
-        // 保存清理函数
-        learningModeCleanup = () => {
-            document.removeEventListener('mouseover', onMouseOver, true);
-            document.removeEventListener('mouseout', onMouseOut, true);
-            document.removeEventListener('click', onClick, true);
-            document.removeEventListener('keydown', onKeyDown);
-            
-            // 移除高亮
-            document.querySelectorAll('.recall-learning-highlight').forEach(el => {
-                el.classList.remove('recall-learning-highlight');
-            });
-            document.querySelectorAll('.recall-selected-element').forEach(el => {
-                el.classList.remove('recall-selected-element');
-            });
-            
-            // 移除提示条
-            const existingBanner = document.getElementById('recall-learning-banner');
-            if (existingBanner) existingBanner.remove();
-        };
-    }
-    
-    /**
-     * 停止选择器学习模式
-     * @param {boolean} reopenPanel - 是否重新打开设置面板（学习成功后需要）
-     */
-    function stopSelectorLearning(reopenPanel = false) {
-        selectorLearningMode = false;
-        
-        // 取消自动停止的 timeout
-        if (learningModeTimeout) {
-            clearTimeout(learningModeTimeout);
-            learningModeTimeout = null;
-        }
-        
-        if (learningModeCleanup) {
-            learningModeCleanup();
-            learningModeCleanup = null;
-        }
-        
-        // 备用清理：确保 banner 被移除（即使 cleanup 函数未设置）
-        const existingBanner = document.getElementById('recall-learning-banner');
-        if (existingBanner) existingBanner.remove();
-        
-        // 备用清理：移除可能残留的高亮样式
-        document.querySelectorAll('.recall-learning-highlight, .recall-selected-element').forEach(el => {
-            el.classList.remove('recall-learning-highlight', 'recall-selected-element');
-        });
-        
-        const statusEl = document.getElementById('recall-learning-status');
-        if (statusEl) {
-            statusEl.style.display = 'none';
-        }
-        
-        // 【新增】如果有新增选择器，重新展开设置面板让用户看到结果
-        if (reopenPanel) {
-            const recallExtension = document.getElementById('recall-extension');
-            if (recallExtension) {
-                const drawerContent = recallExtension.querySelector('.inline-drawer-content');
-                const drawerIcon = recallExtension.querySelector('.inline-drawer-icon');
-                if (drawerContent) {
-                    drawerContent.style.display = 'block';
-                }
-                if (drawerIcon) {
-                    drawerIcon.classList.remove('down');
-                    drawerIcon.classList.add('up');
-                }
-                
-                // 滚动到选择器区域
-                const selectorGroup = document.getElementById('recall-selector-learning-group');
-                if (selectorGroup) {
-                    setTimeout(() => {
-                        selectorGroup.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    }, 100);
-                }
-            }
-        }
-    }
-    
-    /**
-     * 智能生成选择器
-     * 优先使用类名，避免使用太具体的选择器
-     */
-    function generateSmartSelector(element) {
-        if (!element) return null;
-        
-        // 辅助函数：安全获取 className 字符串
-        function getClassNameStr(el) {
-            if (!el || !el.className) return '';
-            if (typeof el.className === 'string') return el.className;
-            if (el.className.baseVal) return el.className.baseVal;  // SVG 元素
-            return '';
-        }
-        
-        // 辅助函数：转义 CSS 选择器中的特殊字符
-        function escapeCssSelector(str) {
-            return str.replace(/([!"#$%&'()*+,./:;<=>?@[\\\]^`{|}~])/g, '\\$1');
-        }
-        
-        // 辅助函数：检查类名是否可用于选择器（不包含特殊字符）
-        function isValidClassName(className) {
-            // 跳过包含特殊字符的类名（如 Tailwind 的 hover:xxx）
-            return className && !/[!"#$%&'()*+,./:;<=>?@[\\\]^`{|}~]/.test(className);
-        }
-        
-        const selectors = [];
-        const elementClassStr = getClassNameStr(element);
-        
-        // 1. 优先使用有意义的类名
-        if (elementClassStr) {
-            const classes = elementClassStr.split(/\s+/).filter(c => c && c.length > 2);
-            // 过滤掉我们自己添加的类和一些通用类，以及包含特殊字符的类
-            const meaningfulClasses = classes.filter(c => 
-                isValidClassName(c) &&
-                !c.startsWith('recall-') && 
-                !['mes_text', 'mes', 'mes_block'].includes(c) &&
-                !/^(active|show|hide|visible|hidden|open|closed)$/i.test(c)
-            );
-            
-            if (meaningfulClasses.length > 0) {
-                // 使用最具体的类名
-                selectors.push('.' + meaningfulClasses.join('.'));
-            }
-        }
-        
-        // 2. 使用 ID（如果有）
-        if (element.id && !element.id.startsWith('recall-') && isValidClassName(element.id)) {
-            selectors.push('#' + element.id);
-        }
-        
-        // 3. 尝试父元素 + 当前元素的组合
-        const parent = element.parentElement;
-        const parentClassStr = getClassNameStr(parent);
-        if (parentClassStr) {
-            const parentClasses = parentClassStr.split(/\s+/).filter(c => 
-                c && c.length > 2 && isValidClassName(c) && 
-                !c.startsWith('recall-') && 
-                !['mes_text', 'mes', 'mes_block'].includes(c)
-            );
-            
-            if (parentClasses.length > 0 && elementClassStr) {
-                const childClasses = elementClassStr.split(/\s+/).filter(c => 
-                    c && c.length > 2 && isValidClassName(c) && !c.startsWith('recall-')
-                );
-                if (childClasses.length > 0) {
-                    selectors.push('.' + parentClasses[0] + ' .' + childClasses[0]);
-                }
-            }
-        }
-        
-        // 4. 使用标签名 + 类名
-        if (element.tagName && elementClassStr) {
-            const classes = elementClassStr.split(/\s+/).filter(c => 
-                c && c.length > 2 && isValidClassName(c) && !c.startsWith('recall-')
-            );
-            if (classes.length > 0) {
-                selectors.push(element.tagName.toLowerCase() + '.' + classes[0]);
-            }
-        }
-        
-        // 返回第一个有效的选择器
-        for (const selector of selectors) {
-            try {
-                // 验证选择器有效性
-                document.querySelector(selector);
-                return selector;
-            } catch (e) {
-                continue;
-            }
-        }
-        
-        return null;
-    }
-    
-    /**
-     * 添加学习到的选择器
-     */
-    function addLearnedSelector(selector, element) {
-        // 确保 customFilterSelectors 是数组
-        if (!Array.isArray(pluginSettings.customFilterSelectors)) {
-            pluginSettings.customFilterSelectors = [];
-        }
-        
-        // 检查是否已存在
-        if (pluginSettings.customFilterSelectors.includes(selector)) {
-            showLearningResultInBanner(`${selector} (已存在)`, true);
-            showLearningSuccess(`选择器已存在: ${selector}`);
-            // 2秒后自动停止，并重新打开面板
-            if (learningModeTimeout) {
-                clearTimeout(learningModeTimeout);
-            }
-            learningModeTimeout = setTimeout(() => {
-                stopSelectorLearning(true);  // 已存在也应该打开面板让用户看到
-            }, 2000);
-            return;
-        }
-        
-        // 添加选择器
-        pluginSettings.customFilterSelectors.push(selector);
-        saveSettings();
-        
-        // 更新 UI
-        updateLearnedSelectorsUI();
-        
-        // 高亮选中的元素
-        element.classList.remove('recall-learning-highlight');
-        element.classList.add('recall-selected-element');
-        
-        // 【重要】在 banner 中显示学习到的选择器
-        showLearningResultInBanner(selector, true);
-        
-        // 显示成功
-        showLearningSuccess(`已添加: ${selector}`);
-        
-        // 2.5秒后停止学习模式并重新打开设置面板
-        if (learningModeTimeout) {
-            clearTimeout(learningModeTimeout);
-        }
-        learningModeTimeout = setTimeout(() => {
-            stopSelectorLearning(true);  // 传入 true 重新打开面板
-        }, 2500);
-    }
-    
-    /**
-     * 在 banner 中显示学习结果
-     */
-    function showLearningResultInBanner(selector, isSuccess) {
-        const resultEl = document.getElementById('recall-learning-result');
-        const selectorEl = resultEl?.querySelector('.recall-learning-result-selector');
-        if (resultEl && selectorEl) {
-            resultEl.style.display = 'flex';
-            resultEl.className = `recall-learning-banner-result ${isSuccess ? 'success' : 'error'}`;
-            selectorEl.textContent = selector;
-        }
-        
-        // 更新 banner 样式
-        const banner = document.getElementById('recall-learning-banner');
-        if (banner) {
-            banner.classList.add(isSuccess ? 'success' : 'error');
-        }
-    }
-    
-    /**
-     * 移除指定的选择器
-     */
-    function removeLearnedSelector(index) {
-        if (!Array.isArray(pluginSettings.customFilterSelectors)) return;
-        if (index < 0 || index >= pluginSettings.customFilterSelectors.length) return;
-        
-        pluginSettings.customFilterSelectors.splice(index, 1);
-        saveSettings();
-        updateLearnedSelectorsUI();
-    }
-    
-    /**
-     * 清空所有学习的选择器
-     */
-    function clearLearnedSelectors() {
-        pluginSettings.customFilterSelectors = [];
-        saveSettings();
-        updateLearnedSelectorsUI();
-    }
-    
-    /**
-     * 更新学习选择器的 UI 显示
-     */
-    function updateLearnedSelectorsUI() {
-        const container = document.getElementById('recall-learned-selectors');
-        if (!container) return;
-        
-        const selectors = Array.isArray(pluginSettings.customFilterSelectors) 
-            ? pluginSettings.customFilterSelectors 
-            : [];
-        
-        if (selectors.length === 0) {
-            container.innerHTML = '';
-            return;
-        }
-        
-        container.innerHTML = selectors.map((s, i) => `
-            <div class="recall-selector-item" data-index="${i}">
-                <span class="recall-selector-text">${escapeHtml(s)}</span>
-                <button type="button" class="recall-selector-remove" data-index="${i}">×</button>
-            </div>
-        `).join('');
-        
-        // 绑定删除按钮事件
-        container.querySelectorAll('.recall-selector-remove').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                e.stopPropagation();  // 防止事件冒泡
-                const idx = parseInt(e.currentTarget.dataset.index, 10);
-                if (!isNaN(idx)) {
-                    removeLearnedSelector(idx);
-                }
-            });
-        });
-    }
-    
-    /**
-     * 显示学习成功提示
-     */
-    function showLearningSuccess(message) {
-        const statusEl = document.getElementById('recall-learning-status');
-        if (statusEl) {
-            statusEl.style.display = 'block';
-            statusEl.className = 'recall-learning-status success';
-            statusEl.textContent = '✅ ' + message;
-        }
-    }
-    
-    /**
-     * 显示学习错误提示
-     * @param {string} message - 错误信息
-     * @param {boolean} autoStop - 是否自动停止学习模式（默认 false，让用户继续尝试）
-     */
-    function showLearningError(message, autoStop = false) {
-        const statusEl = document.getElementById('recall-learning-status');
-        if (statusEl) {
-            statusEl.style.display = 'block';
-            statusEl.className = 'recall-learning-status error';
-            statusEl.textContent = '❌ ' + message;
-        }
-        
-        // 在 banner 中显示错误（但不改变 banner 整体颜色，只显示消息）
-        const resultEl = document.getElementById('recall-learning-result');
-        const selectorEl = resultEl?.querySelector('.recall-learning-result-selector');
-        if (resultEl && selectorEl) {
-            resultEl.style.display = 'flex';
-            resultEl.className = 'recall-learning-banner-result error';
-            const labelEl = resultEl.querySelector('.recall-learning-result-label');
-            if (labelEl) labelEl.textContent = '提示:';
-            selectorEl.textContent = message;
-            
-            // 3秒后隐藏错误提示，让用户继续尝试
-            setTimeout(() => {
-                if (selectorLearningMode && resultEl) {
-                    resultEl.style.display = 'none';
-                    if (labelEl) labelEl.textContent = '已学习:';
-                }
-            }, 3000);
-        }
-        
-        // 只有明确要求时才自动停止
-        if (autoStop) {
-            if (learningModeTimeout) {
-                clearTimeout(learningModeTimeout);
-            }
-            learningModeTimeout = setTimeout(() => {
-                stopSelectorLearning();
-            }, 2000);
-        }
-    }
 
     /**
      * 处理渲染完成的消息
@@ -785,65 +266,13 @@
     /**
      * 【通用】清理文本中的 HTML 残留
      * 当 HTML 作为纯文本存在（未被浏览器渲染）时，需要清理这些代码
-     * 这是一个通用方案，不针对任何特定预设
+     * 【新方案】不再做关键词过滤，只做基础 HTML 清理
      */
     function cleanHtmlArtifacts(text) {
         if (!text) return text;
         
         let cleaned = text;
         const originalLength = cleaned.length;
-        
-        // 【关键】使用 DOM 解析来移除思考容器
-        // 创建临时 DOM 元素来解析 HTML 结构
-        try {
-            const tempDiv = document.createElement('div');
-            tempDiv.innerHTML = cleaned;
-            
-            // 查找并移除所有"思考容器"（只用通用语义关键词）
-            const thinkingSelectors = [
-                '[class*="think"][class*="content"]',
-                '[class*="thought"][class*="content"]',
-                '[class*="reasoning"][class*="content"]',
-                '[class*="cot"][class*="content"]',
-                '[class*="reflection"][class*="content"]',
-                '[class*="inner"][class*="content"]',
-                '[class*="collapse"][class*="content"]',
-                '[id*="think"]',
-                '[id*="thought"]',
-                '[id*="reasoning"]',
-                '[id*="cot-"]',
-            ];
-            
-            // 【关键】添加用户自定义的选择器（一键学习功能）
-            if (Array.isArray(pluginSettings.customFilterSelectors) && pluginSettings.customFilterSelectors.length > 0) {
-                for (const selector of pluginSettings.customFilterSelectors) {
-                    if (selector && typeof selector === 'string') {
-                        thinkingSelectors.push(selector);
-                    }
-                }
-            }
-            
-            let removedContainers = 0;
-            for (const selector of thinkingSelectors) {
-                try {
-                    const elements = tempDiv.querySelectorAll(selector);
-                    elements.forEach(el => {
-                        el.remove();
-                        removedContainers++;
-                    });
-                } catch (e) {
-                    // 选择器可能无效，跳过
-                }
-            }
-            
-            if (removedContainers > 0) {
-                console.log(`[Recall] 移除了 ${removedContainers} 个思考容器`);
-                // 使用 DOM 解析后的纯文本，移除了思考容器
-                cleaned = tempDiv.textContent || tempDiv.innerText || '';
-            }
-        } catch (e) {
-            console.warn('[Recall] DOM解析失败，使用正则清理:', e);
-        }
         
         // 检测是否包含完整 HTML 文档结构
         const hasHtmlDocument = /<!DOCTYPE\s+html/i.test(cleaned) || /<html[\s>]/i.test(cleaned);
@@ -852,7 +281,6 @@
             console.log('[Recall] 检测到 HTML 文档结构，进行清理...');
             
             // 尝试提取 <body> 内的实际内容
-            // 某些预设会输出完整 HTML 文档，我们只要 body 内的内容
             const bodyMatch = cleaned.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
             if (bodyMatch) {
                 cleaned = bodyMatch[1];
@@ -965,7 +393,8 @@
 
     /**
      * 从DOM元素中提取用户真正能看到的文本
-     * 【通用方案】基于实际渲染状态判断，不依赖任何特定的CSS类名
+     * 【核心原则】用户在UI上看到什么文字，Recall就保存什么文字
+     * 【实现方式】纯可见性检测，不做任何关键词/类名过滤
      * @param {Element} element - 消息的.mes_text元素
      * @returns {string} 用户实际看到的纯文本
      */
@@ -974,32 +403,39 @@
         
         /**
          * 检查元素是否真正可见（基于计算样式）
-         * 注意：不处理 details 元素的特殊逻辑，那在 extractText 中单独处理
+         * 这是整个过滤逻辑的核心：只检查CSS可见性，不做任何语义判断
          */
-        function isBasicVisible(el) {
+        function isElementVisible(el) {
             if (!el || el.nodeType !== Node.ELEMENT_NODE) return true;
             
             try {
                 const style = window.getComputedStyle(el);
                 
-                // 检查各种隐藏方式
+                // 检查各种CSS隐藏方式
                 if (style.display === 'none') return false;
                 if (style.visibility === 'hidden') return false;
                 if (style.opacity === '0') return false;
                 
-                // 检查尺寸为0的情况（常见的隐藏技巧）
-                if (parseFloat(style.height) === 0 && style.overflow === 'hidden') return false;
-                if (parseFloat(style.width) === 0 && style.overflow === 'hidden') return false;
+                // 检查尺寸为0的情况（常见的折叠/隐藏技巧）
+                const height = parseFloat(style.height);
+                const width = parseFloat(style.width);
+                if (height === 0 && style.overflow === 'hidden') return false;
+                if (width === 0 && style.overflow === 'hidden') return false;
+                
+                // 检查 max-height: 0 的情况（另一种折叠方式）
+                const maxHeight = parseFloat(style.maxHeight);
+                if (maxHeight === 0 && style.overflow === 'hidden') return false;
                 
                 return true;
             } catch (e) {
-                // getComputedStyle 可能在某些情况下失败
+                // getComputedStyle 可能在某些情况下失败，默认认为可见
                 return true;
             }
         }
         
         /**
          * 递归提取可见文本
+         * 【核心原则】只检查可见性，不做任何语义判断
          * 递归保证：只有当父元素可见时，子元素才会被处理
          */
         function extractText(node) {
@@ -1013,74 +449,24 @@
                 return '';
             }
             
-            // 基本可见性检查
-            if (!isBasicVisible(node)) {
+            // 【核心】CSS可见性检查
+            if (!isElementVisible(node)) {
                 return '';
             }
             
-            // 跳过不应提取的元素
-            const skipTags = ['IFRAME', 'SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE'];
+            // 跳过非内容元素（脚本、样式等）
+            const skipTags = ['IFRAME', 'SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'SVG'];
             if (skipTags.includes(node.tagName)) {
                 return '';
             }
             
-            // 跳过 aria-hidden="true" 的元素（无障碍隐藏）
+            // 跳过 aria-hidden="true" 的元素（无障碍标准：屏幕阅读器不可见）
             if (node.getAttribute('aria-hidden') === 'true') {
                 return '';
             }
             
-            // 【关键】首先检查用户自定义的过滤选择器
-            // 这是最高优先级，用户通过"点击学习"添加的选择器
-            if (Array.isArray(pluginSettings.customFilterSelectors) && pluginSettings.customFilterSelectors.length > 0) {
-                for (const selector of pluginSettings.customFilterSelectors) {
-                    try {
-                        if (selector && typeof selector === 'string' && node.matches(selector)) {
-                            return '';  // 跳过匹配的元素
-                        }
-                    } catch (e) {
-                        // 选择器可能无效，跳过
-                    }
-                }
-            }
-            
-            // 【关键】通用检测：跳过"思考/推理容器"
-            // 检查元素的类名或ID是否包含思考相关的关键词
-            // 注意：SVG 元素的 className 是 SVGAnimatedString，需要特殊处理
-            let classNameStr = '';
-            if (node.className) {
-                if (typeof node.className === 'string') {
-                    classNameStr = node.className;
-                } else if (node.className.baseVal) {
-                    classNameStr = node.className.baseVal;  // SVG 元素
-                }
-            }
-            const className = classNameStr.toLowerCase();
-            const idName = (node.id || '').toLowerCase();
-            const combinedNames = className + ' ' + idName;
-            
-            // 思考容器的关键词（通用语义关键词，不包含任何预设名称）
-            const thinkingKeywords = [
-                'think', 'thought', 'reasoning', 'reflection', 'internal',
-                'cot', 'chain-of-thought', 'inner-monologue', 'hidden-content',
-                'collapsible-content', 'fold-content', 'collapsed'
-            ];
-            
-            // 检测是否是思考容器（但不是 summary/header）
-            // 我们跳过内容容器，但保留标题（用户能看到标题）
-            const isThinkingContainer = thinkingKeywords.some(keyword => 
-                combinedNames.includes(keyword + '-content') ||
-                combinedNames.includes(keyword + 'content') ||
-                combinedNames.includes('content-' + keyword) ||
-                (combinedNames.includes(keyword) && combinedNames.includes('inner'))
-            );
-            
-            if (isThinkingContainer) {
-                // 跳过思考内容容器
-                return '';
-            }
-            
             // 特殊处理：未展开的 <details> 元素
-            // 只提取 <summary> 内容，跳过其他子元素
+            // 只提取 <summary> 内容，跳过其他子元素（因为用户看不到）
             if (node.tagName === 'DETAILS' && !node.hasAttribute('open')) {
                 let text = '';
                 for (const child of node.children) {
@@ -1092,14 +478,11 @@
                 return text + '\n';
             }
             
-            // 【修复】检查是否在未展开的 details 中（且不是 summary 或其子元素）
-            // 注意：这个检查只对非 details 元素生效（因为 details 在上面已经处理过了）
+            // 检查是否在未展开的 details 中（且不是 summary 或其子元素）
             if (node.tagName !== 'DETAILS') {
                 const parentDetails = node.closest('details:not([open])');
                 if (parentDetails) {
-                    // 检查是否在 summary 内部
                     const parentSummary = node.closest('summary');
-                    // 如果有 parentSummary 且它是这个 parentDetails 的子元素，则允许提取
                     if (!parentSummary || !parentDetails.contains(parentSummary)) {
                         return '';
                     }
@@ -1145,14 +528,17 @@
      */
     function getRenderedTextByIndex(messageIndex) {
         try {
+            // 获取用户配置的内容选择器（默认 .mes_text）
+            const contentSelector = pluginSettings.contentSelector || '.mes_text';
+            
             // SillyTavern使用mesid属性标识消息
-            const mesElement = document.querySelector(`#chat .mes[mesid="${messageIndex}"] .mes_text`);
+            const mesElement = document.querySelector(`#chat .mes[mesid="${messageIndex}"] ${contentSelector}`);
             if (mesElement) {
                 return extractVisibleTextFromDOM(mesElement);
             }
             
             // 备用：尝试通过其他方式定位
-            const allMessages = document.querySelectorAll('#chat .mes .mes_text');
+            const allMessages = document.querySelectorAll(`#chat .mes ${contentSelector}`);
             if (allMessages[messageIndex]) {
                 return extractVisibleTextFromDOM(allMessages[messageIndex]);
             }
@@ -2630,25 +2016,19 @@ function createUI() {
                                 <input type="checkbox" id="recall-filter-thinking" ${pluginSettings.filterThinking ? 'checked' : ''}>
                                 <span>过滤AI思考过程</span>
                             </label>
-                            <div class="recall-setting-hint">只保存AI的最终回复，不保存&lt;thinking&gt;等思考内容</div>
+                            <div class="recall-setting-hint">只保存用户能看到的文字，隐藏/折叠的内容自动跳过</div>
                         </div>
                         
-                        <!-- 选择器学习功能 -->
-                        <div class="recall-setting-group" id="recall-selector-learning-group">
-                            <label class="recall-setting-title">🎯 自定义过滤区域</label>
-                            <div class="recall-setting-hint">点击学习你想过滤的思考区域，无需知道CSS</div>
-                            <div class="recall-selector-buttons">
-                                <button type="button" id="recall-learn-selector-btn" class="menu_button">
-                                    🎯 点击学习
-                                </button>
-                                <button type="button" id="recall-clear-selectors-btn" class="menu_button">
-                                    🗑️ 清空
-                                </button>
+                        <!-- 内容选择器设置 -->
+                        <div class="recall-setting-group" id="recall-content-selector-group">
+                            <label class="recall-setting-title">📍 内容选择器</label>
+                            <input type="text" id="recall-content-selector" class="text_pole" 
+                                   value="${pluginSettings.contentSelector || '.mes_text'}"
+                                   placeholder=".mes_text">
+                            <div class="recall-setting-hint">
+                                指定从哪个元素提取文本（默认 .mes_text）<br>
+                                <small>如果你的预设使用不同的容器，可以修改此选择器</small>
                             </div>
-                            <div id="recall-learned-selectors" class="recall-learned-selectors">
-                                <!-- 内容由 updateLearnedSelectorsUI() 动态生成 -->
-                            </div>
-                            <div id="recall-learning-status" class="recall-learning-status" style="display:none;"></div>
                         </div>
                         
                         <div class="recall-setting-group">
@@ -3215,17 +2595,13 @@ function createUI() {
     document.getElementById('recall-refresh-btn')?.addEventListener('click', safeExecute(loadMemories, '刷新失败'));
     document.getElementById('recall-load-more-btn')?.addEventListener('click', safeExecute(onLoadMoreMemories, '加载更多失败'));
     
-    // 选择器学习按钮事件
-    document.getElementById('recall-learn-selector-btn')?.addEventListener('click', () => {
-        startSelectorLearning();
+    // 内容选择器设置
+    document.getElementById('recall-content-selector')?.addEventListener('change', (e) => {
+        const value = e.target.value.trim() || '.mes_text';
+        pluginSettings.contentSelector = value;
+        saveSettings();
+        console.log('[Recall] 内容选择器已更新:', value);
     });
-    document.getElementById('recall-clear-selectors-btn')?.addEventListener('click', () => {
-        if (confirm('确定要清空所有学习的选择器吗？')) {
-            clearLearnedSelectors();
-        }
-    });
-    // 【重要】初始化时加载已保存的选择器列表
-    updateLearnedSelectorsUI();
     
     // 后台任务面板事件
     document.getElementById('recall-tasks-indicator')?.addEventListener('click', () => {
@@ -4938,6 +4314,7 @@ function onSaveSettings() {
     
     pluginSettings.autoInject = document.getElementById('recall-auto-inject')?.checked ?? true;
     pluginSettings.filterThinking = document.getElementById('recall-filter-thinking')?.checked ?? true;
+    pluginSettings.contentSelector = document.getElementById('recall-content-selector')?.value?.trim() || '.mes_text';
     pluginSettings.autoChunkLongText = document.getElementById('recall-auto-chunk')?.checked ?? true;
     pluginSettings.chunkSize = parseInt(document.getElementById('recall-chunk-size')?.value) || 2000;
     pluginSettings.previewLength = parseInt(document.getElementById('recall-preview-length')?.value) || 200;
@@ -5635,11 +5012,6 @@ function clearAllListsForCharacterSwitch() {
     // 【重要】清空待处理的AI消息队列，避免旧消息保存到新角色
     pendingAIMessages.clear();
     console.log('[Recall] 已清空待处理消息队列');
-    
-    // 【新增】停止选择器学习模式（如果正在进行）
-    if (selectorLearningMode) {
-        stopSelectorLearning();
-    }
     
     // 重置所有 loading 标志
     _loadMemoriesLoading = false;
