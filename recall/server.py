@@ -3606,11 +3606,13 @@ async def get_query_stats():
 async def list_entities(
     user_id: str = Query(default="default", description="用户ID"),
     character_id: str = Query(default="default", description="角色ID"),
+    entity_type: str = Query(default="", description="实体类型过滤，如 PERSON、LOCATION 等"),
     limit: int = Query(default=100, description="最大返回数量")
 ):
     """获取用户的实体列表
     
     返回该用户/角色组合下提取到的所有实体。
+    可通过 entity_type 参数过滤特定类型的实体。
     """
     engine = get_engine()
     
@@ -3642,7 +3644,19 @@ async def list_entities(
     # 按出现次数排序
     entities.sort(key=lambda e: -e.get('occurrence_count', 0))
     
-    return entities[:limit]
+    # 服务端类型过滤（在截断之前过滤）
+    if entity_type:
+        entity_type_upper = entity_type.upper()
+        entities = [e for e in entities if (e.get('type', '') or '').upper() == entity_type_upper]
+    
+    # 记录总数，然后截断
+    total = len(entities)
+    
+    return {
+        "entities": entities[:limit],
+        "total": total,
+        "limit": limit
+    }
 
 
 @app.get("/v1/entities/{name}", tags=["Entities"])

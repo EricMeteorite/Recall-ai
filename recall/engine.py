@@ -3183,7 +3183,7 @@ class RecallEngine:
                     'name': indexed.name,
                     'type': indexed.entity_type,
                     'aliases': indexed.aliases,
-                    'mention_count': len(indexed.turn_references),
+                    'occurrence_count': len(indexed.turn_references),  # 统一使用 occurrence_count
                     'related_turns': indexed.turn_references[:10]
                 }
         return None

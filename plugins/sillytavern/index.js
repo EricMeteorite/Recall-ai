@@ -41,6 +41,7 @@
         previewLength: 200,    // 记忆预览字数
         autoChunkLongText: true,  // 自动分段长文本
         chunkSize: 2000,       // 分段大小（字符数）
+        maxDisplayEntities: 100,  // 实体列表显示上限
         customFilterSelectors: []  // 用户自定义的思考内容过滤选择器
     };
     
@@ -2328,9 +2329,8 @@ function createUI() {
                             <option value="">全部类型</option>
                             <option value="PERSON">👤 人物</option>
                             <option value="LOCATION">📍 地点</option>
-                            <option value="ORGANIZATION">🏢 组织</option>
-                            <option value="OBJECT">📦 物品</option>
-                            <option value="EVENT">📅 事件</option>
+                            <option value="ORG">🏢 组织</option>
+                            <option value="ITEM">📦 物品</option>
                             <option value="CONCEPT">💡 概念</option>
                         </select>
                     </div>
@@ -2911,6 +2911,13 @@ function createUI() {
                             <label class="recall-setting-title">预览字数</label>
                             <input type="number" id="recall-preview-length" value="${pluginSettings.previewLength || 200}" 
                                    min="50" max="500" step="50" class="text_pole">
+                        </div>
+                        
+                        <div class="recall-setting-group">
+                            <label class="recall-setting-title">实体显示上限</label>
+                            <input type="number" id="recall-max-display-entities" value="${pluginSettings.maxDisplayEntities || 100}" 
+                                   min="10" max="1000" step="10" class="text_pole">
+                            <div class="recall-setting-hint">实体列表最多显示多少个，设置过高可能影响页面性能</div>
                         </div>
                         
                         <div class="recall-setting-group">
@@ -5183,6 +5190,7 @@ function onSaveSettings() {
     pluginSettings.autoChunkLongText = document.getElementById('recall-auto-chunk')?.checked ?? true;
     pluginSettings.chunkSize = parseInt(document.getElementById('recall-chunk-size')?.value) || 2000;
     pluginSettings.previewLength = parseInt(document.getElementById('recall-preview-length')?.value) || 200;
+    pluginSettings.maxDisplayEntities = parseInt(document.getElementById('recall-max-display-entities')?.value) || 100;
     pluginSettings.maxMemories = parseInt(document.getElementById('recall-max-memories')?.value) || 10;
     pluginSettings.maxContextTokens = parseInt(document.getElementById('recall-max-context-tokens')?.value) || 2000;
     pluginSettings.injectPosition = document.getElementById('recall-inject-position')?.value || 'in_chat';
@@ -8015,25 +8023,57 @@ async function loadEntities() {
     const taskId = taskTracker.add('load', '加载实体列表');
     
     try {
-        let url = `${pluginSettings.apiUrl}/v1/entities?user_id=${encodeURIComponent(userId)}&limit=100`;
+        // 使用配置的显示上限
+        const displayLimit = pluginSettings.maxDisplayEntities || 100;
+        let url = `${pluginSettings.apiUrl}/v1/entities?user_id=${encodeURIComponent(userId)}&limit=${displayLimit}`;
         if (entityType) url += `&entity_type=${encodeURIComponent(entityType)}`;
         
         const response = await fetch(url);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         
         const data = await response.json();
-        let entities = data.entities || data || [];
+        // 兼容新旧两种返回格式：
+        // 新格式: { entities: [...], total: N }
+        // 旧格式: [...] 或 { entities: [...] }
+        let entities = [];
+        let total = 0;
+        if (Array.isArray(data)) {
+            // 旧格式：直接返回数组
+            entities = data;
+            total = data.length;
+        } else if (data.entities) {
+            // 新格式：包含 entities 和 total
+            entities = data.entities || [];
+            total = data.total ?? entities.length;
+        } else {
+            entities = [];
+            total = 0;
+        }
         
-        // 客户端搜索过滤
+        // 保存服务端返回的总数（用于显示截断信息）
+        // 注意：如果有类型过滤，serverTotal 是该类型的总数
+        const serverTotal = data.total ?? entities.length;
+        
+        // 客户端搜索过滤（类型过滤已在服务端完成）
         if (search) {
             entities = entities.filter(e => 
                 (e.name || '').toLowerCase().includes(search.toLowerCase())
             );
         }
         
-        // 更新计数
+        // 更新计数：显示真实总数
         const entityCountEl = document.getElementById('recall-entity-count');
-        if (entityCountEl) entityCountEl.textContent = entities.length;
+        if (entityCountEl) {
+            // 如果有搜索，显示过滤后的数量
+            // 如果有截断（服务端总数 > 返回数量），显示 "X/Y" 格式
+            if (search) {
+                entityCountEl.textContent = entities.length;
+            } else if (serverTotal > entities.length) {
+                entityCountEl.textContent = `${entities.length}/${serverTotal}`;
+            } else {
+                entityCountEl.textContent = entities.length;
+            }
+        }
         
         // 渲染列表
         const listEl = document.getElementById('recall-entity-list');
@@ -8083,7 +8123,8 @@ async function loadEntities() {
 function createEntityItemHtml(entity) {
     const name = entity.name || entity.entity_name || '-';
     const type = entity.entity_type || entity.type || 'UNKNOWN';
-    const count = entity.mention_count || entity.count || 0;
+    // 兼容多种字段名：occurrence_count (服务端返回) / mention_count / count
+    const count = entity.occurrence_count || entity.mention_count || entity.count || 0;
     const typeIcon = getEntityTypeIcon(type);
     
     return `
@@ -8104,8 +8145,10 @@ function getEntityTypeIcon(type) {
     const icons = {
         'PERSON': '👤',
         'LOCATION': '📍',
-        'ORGANIZATION': '🏢',
-        'OBJECT': '📦',
+        'ORG': '🏢',           // 服务端实际使用的组织类型
+        'ORGANIZATION': '🏢', // 兼容旧数据
+        'ITEM': '📦',          // 服务端实际使用的物品类型
+        'OBJECT': '📦',       // 兼容旧数据
         'EVENT': '📅',
         'CONCEPT': '💡',
         'TIME': '⏰',
@@ -8157,7 +8200,8 @@ async function showEntityDetail(entityName) {
         if (nameEl) nameEl.textContent = entityName;
         if (typeEl) typeEl.textContent = entity.entity_type || entity.type || '-';
         if (summaryEl) summaryEl.textContent = entity.summary || '暂无摘要';
-        if (countEl) countEl.textContent = entity.mention_count || entity.count || '-';
+        // 兼容多种字段名：occurrence_count (服务端返回) / mention_count / count
+        if (countEl) countEl.textContent = entity.occurrence_count || entity.mention_count || entity.count || '-';
         
         // 显示相关实体
         if (relationsEl) {

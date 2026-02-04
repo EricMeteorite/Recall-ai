@@ -256,7 +256,13 @@ class RecallAPIClient:
     
     def get_entities(self, user_id: str) -> List[Dict]:
         """获取实体列表"""
-        return self._request("GET", f"/v1/entities?user_id={user_id}")
+        result = self._request("GET", f"/v1/entities?user_id={user_id}")
+        # 兼容新旧两种格式
+        if isinstance(result, list):
+            return result
+        elif isinstance(result, dict) and 'entities' in result:
+            return result['entities']
+        return result
     
     def get_related_entities(self, name: str) -> Dict:
         """获取相关实体"""
@@ -604,12 +610,23 @@ class RecallChatApp:
     def cmd_entities(self):
         """查看实体"""
         try:
-            entities = self.recall.get_entities(self.user_id)
+            result = self.recall._request("GET", f"/v1/entities?user_id={self.user_id}")
+            # 兼容新旧格式
+            if isinstance(result, list):
+                entities = result
+                total = len(result)
+            elif isinstance(result, dict):
+                entities = result.get('entities', [])
+                total = result.get('total', len(entities))
+            else:
+                entities = []
+                total = 0
+            
             if not entities:
                 print(f"  {Colors.YELLOW}暂无实体{Colors.RESET}")
                 return
             
-            print(f"\n{Colors.CYAN}实体列表 ({len(entities)}个):{Colors.RESET}")
+            print(f"\n{Colors.CYAN}实体列表 (显示 {len(entities)} / 共 {total} 个):{Colors.RESET}")
             for e in entities[:30]:
                 name = e.get("name", "?")
                 etype = e.get("type", "UNKNOWN")
