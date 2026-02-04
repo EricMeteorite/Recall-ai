@@ -142,6 +142,26 @@
         if (selectorLearningMode) return;
         selectorLearningMode = true;
         
+        // 【重要】自动收起扩展设置面板，让用户能看到聊天区域
+        const recallExtension = document.getElementById('recall-extension');
+        if (recallExtension) {
+            const drawerContent = recallExtension.querySelector('.inline-drawer-content');
+            const drawerIcon = recallExtension.querySelector('.inline-drawer-icon');
+            if (drawerContent) {
+                drawerContent.style.display = 'none';
+            }
+            if (drawerIcon) {
+                drawerIcon.classList.remove('up');
+                drawerIcon.classList.add('down');
+            }
+        }
+        
+        // 同时收起整个扩展侧边栏（如果是移动端或窄屏）
+        const extensionsMenu = document.getElementById('extensionsMenu');
+        if (extensionsMenu && extensionsMenu.classList.contains('openDrawer')) {
+            extensionsMenu.classList.remove('openDrawer');
+        }
+        
         const statusEl = document.getElementById('recall-learning-status');
         if (statusEl) {
             statusEl.style.display = 'block';
@@ -149,13 +169,23 @@
             statusEl.textContent = '🎯 学习模式已开启 - 点击聊天中的思考区域 (ESC取消)';
         }
         
-        // 创建顶部提示条
+        // 创建顶部提示条（更醒目）
         const banner = document.createElement('div');
         banner.className = 'recall-learning-banner';
         banner.id = 'recall-learning-banner';
         banner.innerHTML = `
-            <span>🎯 <strong>选择器学习模式</strong> - 点击聊天区域中你想过滤的思考内容</span>
-            <button id="recall-cancel-learning">按 ESC 或点此取消</button>
+            <div class="recall-learning-banner-content">
+                <span class="recall-learning-banner-icon">🎯</span>
+                <span class="recall-learning-banner-text">
+                    <strong>选择器学习模式</strong><br>
+                    <small>点击聊天区域中你想过滤的思考内容（如折叠的思考面板）</small>
+                </span>
+            </div>
+            <div class="recall-learning-banner-result" id="recall-learning-result" style="display:none;">
+                <span class="recall-learning-result-label">已学习:</span>
+                <code class="recall-learning-result-selector"></code>
+            </div>
+            <button id="recall-cancel-learning" class="recall-learning-cancel-btn">✕ 取消 (ESC)</button>
         `;
         document.body.appendChild(banner);
         
@@ -290,8 +320,9 @@
     
     /**
      * 停止选择器学习模式
+     * @param {boolean} reopenPanel - 是否重新打开设置面板（学习成功后需要）
      */
-    function stopSelectorLearning() {
+    function stopSelectorLearning(reopenPanel = false) {
         selectorLearningMode = false;
         
         // 取消自动停止的 timeout
@@ -317,6 +348,30 @@
         const statusEl = document.getElementById('recall-learning-status');
         if (statusEl) {
             statusEl.style.display = 'none';
+        }
+        
+        // 【新增】如果有新增选择器，重新展开设置面板让用户看到结果
+        if (reopenPanel) {
+            const recallExtension = document.getElementById('recall-extension');
+            if (recallExtension) {
+                const drawerContent = recallExtension.querySelector('.inline-drawer-content');
+                const drawerIcon = recallExtension.querySelector('.inline-drawer-icon');
+                if (drawerContent) {
+                    drawerContent.style.display = 'block';
+                }
+                if (drawerIcon) {
+                    drawerIcon.classList.remove('down');
+                    drawerIcon.classList.add('up');
+                }
+                
+                // 滚动到选择器区域
+                const selectorGroup = document.getElementById('recall-selector-learning-group');
+                if (selectorGroup) {
+                    setTimeout(() => {
+                        selectorGroup.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }, 100);
+                }
+            }
         }
     }
     
@@ -426,15 +481,15 @@
         
         // 检查是否已存在
         if (pluginSettings.customFilterSelectors.includes(selector)) {
+            showLearningResultInBanner(`${selector} (已存在)`, true);
             showLearningSuccess(`选择器已存在: ${selector}`);
-            // 不立即停止，让用户可以继续点击其他元素
-            // 与成功添加一样，1.5秒后自动停止
+            // 2秒后自动停止，并重新打开面板
             if (learningModeTimeout) {
                 clearTimeout(learningModeTimeout);
             }
             learningModeTimeout = setTimeout(() => {
-                stopSelectorLearning();
-            }, 1500);
+                stopSelectorLearning(true);  // 已存在也应该打开面板让用户看到
+            }, 2000);
             return;
         }
         
@@ -449,16 +504,38 @@
         element.classList.remove('recall-learning-highlight');
         element.classList.add('recall-selected-element');
         
+        // 【重要】在 banner 中显示学习到的选择器
+        showLearningResultInBanner(selector, true);
+        
         // 显示成功
         showLearningSuccess(`已添加: ${selector}`);
         
-        // 1.5秒后停止学习模式（先取消之前的 timeout，再设置新的）
+        // 2.5秒后停止学习模式并重新打开设置面板
         if (learningModeTimeout) {
             clearTimeout(learningModeTimeout);
         }
         learningModeTimeout = setTimeout(() => {
-            stopSelectorLearning();
-        }, 1500);
+            stopSelectorLearning(true);  // 传入 true 重新打开面板
+        }, 2500);
+    }
+    
+    /**
+     * 在 banner 中显示学习结果
+     */
+    function showLearningResultInBanner(selector, isSuccess) {
+        const resultEl = document.getElementById('recall-learning-result');
+        const selectorEl = resultEl?.querySelector('.recall-learning-result-selector');
+        if (resultEl && selectorEl) {
+            resultEl.style.display = 'flex';
+            resultEl.className = `recall-learning-banner-result ${isSuccess ? 'success' : 'error'}`;
+            selectorEl.textContent = selector;
+        }
+        
+        // 更新 banner 样式
+        const banner = document.getElementById('recall-learning-banner');
+        if (banner) {
+            banner.classList.add(isSuccess ? 'success' : 'error');
+        }
     }
     
     /**
@@ -531,13 +608,44 @@
     
     /**
      * 显示学习错误提示
+     * @param {string} message - 错误信息
+     * @param {boolean} autoStop - 是否自动停止学习模式（默认 false，让用户继续尝试）
      */
-    function showLearningError(message) {
+    function showLearningError(message, autoStop = false) {
         const statusEl = document.getElementById('recall-learning-status');
         if (statusEl) {
             statusEl.style.display = 'block';
             statusEl.className = 'recall-learning-status error';
             statusEl.textContent = '❌ ' + message;
+        }
+        
+        // 在 banner 中显示错误（但不改变 banner 整体颜色，只显示消息）
+        const resultEl = document.getElementById('recall-learning-result');
+        const selectorEl = resultEl?.querySelector('.recall-learning-result-selector');
+        if (resultEl && selectorEl) {
+            resultEl.style.display = 'flex';
+            resultEl.className = 'recall-learning-banner-result error';
+            const labelEl = resultEl.querySelector('.recall-learning-result-label');
+            if (labelEl) labelEl.textContent = '提示:';
+            selectorEl.textContent = message;
+            
+            // 3秒后隐藏错误提示，让用户继续尝试
+            setTimeout(() => {
+                if (selectorLearningMode && resultEl) {
+                    resultEl.style.display = 'none';
+                    if (labelEl) labelEl.textContent = '已学习:';
+                }
+            }, 3000);
+        }
+        
+        // 只有明确要求时才自动停止
+        if (autoStop) {
+            if (learningModeTimeout) {
+                clearTimeout(learningModeTimeout);
+            }
+            learningModeTimeout = setTimeout(() => {
+                stopSelectorLearning();
+            }, 2000);
         }
     }
 
