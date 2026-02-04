@@ -178,14 +178,14 @@
                 <span class="recall-learning-banner-icon">🎯</span>
                 <span class="recall-learning-banner-text">
                     <strong>选择器学习模式</strong><br>
-                    <small>点击聊天区域中你想过滤的思考内容（如折叠的思考面板）</small>
+                    <small>点击要过滤的元素，可连续添加多个，按 ESC 或点击右侧按钮退出</small>
                 </span>
             </div>
             <div class="recall-learning-banner-result" id="recall-learning-result" style="display:none;">
                 <span class="recall-learning-result-label">已学习:</span>
                 <code class="recall-learning-result-selector"></code>
             </div>
-            <button id="recall-cancel-learning" class="recall-learning-cancel-btn">✕ 取消 (ESC)</button>
+            <button id="recall-cancel-learning" class="recall-learning-cancel-btn">✕ 完成</button>
         `;
         document.body.appendChild(banner);
         
@@ -238,7 +238,7 @@
             if (target.id === 'recall-cancel-learning' || target.closest('#recall-cancel-learning')) {
                 e.preventDefault();
                 e.stopPropagation();
-                stopSelectorLearning();
+                stopSelectorLearning(true);  // 完成时打开面板
                 return;
             }
             
@@ -247,39 +247,26 @@
                 e.preventDefault();
                 e.stopPropagation();
                 
-                // 向上查找有类名的元素（用户可能点击了纯文本）
-                // 跳过 mes_text 本身和它的直接包装器，因为它们是通用容器
-                let targetElement = target;
                 const mesText = target.closest('.mes_text');
                 
-                while (targetElement && targetElement !== chatArea && targetElement !== mesText) {
-                    const classStr = getClassNameString(targetElement);
-                    // 找到有非通用类名的元素
-                    if (classStr && classStr.trim()) {
-                        const classes = classStr.split(/\s+/).filter(c => 
-                            c && c.length > 2 && 
-                            !c.startsWith('recall-') &&
-                            !['mes_text', 'mes', 'mes_block', 'mes_text_wrapper'].includes(c)
-                        );
-                        if (classes.length > 0) {
-                            break;  // 找到有意义的类名
-                        }
-                    }
-                    targetElement = targetElement.parentElement;
-                }
+                // 【重要】允许选择任何元素
+                let targetElement = target;
                 
-                // 如果没找到有效元素（走到了 mes_text 或更上层）
-                if (!targetElement || targetElement === chatArea || targetElement === mesText) {
-                    showLearningError('请点击有特定样式的区域（如折叠面板），而不是普通文本');
+                // 如果是 mes_text 本身，提示用户需要更具体的选择
+                if (targetElement === mesText) {
+                    showLearningError('请点击更具体的元素，而不是整个消息区域');
                     return;
                 }
                 
-                // 生成选择器
-                const selector = generateSmartSelector(targetElement);
+                // 生成选择器 - 尝试智能选择器，失败则用 fallback
+                let selector = generateSmartSelector(targetElement);
+                if (!selector) {
+                    selector = generateFallbackSelector(targetElement, mesText);
+                }
+                
+                // 现在 selector 一定有值（fallback 保证返回）
                 if (selector) {
                     addLearnedSelector(selector, targetElement);
-                } else {
-                    showLearningError('无法为此元素生成选择器');
                 }
             }
         };
@@ -287,7 +274,7 @@
         // ESC 取消
         const onKeyDown = (e) => {
             if (e.key === 'Escape') {
-                stopSelectorLearning();
+                stopSelectorLearning(true);  // 完成时打开面板，让用户看到已添加的选择器
             }
         };
         
@@ -471,6 +458,104 @@
     }
     
     /**
+     * 为没有类名的元素生成备用选择器
+     * 基于标签名和在父元素中的位置
+     */
+    function generateFallbackSelector(element, mesText) {
+        if (!element || !element.tagName) return null;
+        
+        // 辅助函数：获取元素在同类型兄弟中的索引
+        function getNthOfTypeIndex(el) {
+            if (!el.parentElement) return 1;
+            const siblings = Array.from(el.parentElement.children).filter(c => c.tagName === el.tagName);
+            return siblings.indexOf(el) + 1;
+        }
+        
+        // 辅助函数：获取元素在所有兄弟中的索引
+        function getNthChildIndex(el) {
+            if (!el.parentElement) return 1;
+            return Array.from(el.parentElement.children).indexOf(el) + 1;
+        }
+        
+        // 辅助函数：安全获取类名字符串
+        function getClassNameStr(el) {
+            if (!el || !el.className) return '';
+            if (typeof el.className === 'string') return el.className;
+            if (el.className.baseVal) return el.className.baseVal;
+            return '';
+        }
+        
+        const tagName = element.tagName.toLowerCase();
+        const selectors = [];
+        
+        // 1. 尝试使用父元素的类名 + 子元素标签
+        const parent = element.parentElement;
+        if (parent && parent !== mesText) {
+            const parentClassStr = getClassNameStr(parent);
+            if (parentClassStr) {
+                const parentClasses = parentClassStr.split(/\s+/).filter(c => 
+                    c && c.length > 2 && 
+                    !c.startsWith('recall-') &&
+                    !['mes_text', 'mes', 'mes_block'].includes(c)
+                );
+                if (parentClasses.length > 0) {
+                    // .parent-class > tagname
+                    selectors.push('.' + parentClasses[0] + ' > ' + tagName);
+                    // .parent-class tagname (更宽松)
+                    selectors.push('.' + parentClasses[0] + ' ' + tagName);
+                }
+            }
+            
+            // 2. 使用父元素标签 + 当前元素标签
+            const parentTag = parent.tagName.toLowerCase();
+            if (!['div', 'span'].includes(parentTag)) {
+                selectors.push(parentTag + ' > ' + tagName);
+            }
+        }
+        
+        // 3. 直接使用标签名（如果是比较特殊的标签）
+        const specificTags = ['details', 'summary', 'pre', 'code', 'blockquote', 'figure', 'figcaption'];
+        if (specificTags.includes(tagName)) {
+            selectors.push(tagName);
+        }
+        
+        // 4. 使用 nth-of-type 选择器
+        const nthIndex = getNthOfTypeIndex(element);
+        if (parent && parent !== mesText) {
+            const parentClassStr = getClassNameStr(parent);
+            if (parentClassStr) {
+                const parentClasses = parentClassStr.split(/\s+/).filter(c => 
+                    c && c.length > 2 && !c.startsWith('recall-')
+                );
+                if (parentClasses.length > 0) {
+                    selectors.push('.' + parentClasses[0] + ' > ' + tagName + ':nth-of-type(' + nthIndex + ')');
+                }
+            }
+        }
+        
+        // 5. 【保底】使用 .mes_text > tagname:nth-of-type(n) 或 .mes_text tagname:nth-child(n)
+        // 这个选择器一定能工作
+        selectors.push('.mes_text ' + tagName + ':nth-of-type(' + nthIndex + ')');
+        selectors.push('.mes_text > *:nth-child(' + getNthChildIndex(element) + ')');
+        
+        // 6. 最终保底：直接用标签名
+        selectors.push(tagName);
+        
+        // 返回第一个有效的选择器
+        for (const selector of selectors) {
+            try {
+                document.querySelector(selector);
+                return selector;
+            } catch (e) {
+                continue;
+            }
+        }
+        
+        // 这里不应该到达，但如果到达了，返回标签名
+        return tagName;
+    }
+
+    /**
      * 添加学习到的选择器
      */
     function addLearnedSelector(selector, element) {
@@ -483,15 +568,13 @@
         if (pluginSettings.customFilterSelectors.includes(selector)) {
             showLearningResultInBanner(`${selector} (已存在)`, true);
             showLearningSuccess(`选择器已存在: ${selector}`);
-            // 2秒后自动停止，并重新打开面板
-            if (learningModeTimeout) {
-                clearTimeout(learningModeTimeout);
-            }
-            learningModeTimeout = setTimeout(() => {
-                stopSelectorLearning(true);  // 已存在也应该打开面板让用户看到
-            }, 2000);
+            // 【改进】不自动停止，允许用户继续添加其他选择器
             return;
         }
+        
+        // 【新增】检查选择器是否过于通用，给出警告
+        const tooGenericSelectors = ['div', 'span', 'p', 'a', 'ul', 'ol', 'li', 'table', 'tr', 'td', 'th', 'details', 'summary', 'pre', 'code'];
+        const isToGeneric = tooGenericSelectors.includes(selector.toLowerCase());
         
         // 添加选择器
         pluginSettings.customFilterSelectors.push(selector);
@@ -507,16 +590,16 @@
         // 【重要】在 banner 中显示学习到的选择器
         showLearningResultInBanner(selector, true);
         
-        // 显示成功
-        showLearningSuccess(`已添加: ${selector}`);
-        
-        // 2.5秒后停止学习模式并重新打开设置面板
-        if (learningModeTimeout) {
-            clearTimeout(learningModeTimeout);
+        // 显示成功（如果选择器过于通用，显示警告）
+        const count = pluginSettings.customFilterSelectors.length;
+        if (isToGeneric) {
+            showLearningSuccess(`⚠️ 已添加 (${count}个): ${selector} - 此选择器较为通用，可能会影响所有消息中的相似元素`);
+        } else {
+            showLearningSuccess(`已添加 (${count}个): ${selector}`);
         }
-        learningModeTimeout = setTimeout(() => {
-            stopSelectorLearning(true);  // 传入 true 重新打开面板
-        }, 2500);
+        
+        // 【改进】不自动停止学习模式，允许用户连续添加多个选择器
+        // 用户需要按 ESC 或点击取消按钮来退出学习模式
     }
     
     /**
@@ -1150,19 +1233,8 @@
     /**
      * 【核心】从 .mes_text 中提取语义内容
      * 
-     * 原理：无论什么预设，AI 的"正文内容"总是在语义标签中：
-     * - p 段落
-     * - ul/ol/li 列表
-     * - blockquote 引用
-     * - h1-h6 标题
-     * - table 表格
-     * 
-     * 而"思考内容"通常在：
-     * - details 折叠面板
-     * - div.think/div.reason 等特殊容器
-     * - pre/code 代码块（某些预设用来显示思考）
-     * 
-     * 这个函数通过"正向提取语义标签"来获取内容，天然排除了思考内容。
+     * 【新方法】使用 DOM 克隆 + 移除思考容器的方式
+     * 这种方法更简单可靠，不会遗漏任何内容
      * 
      * @param {Element} mesText - .mes_text 元素
      * @returns {string} 提取的语义内容文本
@@ -1170,82 +1242,54 @@
     function extractSemanticContent(mesText) {
         if (!mesText) return '';
         
-        const contentParts = [];
+        // 应该跳过的类名关键词（思考/推理相关）
+        const SKIP_CLASS_KEYWORDS = [
+            'think', 'thought', 'reasoning', 'reflection',
+            'cot', 'chain-of-thought',
+            'inner', 'internal',
+            'hidden', 'collapsed', 'folded',
+            'monologue'
+        ];
         
-        // 语义内容标签（白名单）
-        const SEMANTIC_TAGS = new Set([
-            'P', 'UL', 'OL', 'LI', 'BLOCKQUOTE',
-            'H1', 'H2', 'H3', 'H4', 'H5', 'H6',
-            'TABLE', 'THEAD', 'TBODY', 'TR', 'TD', 'TH', 'CAPTION',
-            'DL', 'DT', 'DD',  // 定义列表
-            'FIGURE', 'FIGCAPTION',
-            'PRE', 'CODE'  // 代码块（会根据类名判断是否跳过）
-        ]);
-        
-        // 应该跳过的容器标签
-        // 注意：DETAILS 和 SUMMARY 在 shouldSkip 中单独处理（根据 open 属性判断）
-        // 注意：PRE 不再无条件跳过，而是在 shouldSkip 中根据类名判断
+        // 应该跳过的标签
         const SKIP_TAGS = new Set([
             'SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE',
             'IFRAME', 'SVG', 'CANVAS', 'VIDEO', 'AUDIO',
             'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA'
         ]);
         
-        // 应该跳过的类名关键词（思考/推理相关）
-        // 平衡策略：保留常见的思考容器关键词，但移除过于宽泛的（如 reason）
-        const SKIP_CLASS_KEYWORDS = [
-            'think', 'thought', 'reasoning', 'reflection',  // 思考相关
-            'cot', 'chain-of-thought',                       // CoT 相关
-            'inner', 'internal',                             // 内部思考
-            'hidden', 'collapsed', 'folded',                 // 隐藏/折叠状态
-            'monologue'                                      // 独白
-        ];
-        
         /**
-         * 安全获取元素的类名字符串
+         * 检查元素是否应该被移除
          */
-        function getClassString(el) {
-            if (!el || !el.className) return '';
-            if (typeof el.className === 'string') return el.className.toLowerCase();
-            if (el.className.baseVal) return el.className.baseVal.toLowerCase();
-            return '';
-        }
-        
-        /**
-         * 检查元素是否应该被跳过
-         */
-        function shouldSkip(el) {
+        function shouldRemove(el) {
             if (!el || el.nodeType !== Node.ELEMENT_NODE) return false;
             
             const tagName = el.tagName;
             
-            // 【特殊处理】DETAILS 标签：只有未展开的才跳过
-            // 如果用户展开了 details（设置了 open 属性），应该提取内容
-            if (tagName === 'DETAILS') {
-                // 未展开的 details 跳过（用户看不到内容）
-                if (!el.hasAttribute('open')) return true;
-                // 展开的 details 不跳过，继续检查类名
-            }
+            // DETAILS 元素特殊处理：
+            // - 未展开的 details：不直接移除整个元素，而是在后面单独处理其内部非 summary 内容
+            // - 展开的 details：正常处理
+            // 注意：这里不返回 true，让后面的代码单独处理未展开 details 的内容
             
-            // SUMMARY 总是跳过（它是 details 的标题，不是正文内容）
-            if (tagName === 'SUMMARY') return true;
+            // SUMMARY：不移除，因为它是用户可见的（作为折叠标题）
+            // 无论 details 是否展开，summary 都是可见的
             
             // 跳过特定标签
             if (SKIP_TAGS.has(tagName)) return true;
             
             // 检查 hidden 属性
             if (el.hidden) return true;
-            
-            // 检查 aria-hidden
             if (el.getAttribute('aria-hidden') === 'true') return true;
             
-            // 检查 display:none
-            try {
-                if (window.getComputedStyle(el).display === 'none') return true;
-            } catch (e) {}
-            
             // 检查类名是否包含思考相关关键词
-            const classStr = getClassString(el);
+            let classStr = '';
+            if (el.className) {
+                if (typeof el.className === 'string') {
+                    classStr = el.className.toLowerCase();
+                } else if (el.className.baseVal) {
+                    classStr = el.className.baseVal.toLowerCase();
+                }
+            }
             const idStr = (el.id || '').toLowerCase();
             const combined = classStr + ' ' + idStr;
             
@@ -1253,7 +1297,7 @@
                 if (combined.includes(keyword)) return true;
             }
             
-            // 【关键】检查用户自定义的过滤选择器
+            // 检查用户自定义的过滤选择器
             if (Array.isArray(pluginSettings.customFilterSelectors)) {
                 for (const selector of pluginSettings.customFilterSelectors) {
                     try {
@@ -1265,74 +1309,59 @@
             return false;
         }
         
-        /**
-         * 从元素中提取纯文本（递归处理内联元素）
-         */
-        function getTextFromElement(el) {
-            if (!el) return '';
+        // 【方法】克隆 DOM 树，移除思考容器，然后提取文本
+        try {
+            // 1. 克隆 DOM 树（深拷贝）
+            const clone = mesText.cloneNode(true);
             
-            // 如果整个元素应该跳过
-            if (shouldSkip(el)) return '';
-            
-            // 直接获取文本内容，但要递归检查子元素是否需要跳过
-            let text = '';
-            for (const child of el.childNodes) {
-                if (child.nodeType === Node.TEXT_NODE) {
-                    text += child.textContent || '';
-                } else if (child.nodeType === Node.ELEMENT_NODE) {
-                    // BR 标签转换为换行
-                    if (child.tagName === 'BR') {
-                        text += '\n';
-                        continue;
-                    }
-                    // 递归检查子元素
-                    if (!shouldSkip(child)) {
-                        text += getTextFromElement(child);
+            // 2. 特殊处理：未展开的 <details> 元素
+            // 只保留 <summary> 内容，移除其他子元素
+            const closedDetails = clone.querySelectorAll('details:not([open])');
+            for (const details of closedDetails) {
+                // 保留 summary，移除其他所有子元素
+                const children = Array.from(details.children);
+                for (const child of children) {
+                    if (child.tagName !== 'SUMMARY') {
+                        child.remove();
                     }
                 }
             }
+            
+            // 3. 收集所有需要移除的元素
+            const toRemove = [];
+            const allElements = clone.querySelectorAll('*');
+            for (const el of allElements) {
+                if (shouldRemove(el)) {
+                    toRemove.push(el);
+                }
+            }
+            
+            // 4. 移除收集到的元素（从后往前移除，避免索引问题）
+            for (let i = toRemove.length - 1; i >= 0; i--) {
+                const el = toRemove[i];
+                if (el.parentNode) {
+                    el.remove();
+                }
+            }
+            
+            // 5. 获取剩余内容的文本
+            let text = clone.textContent || '';
+            
+            // 6. 清理：多余空白、连续换行
+            text = text.replace(/[ \t]+/g, ' ');  // 合并连续空格
+            text = text.replace(/\n[ \t]+/g, '\n');  // 移除行首空白
+            text = text.replace(/[ \t]+\n/g, '\n');  // 移除行尾空白
+            text = text.replace(/\n{3,}/g, '\n\n');  // 最多两个连续换行
+            text = text.trim();
+            
+            console.log(`[Recall] 语义提取: 原始DOM ${mesText.textContent?.length || 0} 字 → 过滤后 ${text.length} 字`);
+            
             return text;
+            
+        } catch (e) {
+            console.warn('[Recall] 语义提取失败:', e);
+            return '';
         }
-        
-        /**
-         * 递归遍历并提取语义内容
-         */
-        function traverseWithText(parent) {
-            for (const child of parent.childNodes) {
-                if (child.nodeType === Node.TEXT_NODE) {
-                    // 直接文本节点
-                    const text = child.textContent.trim();
-                    if (text) {
-                        contentParts.push(text);
-                    }
-                } else if (child.nodeType === Node.ELEMENT_NODE) {
-                    // 元素节点
-                    if (shouldSkip(child)) continue;
-                    
-                    const tagName = child.tagName;
-                    
-                    if (SEMANTIC_TAGS.has(tagName)) {
-                        // 语义标签：提取全部文本
-                        const text = getTextFromElement(child).trim();
-                        if (text) {
-                            contentParts.push(text);
-                        }
-                    } else {
-                        // 其他容器：递归
-                        traverseWithText(child);
-                    }
-                }
-            }
-        }
-        
-        // 开始遍历 .mes_text 的子节点（包括文本节点和元素节点）
-        traverseWithText(mesText);
-        
-        // 合并并清理
-        let result = contentParts.join('\n\n');
-        result = result.replace(/\n{3,}/g, '\n\n').trim();
-        
-        return result;
     }
 
     /**
