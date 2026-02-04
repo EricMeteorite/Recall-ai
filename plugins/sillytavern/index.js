@@ -1330,11 +1330,16 @@
             // 3. 收集所有需要移除的元素
             const toRemove = [];
             const allElements = clone.querySelectorAll('*');
+            console.log(`[Recall] 语义提取: 检查 ${allElements.length} 个元素`);
+            
             for (const el of allElements) {
                 if (shouldRemove(el)) {
                     toRemove.push(el);
+                    console.log(`[Recall] 语义提取: 将移除 <${el.tagName.toLowerCase()}> class="${el.className}"`);
                 }
             }
+            
+            console.log(`[Recall] 语义提取: 共移除 ${toRemove.length} 个元素`);
             
             // 4. 移除收集到的元素（从后往前移除，避免索引问题）
             for (let i = toRemove.length - 1; i >= 0; i--) {
@@ -1355,6 +1360,11 @@
             text = text.trim();
             
             console.log(`[Recall] 语义提取: 原始DOM ${mesText.textContent?.length || 0} 字 → 过滤后 ${text.length} 字`);
+            
+            // 【调试】显示提取结果的前 200 字
+            if (text.length > 0) {
+                console.log(`[Recall] 语义提取预览: ${text.substring(0, 200)}${text.length > 200 ? '...' : ''}`);
+            }
             
             return text;
             

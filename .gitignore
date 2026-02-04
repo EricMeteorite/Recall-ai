@@ -105,3 +105,8 @@ recall_data/models/
 *.pkl
 *.db
 *.sqlite3
+
+# ==================== nodejs ====================
+node_modules/
+package-lock.json
+package.json
