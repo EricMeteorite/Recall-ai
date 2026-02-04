@@ -169,14 +169,31 @@
         if (pluginSettings.filterThinking) {
             // 现在消息已经渲染完成，可以安全地从DOM提取
             const domText = getRenderedTextByIndex(messageIndex);
+            
+            // 【调试】打印 DOM 提取的原始结果
+            console.log(`[Recall] DOM提取结果: ${domText ? domText.length + '字' : 'null'}`);
+            if (domText) {
+                console.log(`[Recall] DOM提取预览: ${domText.substring(0, 100)}...`);
+            }
+            
             if (domText && domText.trim().length > 0) {
-                contentToSave = domText;
-                console.log('[Recall] ✓ 从DOM提取用户可见内容（渲染完成后）');
+                // 【新增】检测提取的内容是否包含大量 HTML 代码
+                // 如果是，说明 HTML 没有被正确渲染，需要额外清理
+                contentToSave = cleanHtmlArtifacts(domText);
+                
+                if (contentToSave !== domText) {
+                    console.log('[Recall] ✓ 从DOM提取并清理了HTML残留');
+                } else {
+                    console.log('[Recall] ✓ 从DOM提取用户可见内容（渲染完成后）');
+                }
             } else {
                 // fallback：DOM提取失败，使用正则过滤
                 contentToSave = filterThinkingContent(message.mes);
+                // 同样需要清理 HTML 残留
+                contentToSave = cleanHtmlArtifacts(contentToSave);
+                
                 if (contentToSave !== message.mes) {
-                    console.log('[Recall] ⚠ DOM提取失败，已使用正则过滤思维链');
+                    console.log('[Recall] ⚠ DOM提取失败，已使用正则过滤+HTML清理');
                 } else {
                     console.log('[Recall] ⚠ DOM提取失败，使用原始内容');
                 }
@@ -242,6 +259,112 @@
                 console.warn('[Recall] 保存AI响应失败:', err);
             });
         }
+    }
+    
+    /**
+     * 【通用】清理文本中的 HTML 残留
+     * 当 HTML 作为纯文本存在（未被浏览器渲染）时，需要清理这些代码
+     * 这是一个通用方案，不针对任何特定预设
+     */
+    function cleanHtmlArtifacts(text) {
+        if (!text) return text;
+        
+        let cleaned = text;
+        const originalLength = cleaned.length;
+        
+        // 检测是否包含完整 HTML 文档结构
+        const hasHtmlDocument = /<!DOCTYPE\s+html/i.test(cleaned) || /<html[\s>]/i.test(cleaned);
+        
+        if (hasHtmlDocument) {
+            console.log('[Recall] 检测到 HTML 文档结构，进行清理...');
+            
+            // 尝试提取 <body> 内的实际内容
+            // 某些预设会输出完整 HTML 文档，我们只要 body 内的内容
+            const bodyMatch = cleaned.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+            if (bodyMatch) {
+                cleaned = bodyMatch[1];
+            }
+        }
+        
+        // 移除 <head> 标签及其内容（必须在处理其他标签之前）
+        cleaned = cleaned.replace(/<head[^>]*>[\s\S]*?<\/head>/gi, '');
+        
+        // 移除 <style> 标签及其内容（纯文本形式）
+        cleaned = cleaned.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
+        
+        // 移除 <script> 标签及其内容（纯文本形式）
+        cleaned = cleaned.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
+        
+        // 移除 HTML 注释
+        cleaned = cleaned.replace(/<!--[\s\S]*?-->/g, '');
+        
+        // 移除 <!DOCTYPE>, <html>, </html>, <body>, </body> 等标签
+        cleaned = cleaned.replace(/<!DOCTYPE[^>]*>/gi, '');
+        cleaned = cleaned.replace(/<\/?html[^>]*>/gi, '');
+        cleaned = cleaned.replace(/<\/?body[^>]*>/gi, '');
+        
+        // 移除 SVG 内容（通常是装饰性的）
+        cleaned = cleaned.replace(/<svg[^>]*>[\s\S]*?<\/svg>/gi, '');
+        
+        // 移除 <defs> 标签（SVG 定义）
+        cleaned = cleaned.replace(/<defs[^>]*>[\s\S]*?<\/defs>/gi, '');
+        
+        // 移除 <filter> 标签（SVG 滤镜）
+        cleaned = cleaned.replace(/<filter[^>]*>[\s\S]*?<\/filter>/gi, '');
+        
+        // 移除 <mask> 标签（SVG 遮罩）
+        cleaned = cleaned.replace(/<mask[^>]*>[\s\S]*?<\/mask>/gi, '');
+        
+        // 移除内联 CSS 代码块（独立的 CSS 规则）
+        // 匹配类似 .class-name { ... } 或 #id { ... } 的 CSS 规则
+        cleaned = cleaned.replace(/^\s*[\.\#\*]?[\w\-\:\[\]=\"\']+\s*\{[^}]*\}\s*$/gm, '');
+        
+        // 移除 CSS 媒体查询块
+        cleaned = cleaned.replace(/@media[^{]*\{[\s\S]*?\}\s*\}/gi, '');
+        
+        // 移除 CSS @keyframes 动画
+        cleaned = cleaned.replace(/@keyframes[^{]*\{[\s\S]*?\}\s*\}/gi, '');
+        
+        // 移除 CSS 变量定义
+        cleaned = cleaned.replace(/:root\s*\{[^}]*\}/gi, '');
+        
+        // 移除类似 CSS 属性的行（如 "width: 100%; height: 100%;"）
+        // 只移除看起来明显是 CSS 的连续多行
+        cleaned = cleaned.replace(/^\s*([\w\-]+\s*:\s*[^;]+;\s*)+$/gm, '');
+        
+        // 移除空的 div/span 容器标签（保留内容）
+        cleaned = cleaned.replace(/<div[^>]*>\s*<\/div>/gi, '');
+        cleaned = cleaned.replace(/<span[^>]*>\s*<\/span>/gi, '');
+        
+        // 移除常见的装饰性类名的 div 标签（但保留内容）
+        // 这些通常是 UI 组件的容器
+        cleaned = cleaned.replace(/<div\s+class=["'][^"']*(?:toggle|icon|header|wrapper|container|collapsible|collapse|expand)[^"']*["'][^>]*>/gi, '');
+        cleaned = cleaned.replace(/<\/div>/gi, '\n');
+        
+        // 清理其他空标签
+        cleaned = cleaned.replace(/<[a-z]+[^>]*>\s*<\/[a-z]+>/gi, '');
+        
+        // 移除行内事件处理器（onclick等）的残留
+        cleaned = cleaned.replace(/\s*on\w+\s*=\s*["'][^"']*["']/gi, '');
+        
+        // 移除 aria 属性残留
+        cleaned = cleaned.replace(/\s*aria-[\w\-]+\s*=\s*["'][^"']*["']/gi, '');
+        
+        // 移除 role 属性残留
+        cleaned = cleaned.replace(/\s*role\s*=\s*["'][^"']*["']/gi, '');
+        
+        // 移除 tabindex 属性残留
+        cleaned = cleaned.replace(/\s*tabindex\s*=\s*["'][^"']*["']/gi, '');
+        
+        // 清理多余的空行
+        cleaned = cleaned.replace(/\n{3,}/g, '\n\n').trim();
+        
+        // 如果清理后内容显著减少，记录日志
+        if (originalLength > 0 && cleaned.length < originalLength * 0.5) {
+            console.log(`[Recall] HTML清理: ${originalLength}字 → ${cleaned.length}字 (移除了${Math.round((1 - cleaned.length/originalLength) * 100)}%)`);
+        }
+        
+        return cleaned;
     }
 
     /**
@@ -4705,8 +4828,10 @@ async function onMessageReceived(messageIndex) {
  */
 async function saveAIMessageFallback(messageIndex, message) {
     let contentToSave = filterThinkingContent(message.mes);
+    // 【新增】同样需要清理 HTML 残留
+    contentToSave = cleanHtmlArtifacts(contentToSave);
     if (contentToSave !== message.mes) {
-        console.log('[Recall] 使用正则过滤思维链（fallback）');
+        console.log('[Recall] 使用正则过滤+HTML清理（fallback）');
     }
     await saveAIMessageDirect(messageIndex, message, contentToSave);
 }
@@ -4715,6 +4840,9 @@ async function saveAIMessageFallback(messageIndex, message) {
  * 直接保存AI消息（已处理好的内容）
  */
 async function saveAIMessageDirect(messageIndex, message, contentToSave) {
+    // 【新增】最后一道防线：清理 HTML 残留
+    contentToSave = cleanHtmlArtifacts(contentToSave);
+    
     if (!contentToSave || contentToSave.trim().length === 0) {
         console.log('[Recall] 内容为空，跳过保存');
         return;
