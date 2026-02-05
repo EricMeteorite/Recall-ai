@@ -44,6 +44,7 @@ class TaskType(Enum):
     
     # LLM 调用
     LLM_CALL = "llm_call"        # LLM API 调用
+    LLM_ANALYSIS = "llm_analysis"  # 统一 LLM 分析（矛盾检测+关系提取合并）
     EMBEDDING = "embedding"      # 向量化
     
     # 通用

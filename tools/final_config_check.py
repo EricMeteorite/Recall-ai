@@ -18,6 +18,7 @@ TARGET_CONFIGS = {
     'COMMUNITY_DETECTION_ENABLED': 'false',
     'LLM_RELATION_MODE': 'llm',
     'ENTITY_SUMMARY_ENABLED': 'true',
+    'UNIFIED_LLM_ANALYSIS_ENABLED': 'true',  # v4.1.1 性能优化
 }
 
 def check_template_files():
@@ -30,7 +31,7 @@ def check_template_files():
         'manage.sh'
     ]
     
-    print('\n📋 1. 配置模板文件检查 (8个目标配置)')
+    print(f'\n📋 1. 配置模板文件检查 ({len(TARGET_CONFIGS)}个目标配置)')
     print('-' * 50)
     
     all_ok = True

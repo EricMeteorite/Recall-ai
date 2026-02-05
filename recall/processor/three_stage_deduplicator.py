@@ -498,6 +498,8 @@ class ThreeStageDeduplicator:
                     item_embedding = self.embedding_backend.encode(item.get_text())
                 if hasattr(item_embedding, 'tolist'):
                     item_embedding = item_embedding.tolist()
+                # 【优化】保存计算的 embedding 到 item，供后续复用（避免二次 API 调用）
+                item.embedding = item_embedding
             
             # 与所有现有项目计算相似度
             best_match = None

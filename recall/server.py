@@ -248,6 +248,11 @@ SUPPORTED_CONFIG_KEYS = {
     # Episode 追溯配置
     'EPISODE_TRACKING_ENABLED',       # 是否启用 Episode 追溯
     
+    # ====== v4.1.1 性能优化配置 ======
+    # 统一 LLM 分析（将矛盾检测和关系提取合并为单次调用）
+    'UNIFIED_LLM_ANALYSIS_ENABLED',   # 是否启用统一 LLM 分析
+    'UNIFIED_LLM_MAX_TOKENS',         # 统一分析最大 tokens
+    
     # ====== v4.1.1 LLM Max Tokens 配置（防止输出截断）======
     'LLM_DEFAULT_MAX_TOKENS',         # LLM 默认最大输出 tokens（通用）
     'LLM_RELATION_MAX_TOKENS',        # 关系提取最大 tokens
@@ -819,6 +824,18 @@ ENTITY_SUMMARY_MIN_FACTS=5
 EPISODE_TRACKING_ENABLED=true
 
 # ----------------------------------------------------------------------------
+# 统一 LLM 分析配置（v4.1.1 性能优化）
+# Unified LLM Analysis Configuration (v4.1.1 Performance Optimization)
+# ----------------------------------------------------------------------------
+# 是否启用统一 LLM 分析（将矛盾检测和关系提取合并为单次调用）
+# Enable unified LLM analysis (merge contradiction detection and relation extraction)
+UNIFIED_LLM_ANALYSIS_ENABLED=true
+
+# 统一分析最大 tokens
+# Max tokens for unified analysis
+UNIFIED_LLM_MAX_TOKENS=2000
+
+# ----------------------------------------------------------------------------
 # LLM Max Tokens 配置 (防止输出截断)
 # LLM Max Tokens Configuration (Prevent output truncation)
 # ----------------------------------------------------------------------------
@@ -990,6 +1007,30 @@ class AddMemoryRequest(BaseModel):
     content: str = Field(..., description="记忆内容")
     user_id: str = Field(default="default", description="用户ID")
     metadata: Optional[Dict[str, Any]] = Field(default=None, description="元数据")
+
+
+class AddTurnRequest(BaseModel):
+    """添加对话轮次请求（用户消息+AI回复合并处理）
+    
+    优化方案3：将用户消息和AI回复作为一个完整的对话轮次一起处理。
+    减少处理次数，共享部分分析（如实体提取可以合并）。
+    """
+    user_content: str = Field(..., description="用户消息内容")
+    ai_content: str = Field(..., description="AI回复内容")
+    user_id: str = Field(default="default", description="用户ID")
+    character_id: str = Field(default="default", description="角色ID")
+    timestamp: Optional[int] = Field(default=None, description="时间戳（毫秒）")
+
+
+class AddTurnResponse(BaseModel):
+    """添加对话轮次响应"""
+    user_memory_id: str = Field(default="", description="用户消息记忆ID")
+    ai_memory_id: str = Field(default="", description="AI回复记忆ID")
+    success: bool
+    user_entities: List[str] = Field(default=[], description="用户消息中的实体")
+    ai_entities: List[str] = Field(default=[], description="AI回复中的实体")
+    message: str = ""
+    consistency_warnings: List[str] = Field(default=[], description="一致性检查警告")
 
 
 class AddMemoryResponse(BaseModel):
@@ -1531,6 +1572,100 @@ async def add_memory(request: AddMemoryRequest):
         entities=result.entities,
         message=result.message,
         consistency_warnings=result.consistency_warnings
+    )
+
+
+@app.post("/v1/memories/turn", response_model=AddTurnResponse, tags=["Memories"])
+async def add_memory_turn(request: AddTurnRequest):
+    """添加完整对话轮次（用户消息+AI回复）- 性能优化方案3
+    
+    将用户消息和AI回复作为一个完整的对话轮次一起处理。
+    相比分开处理，优势：
+    1. 只需要一次网络往返（原来需要2次）
+    2. 队列等待时间减少（原来需要排队2次，各等待1秒间隔）
+    3. 后续可以共享部分分析结果（如实体图谱关联）
+    
+    注意：每条消息仍然独立存储和索引，保证100%完整性和可检索性。
+    """
+    engine = get_engine()
+    
+    user_id = request.user_id
+    character_id = request.character_id
+    timestamp = request.timestamp or int(time.time() * 1000)
+    
+    _safe_print(f"[Recall][Turn] 📥 对话轮次: user={user_id}, char={character_id}")
+    _safe_print(f"[Recall][Turn]    用户消息({len(request.user_content)}字): {request.user_content[:50].replace(chr(10), ' ')}...")
+    _safe_print(f"[Recall][Turn]    AI回复({len(request.ai_content)}字): {request.ai_content[:50].replace(chr(10), ' ')}...")
+    
+    # 收集结果
+    user_memory_id = ""
+    ai_memory_id = ""
+    user_entities = []
+    ai_entities = []
+    all_warnings = []
+    success = True
+    messages = []
+    
+    # 1. 处理用户消息
+    try:
+        user_result = engine.add(
+            content=request.user_content,
+            user_id=user_id,
+            metadata={
+                'role': 'user',
+                'source': 'sillytavern',
+                'character_id': character_id,
+                'timestamp': timestamp
+            }
+        )
+        user_memory_id = user_result.id
+        user_entities = user_result.entities
+        if user_result.consistency_warnings:
+            all_warnings.extend(user_result.consistency_warnings)
+        if user_result.success:
+            _safe_print(f"[Recall][Turn] ✅ 用户消息保存: id={user_result.id}")
+        else:
+            messages.append(f"用户消息: {user_result.message}")
+            _safe_print(f"[Recall][Turn] ⏭️ 用户消息跳过: {user_result.message}")
+    except Exception as e:
+        _safe_print(f"[Recall][Turn] ❌ 用户消息失败: {e}")
+        success = False
+        messages.append(f"用户消息处理失败: {str(e)}")
+    
+    # 2. 处理AI回复
+    try:
+        ai_result = engine.add(
+            content=request.ai_content,
+            user_id=user_id,
+            metadata={
+                'role': 'assistant',
+                'source': 'sillytavern',
+                'character_id': character_id,
+                'timestamp': timestamp + 1  # AI回复稍后
+            }
+        )
+        ai_memory_id = ai_result.id
+        ai_entities = ai_result.entities
+        if ai_result.consistency_warnings:
+            all_warnings.extend(ai_result.consistency_warnings)
+        if ai_result.success:
+            _safe_print(f"[Recall][Turn] ✅ AI回复保存: id={ai_result.id}")
+        else:
+            messages.append(f"AI回复: {ai_result.message}")
+            _safe_print(f"[Recall][Turn] ⏭️ AI回复跳过: {ai_result.message}")
+    except Exception as e:
+        _safe_print(f"[Recall][Turn] ❌ AI回复失败: {e}")
+        success = False
+        messages.append(f"AI回复处理失败: {str(e)}")
+    
+    return AddTurnResponse(
+        user_memory_id=user_memory_id,
+        ai_memory_id=ai_memory_id,
+        success=success,
+        user_entities=user_entities,
+        ai_entities=ai_entities,
+        message="; ".join(messages) if messages else "对话轮次处理完成",
+        consistency_warnings=all_warnings
     )
 
 
