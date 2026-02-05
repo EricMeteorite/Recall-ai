@@ -42,8 +42,13 @@
         autoChunkLongText: true,  // 自动分段长文本
         chunkSize: 2000,       // 分段大小（字符数）
         maxDisplayEntities: 100,  // 实体列表显示上限
-        customFilterSelectors: []  // 用户自定义的思考内容过滤选择器
+        customFilterSelectors: [],  // 用户自定义的思考内容过滤选择器
+        useTurnApi: true       // v4.2: 使用 Turn API 批量保存（性能优化）
     };
+    
+    // v4.2: 缓存等待配对的用户消息
+    let pendingUserMessage = null;
+    let pendingUserMessageTimestamp = 0;
     
     /**
      * 智能检测 Recall API 地址
@@ -5619,7 +5624,15 @@ async function onMessageSent(messageIndex) {
             return;
         }
         
-        // 【关键改动】使用队列保存，不阻塞
+        // v4.2: 如果启用 Turn API，缓存用户消息等待 AI 回复
+        if (pluginSettings.useTurnApi) {
+            console.log(`[Recall][Turn] 缓存用户消息，等待 AI 回复: "${message.mes.substring(0, 50)}..."`);
+            pendingUserMessage = message.mes;
+            pendingUserMessageTimestamp = Date.now();
+            return;  // 不立即保存，等待 AI 回复后一起发送
+        }
+        
+        // 【传统模式】使用队列保存，不阻塞
         // 先将记忆加入队列，立即返回让消息显示
         console.log(`[Recall] 正在将用户消息加入保存队列: "${message.mes.substring(0, 50)}..."`);
         
@@ -5774,7 +5787,61 @@ async function saveAIMessageDirect(messageIndex, message, contentToSave) {
         return;
     }
     
-    // 长文本分段处理
+    // v4.2: 如果启用 Turn API 且有缓存的用户消息，使用 Turn API
+    if (pluginSettings.useTurnApi && pendingUserMessage) {
+        const userMsg = pendingUserMessage;
+        const userTimestamp = pendingUserMessageTimestamp;
+        
+        // 清空缓存
+        pendingUserMessage = null;
+        pendingUserMessageTimestamp = 0;
+        
+        // 检查用户消息是否超时（超过 5 分钟可能不是同一轮对话）
+        const timeout = 5 * 60 * 1000;  // 5 分钟
+        if (Date.now() - userTimestamp > timeout) {
+            console.log('[Recall][Turn] 用户消息已超时，分别保存');
+            // 先保存用户消息（使用传统方式）
+            memorySaveQueue.add({
+                content: userMsg,
+                user_id: currentCharacterId || 'default',
+                metadata: { 
+                    role: 'user', 
+                    source: 'sillytavern',
+                    character_id: currentCharacterId || 'default',
+                    timestamp: userTimestamp
+                }
+            });
+            // 继续使用传统方式保存 AI 回复
+        } else {
+            // 使用 Turn API 批量保存
+            const result = await saveTurnWithApi(userMsg, contentToSave, message.name);
+            
+            if (result.success) {
+                return;  // 成功，无需继续
+            }
+            
+            if (result.fallback) {
+                // Turn API 失败，回退到传统方式
+                console.log('[Recall][Turn] 回退：先保存用户消息');
+                memorySaveQueue.add({
+                    content: userMsg,
+                    user_id: currentCharacterId || 'default',
+                    metadata: { 
+                        role: 'user', 
+                        source: 'sillytavern',
+                        character_id: currentCharacterId || 'default',
+                        timestamp: userTimestamp
+                    }
+                });
+                // 继续使用传统方式保存 AI 回复
+            } else {
+                // 非回退失败（如重复），直接返回
+                return;
+            }
+        }
+    }
+    
+    // 【传统模式】长文本分段处理
     const chunkSize = pluginSettings.chunkSize || 2000;
     const shouldChunk = pluginSettings.autoChunkLongText && contentToSave.length > chunkSize;
     const chunks = shouldChunk ? chunkLongText(contentToSave, chunkSize) : [contentToSave];
@@ -5824,6 +5891,85 @@ async function saveAIMessageDirect(messageIndex, message, contentToSave) {
         }).catch(err => {
             console.warn('[Recall] 保存AI响应失败:', err);
         });
+    }
+}
+
+/**
+ * v4.2: 使用 Turn API 批量保存用户消息和AI回复
+ * 
+ * 性能优化：
+ * - Embedding 复用：一次计算，多处使用（节省 2-4s）
+ * - 合并 LLM 分析：矛盾检测+关系提取一次调用（节省 15-25s）
+ * - 批量索引更新：减少 I/O 开销
+ * 
+ * @param {string} userMessage - 用户消息
+ * @param {string} aiResponse - AI回复（已过滤思考内容）
+ * @param {string} characterName - 角色名称（可选）
+ */
+async function saveTurnWithApi(userMessage, aiResponse, characterName = null) {
+    if (!isConnected || !pluginSettings.enabled) {
+        console.log('[Recall][Turn] 未连接或已禁用，跳过');
+        return { success: false, message: '未连接' };
+    }
+    
+    const userId = currentCharacterId || 'default';
+    const charId = characterName || currentCharacterId || 'default';
+    
+    console.log(`[Recall][Turn] 使用 Turn API 批量保存`);
+    console.log(`[Recall][Turn]   用户消息(${userMessage.length}字): "${userMessage.substring(0, 50)}..."`);
+    console.log(`[Recall][Turn]   AI回复(${aiResponse.length}字): "${aiResponse.substring(0, 50)}..."`);
+    
+    const taskId = taskTracker.add('turn-save', '批量保存对话', '使用 Turn API');
+    taskTracker.startBackendPolling();
+    
+    try {
+        const response = await fetch(`${pluginSettings.apiUrl}/v1/memories/turn`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                user_message: userMessage,
+                ai_response: aiResponse,
+                user_id: userId,
+                character_id: charId,
+                metadata: {
+                    source: 'sillytavern',
+                    timestamp: Date.now()
+                }
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            taskTracker.complete(taskId, true);
+            console.log(`[Recall][Turn] ✅ 保存成功: user=${result.user_memory_id}, ai=${result.ai_memory_id}`);
+            if (result.processing_time_ms) {
+                console.log(`[Recall][Turn]   处理时间: ${result.processing_time_ms.toFixed(0)}ms`);
+            }
+            
+            // 显示一致性检查警告
+            if (result.consistency_warnings && result.consistency_warnings.length > 0) {
+                const warningMsg = result.consistency_warnings.join('\n');
+                console.warn('[Recall][Turn] 一致性警告:', warningMsg);
+                safeToastr.warning(warningMsg, '一致性检查警告', { timeOut: 8000 });
+            }
+            
+            // 触发伏笔分析（使用合并内容）
+            notifyForeshadowingAnalyzer(userMessage + '\n' + aiResponse, 'turn');
+            
+            return { success: true, result };
+        } else {
+            taskTracker.complete(taskId, false, result.message || '保存失败');
+            console.log(`[Recall][Turn] ⏭️ 跳过: ${result.message}`);
+            return { success: false, message: result.message };
+        }
+    } catch (e) {
+        taskTracker.complete(taskId, false, e.message);
+        console.error('[Recall][Turn] Turn API 调用失败:', e);
+        
+        // 回退到传统保存方式
+        console.log('[Recall][Turn] 回退到传统保存方式...');
+        return { success: false, fallback: true, error: e.message };
     }
 }
 

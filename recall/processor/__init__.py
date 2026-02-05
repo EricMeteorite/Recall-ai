@@ -33,6 +33,14 @@ from .three_stage_deduplicator import (
 # === Recall 4.1 新增: 实体摘要生成器 ===
 from .entity_summarizer import EntitySummarizer, EntitySummary
 
+# === Recall 4.2 性能优化: 统一 LLM 分析器 ===
+from .unified_analyzer import (
+    UnifiedAnalyzer,
+    UnifiedAnalysisInput,
+    UnifiedAnalysisResult,
+    AnalysisTask
+)
+
 __all__ = [
     'EntityExtractor',
     'ExtractedEntity',
@@ -71,4 +79,10 @@ __all__ = [
     # === Recall 4.1 新增导出 ===
     'EntitySummarizer',
     'EntitySummary',
+    
+    # === Recall 4.2 性能优化导出 ===
+    'UnifiedAnalyzer',
+    'UnifiedAnalysisInput',
+    'UnifiedAnalysisResult',
+    'AnalysisTask',
 ]

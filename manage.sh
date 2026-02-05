@@ -881,6 +881,27 @@ RETRIEVAL_LLM_MAX_TOKENS=200
 # 去重 LLM 确认最大 tokens（只需 yes/no，较小即可）
 # Max tokens for dedup LLM confirmation (only yes/no, keep small)
 DEDUP_LLM_MAX_TOKENS=100
+
+# ============================================================================
+# v4.2 性能优化配置
+# v4.2 Performance Optimization Configuration
+# ============================================================================
+
+# Embedding 复用开关（节省2-4秒/轮次）
+# Enable embedding reuse (saves 2-4s per turn)
+# EMBEDDING_REUSE_ENABLED=true
+
+# 统一分析器开关（合并矛盾检测+关系提取，节省15-25秒/轮次）
+# Enable unified analyzer (combines contradiction + relation, saves 15-25s per turn)
+# UNIFIED_ANALYZER_ENABLED=true
+
+# 统一分析器 LLM 最大输出 tokens
+# Max tokens for unified analyzer LLM response
+UNIFIED_ANALYSIS_MAX_TOKENS=4000
+
+# Turn API 开关（/v1/memories/turn 端点）
+# Enable Turn API endpoint (/v1/memories/turn)
+# TURN_API_ENABLED=true
 EOF
                 print_info "已创建配置文件: $config_file"
             fi

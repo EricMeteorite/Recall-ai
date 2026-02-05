@@ -83,6 +83,18 @@ class SearchResult:
     entities: List[str] = field(default_factory=list)
 
 
+@dataclass
+class AddTurnResult:
+    """添加对话轮次结果 (v4.2 性能优化)"""
+    success: bool
+    user_memory_id: str = ""
+    ai_memory_id: str = ""
+    entities: List[str] = field(default_factory=list)
+    message: str = ""
+    consistency_warnings: List[str] = field(default_factory=list)
+    processing_time_ms: float = 0
+
+
 class RecallEngine:
     """Recall 核心引擎
     
@@ -575,6 +587,9 @@ class RecallEngine:
         
         # 12. Recall 4.1: 实体摘要生成器
         self._init_entity_summarizer()
+        
+        # 13. v4.2: 统一 LLM 分析器（合并矛盾检测 + 关系提取）
+        self._init_unified_analyzer()
     
     def _init_llm_relation_extractor(self):
         """初始化 LLM 关系提取器 (Recall 4.1)
@@ -668,6 +683,30 @@ class RecallEngine:
                 pass  # 模块不存在时静默跳过
             except Exception as e:
                 _safe_print(f"[Recall v4.1] 实体摘要生成器初始化失败: {e}")
+    
+    def _init_unified_analyzer(self):
+        """初始化统一 LLM 分析器 (v4.2 性能优化)
+        
+        通过一次 LLM 调用完成多个分析任务：
+        - 矛盾检测
+        - 关系提取
+        - 实体摘要（可选）
+        """
+        self.unified_analyzer = None
+        
+        unified_analyzer_enabled = os.environ.get('UNIFIED_ANALYZER_ENABLED', 'true').lower() == 'true'
+        if unified_analyzer_enabled and self.llm_client:
+            try:
+                from .processor.unified_analyzer import UnifiedAnalyzer
+                self.unified_analyzer = UnifiedAnalyzer(
+                    llm_client=self.llm_client,
+                    enabled=True
+                )
+                _safe_print("[Recall v4.2] 统一 LLM 分析器已启用")
+            except ImportError:
+                pass  # 模块不存在时静默跳过
+            except Exception as e:
+                _safe_print(f"[Recall v4.2] 统一分析器初始化失败（回退到独立模块）: {e}")
     
     def _maybe_update_entity_summary(self, entity_name: str):
         """检查并更新实体摘要（如果需要）- Recall 4.1
@@ -1292,6 +1331,20 @@ class RecallEngine:
             existing_memories = scope.get_all(limit=100)  # 检查最近100条
             content_normalized = content.strip()
             
+            # ========== v4.2 性能优化：预计算 Embedding ==========
+            # 在去重检查之前预计算 embedding，后续去重和向量索引可复用
+            content_embedding = None
+            embedding_reuse_enabled = os.environ.get('EMBEDDING_REUSE_ENABLED', 'true').lower() == 'true'
+            
+            if embedding_reuse_enabled and self._vector_index and self._vector_index.enabled:
+                try:
+                    # 使用 VectorIndex 的 encode() 方法（已有缓存机制）
+                    content_embedding = self._vector_index.encode(content_normalized)
+                    _safe_print(f"[Recall] Embedding 预计算完成: dim={len(content_embedding)}")
+                except Exception as e:
+                    _safe_print(f"[Recall] Embedding 预计算失败（回退到独立计算）: {e}")
+                    content_embedding = None
+            
             # 尝试使用三阶段去重器
             if self.deduplicator is not None and existing_memories:
                 try:
@@ -1306,6 +1359,11 @@ class RecallEngine:
                         content=content_normalized,
                         item_type="memory"
                     )
+                    
+                    # ========== v4.2 性能优化：设置预计算的 embedding ==========
+                    # ThreeStageDeduplicator._semantic_match 会自动检查 item.embedding
+                    if content_embedding is not None:
+                        new_item.embedding = content_embedding.tolist() if hasattr(content_embedding, 'tolist') else list(content_embedding)
                     
                     # 将现有记忆转换为 DedupItem 列表
                     existing_items = []
@@ -1654,8 +1712,14 @@ class RecallEngine:
                 
                 if self._vector_index:
                     task_manager.update_task(index_task.id, progress=0.8, message="更新向量索引...")
-                    # VectorIndex.add_text 接受 (turn_id, text)
-                    self._vector_index.add_text(memory_id, content)
+                    # ========== v4.2 性能优化：复用预计算的 embedding ==========
+                    if content_embedding is not None:
+                        # 复用预计算的 embedding（VectorIndex.add 方法）
+                        self._vector_index.add(memory_id, content_embedding)
+                        _safe_print(f"[Recall] 向量索引已复用预计算 embedding")
+                    else:
+                        # 回退到原逻辑：VectorIndex.add_text 接受 (turn_id, text)
+                        self._vector_index.add_text(memory_id, content)
                 
                 task_manager.complete_task(index_task.id, "索引更新完成")
             except Exception as e:
@@ -1860,6 +1924,584 @@ class RecallEngine:
             task_manager.fail_task(parent_task.id, str(e))
             return AddResult(
                 id="",
+                success=False,
+                message=f"添加失败: {str(e)}"
+            )
+    
+    def add_turn(
+        self,
+        user_message: str,
+        ai_response: str,
+        user_id: str = "default",
+        character_id: str = "default",
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> AddTurnResult:
+        """添加对话轮次（v4.2 性能优化版）
+        
+        将用户消息和AI回复作为一个整体处理，共享中间结果：
+        1. 合并内容进行去重检查
+        2. 一次 Embedding 计算（用于去重）
+        3. 合并 LLM 分析（矛盾 + 关系）
+        4. 批量索引更新
+        
+        注意：此方法省略了 task_manager 任务追踪，因为：
+        - Turn API 设计为快速执行（<5s），无需进度显示
+        - 前端 SillyTavern 插件已有自己的加载指示器
+        - 减少 task_manager 调用可进一步提升性能
+        
+        Args:
+            user_message: 用户消息
+            ai_response: AI回复
+            user_id: 用户ID
+            character_id: 角色ID
+            metadata: 元数据
+            
+        Returns:
+            AddTurnResult: 处理结果
+        """
+        import uuid as uuid_module
+        start_time = time.time()
+        consistency_warnings = []
+        all_entities = []
+        keywords = []
+        entities = []
+        relations = []
+        
+        # 输入验证（与 server.py 的 Pydantic 验证保持一致）
+        if not user_message or not user_message.strip():
+            return AddTurnResult(
+                success=False,
+                message="用户消息不能为空"
+            )
+        if not ai_response or not ai_response.strip():
+            return AddTurnResult(
+                success=False,
+                message="AI回复不能为空"
+            )
+        
+        # 合并内容
+        combined_content = f"{user_message}\n\n{ai_response}"
+        
+        try:
+            # 1. 预计算合并内容的 Embedding（复用于去重检查）
+            combined_embedding = None
+            if self._vector_index and self._vector_index.enabled:
+                try:
+                    combined_embedding = self._vector_index.encode(combined_content)
+                    _safe_print(f"[Recall][Turn] Embedding 预计算完成: dim={len(combined_embedding)}")
+                except Exception as e:
+                    _safe_print(f"[Recall][Turn] Embedding 计算失败: {e}")
+            
+            # 2. 分别检查用户消息和 AI 回复是否已存在
+            # 注意：存储是分开的，所以去重也应该分开检查
+            scope = self.storage.get_scope(user_id)
+            existing_memories = scope.get_all(limit=100)
+            
+            # 2.1 首先检查精确匹配（快速路径）
+            user_message_normalized = user_message.strip()
+            ai_response_normalized = ai_response.strip()
+            user_exists = False
+            ai_exists = False
+            
+            for mem in existing_memories:
+                existing_content = mem.get('content', '').strip()
+                if existing_content == user_message_normalized:
+                    user_exists = True
+                if existing_content == ai_response_normalized:
+                    ai_exists = True
+                if user_exists and ai_exists:
+                    break
+            
+            if user_exists and ai_exists:
+                _safe_print(f"[Recall][Turn] 精确匹配发现用户消息和AI回复都已存在")
+                return AddTurnResult(
+                    success=False,
+                    message="对话轮次已存在（用户消息和AI回复都重复）"
+                )
+            
+            # 2.2 语义去重检查（使用 ThreeStageDeduplicator）
+            if self.deduplicator is not None and existing_memories:
+                try:
+                    from .processor.three_stage_deduplicator import DedupItem
+                    
+                    # 分别创建用户消息和 AI 回复的 DedupItem
+                    user_item = DedupItem(
+                        id=str(uuid_module.uuid4()),
+                        name=user_message[:100],
+                        content=user_message,
+                        item_type="memory"
+                    )
+                    ai_item = DedupItem(
+                        id=str(uuid_module.uuid4()),
+                        name=ai_response[:100],
+                        content=ai_response,
+                        item_type="memory"
+                    )
+                    
+                    # 转换现有记忆
+                    existing_items = []
+                    for mem in existing_memories:
+                        mem_content = mem.get('content', '').strip()
+                        if mem_content:
+                            existing_items.append(DedupItem(
+                                id=mem.get('metadata', {}).get('id', str(uuid_module.uuid4())),
+                                name=mem_content[:100],
+                                content=mem_content,
+                                item_type="memory"
+                            ))
+                    
+                    if existing_items:
+                        # 检查用户消息
+                        user_dedup_result = self.deduplicator.deduplicate([user_item], existing_items)
+                        user_is_dup = len(user_dedup_result.matches) > 0
+                        
+                        # 检查 AI 回复
+                        ai_dedup_result = self.deduplicator.deduplicate([ai_item], existing_items)
+                        ai_is_dup = len(ai_dedup_result.matches) > 0
+                        
+                        if user_is_dup and ai_is_dup:
+                            user_match_type = user_dedup_result.matches[0].match_type.value
+                            ai_match_type = ai_dedup_result.matches[0].match_type.value
+                            _safe_print(f"[Recall][Turn] 语义去重: 用户消息({user_match_type}) + AI回复({ai_match_type}) 都重复")
+                            return AddTurnResult(
+                                success=False,
+                                message=f"对话轮次已存在（用户消息:{user_match_type}, AI回复:{ai_match_type}）"
+                            )
+                except Exception as e:
+                    _safe_print(f"[Recall][Turn] 去重检查失败，继续处理: {e}")
+            
+            # === Recall 4.1: Episode 创建（去重通过后才创建）===
+            current_episode = None
+            if self._episode_tracking_enabled and self.episode_store:
+                try:
+                    from .models.temporal import EpisodicNode, EpisodeType
+                    current_episode = EpisodicNode(
+                        source_type=EpisodeType.MESSAGE,
+                        content=combined_content,
+                        user_id=user_id,
+                        character_id=character_id,
+                        source_description=f"Turn: {user_id}",
+                    )
+                    self.episode_store.save(current_episode)
+                    _safe_print(f"[Recall][Turn] Episode 已创建: {current_episode.uuid}")
+                except Exception as e:
+                    _safe_print(f"[Recall][Turn] Episode 创建失败（不影响主流程）: {e}")
+                    current_episode = None
+            
+            # 3. 实体提取（一次提取，两条消息共享）
+            if self.smart_extractor is not None:
+                try:
+                    extraction_result = self.smart_extractor.extract(combined_content)
+                    entities = extraction_result.entities
+                    all_entities = [e.name for e in entities]
+                    keywords = extraction_result.keywords
+                except Exception as e:
+                    _safe_print(f"[Recall][Turn] SmartExtractor 失败，回退: {e}")
+                    entities = self.entity_extractor.extract(combined_content)
+                    all_entities = [e.name for e in entities]
+                    keywords = self.entity_extractor.extract_keywords(combined_content)
+            else:
+                entities = self.entity_extractor.extract(combined_content)
+                all_entities = [e.name for e in entities]
+                keywords = self.entity_extractor.extract_keywords(combined_content)
+            
+            # 4. 统一 LLM 分析（矛盾检测 + 关系提取，一次调用）
+            if self.unified_analyzer:
+                try:
+                    from .processor.unified_analyzer import UnifiedAnalysisInput, AnalysisTask
+                    # 获取相关记忆用于矛盾检测
+                    existing_mems_for_check = self.search(combined_content, user_id=user_id, top_k=5)
+                    
+                    analysis_result = self.unified_analyzer.analyze(UnifiedAnalysisInput(
+                        content=combined_content,
+                        entities=all_entities,
+                        existing_memories=[m.content for m in existing_mems_for_check],
+                        tasks=[AnalysisTask.CONTRADICTION, AnalysisTask.RELATION],
+                        user_id=user_id,
+                        character_id=character_id
+                    ))
+                    
+                    if analysis_result.success:
+                        # 收集一致性警告并存储矛盾到管理器
+                        for c in analysis_result.contradictions:
+                            warning_msg = f"{c.get('old_fact', '')} vs {c.get('new_fact', '')}"
+                            consistency_warnings.append(warning_msg)
+                            
+                            # 存储矛盾到 contradiction_manager
+                            if self.contradiction_manager is not None:
+                                try:
+                                    from .models.temporal import TemporalFact, Contradiction, ContradictionType
+                                    from datetime import datetime
+                                    
+                                    contradiction_type = ContradictionType.DIRECT
+                                    if c.get('type', '').lower() in ['temporal', 'timeline', '时态矛盾']:
+                                        contradiction_type = ContradictionType.TEMPORAL
+                                    elif c.get('type', '').lower() in ['logical', '逻辑矛盾']:
+                                        contradiction_type = ContradictionType.LOGICAL
+                                    
+                                    new_fact = TemporalFact(
+                                        uuid=str(uuid_module.uuid4()),
+                                        fact=c.get('new_fact', '')[:200],
+                                        source_text=c.get('new_fact', '')[:200],
+                                        user_id=user_id
+                                    )
+                                    old_fact = TemporalFact(
+                                        uuid=str(uuid_module.uuid4()),
+                                        fact=c.get('old_fact', '')[:200],
+                                        source_text=c.get('old_fact', '')[:200],
+                                        user_id=user_id
+                                    )
+                                    
+                                    contradiction = Contradiction(
+                                        uuid=str(uuid_module.uuid4()),
+                                        old_fact=old_fact,
+                                        new_fact=new_fact,
+                                        contradiction_type=contradiction_type,
+                                        confidence=c.get('confidence', 0.8),
+                                        detected_at=datetime.now(),
+                                        notes=warning_msg[:200]
+                                    )
+                                    self.contradiction_manager.add_pending(contradiction)
+                                    _safe_print(f"[Recall][Turn] 矛盾已记录: {warning_msg[:50]}...")
+                                except Exception as e:
+                                    _safe_print(f"[Recall][Turn] 矛盾记录失败（不影响主流程）: {e}")
+                        
+                        # 存储关系到知识图谱
+                        relations = analysis_result.relations
+                        if self.knowledge_graph and relations:
+                            for rel in relations:
+                                self.knowledge_graph.add_relation(
+                                    source_id=rel.get('source'),
+                                    target_id=rel.get('target'),
+                                    relation_type=rel.get('relation_type'),
+                                    source_text=combined_content[:200],
+                                    confidence=rel.get('confidence', 0.8),
+                                    fact=rel.get('fact', '')
+                                )
+                except Exception as e:
+                    _safe_print(f"[Recall][Turn] 统一分析失败: {e}")
+                    # 回退到传统关系提取器
+                    if self.knowledge_graph and entities:
+                        try:
+                            if self._llm_relation_extractor:
+                                _safe_print(f"[Recall][Turn] 回退到 LLM 关系提取器")
+                                relations_v2 = self._llm_relation_extractor.extract(combined_content, 0, entities)
+                                relations = [rel.to_legacy_tuple() for rel in relations_v2]
+                                for rel in relations_v2:
+                                    self.knowledge_graph.add_relation(
+                                        source_id=rel.source_id,
+                                        target_id=rel.target_id,
+                                        relation_type=rel.relation_type,
+                                        source_text=rel.source_text,
+                                        confidence=rel.confidence,
+                                        valid_at=getattr(rel, 'valid_at', None),
+                                        invalid_at=getattr(rel, 'invalid_at', None),
+                                        fact=getattr(rel, 'fact', '')
+                                    )
+                            else:
+                                _safe_print(f"[Recall][Turn] 回退到规则关系提取器")
+                                relations = self.relation_extractor.extract(combined_content, 0, entities=entities)
+                                for rel in relations:
+                                    source_id, relation_type, target_id, source_text = rel
+                                    self.knowledge_graph.add_relation(
+                                        source_id=source_id,
+                                        target_id=target_id,
+                                        relation_type=relation_type,
+                                        source_text=source_text
+                                    )
+                        except Exception as fallback_err:
+                            _safe_print(f"[Recall][Turn] 回退关系提取也失败: {fallback_err}")
+            else:
+                # 如果 unified_analyzer 未启用，直接使用传统关系提取
+                if self.knowledge_graph and entities:
+                    try:
+                        if self._llm_relation_extractor:
+                            _safe_print(f"[Recall][Turn] 使用 LLM 关系提取器（无统一分析器）")
+                            relations_v2 = self._llm_relation_extractor.extract(combined_content, 0, entities)
+                            relations = [rel.to_legacy_tuple() for rel in relations_v2]
+                            for rel in relations_v2:
+                                self.knowledge_graph.add_relation(
+                                    source_id=rel.source_id,
+                                    target_id=rel.target_id,
+                                    relation_type=rel.relation_type,
+                                    source_text=rel.source_text,
+                                    confidence=rel.confidence,
+                                    valid_at=getattr(rel, 'valid_at', None),
+                                    invalid_at=getattr(rel, 'invalid_at', None),
+                                    fact=getattr(rel, 'fact', '')
+                                )
+                        else:
+                            _safe_print(f"[Recall][Turn] 使用规则关系提取器（无统一分析器）")
+                            relations = self.relation_extractor.extract(combined_content, 0, entities=entities)
+                            for rel in relations:
+                                source_id, relation_type, target_id, source_text = rel
+                                self.knowledge_graph.add_relation(
+                                    source_id=source_id,
+                                    target_id=target_id,
+                                    relation_type=relation_type,
+                                    source_text=source_text
+                                )
+                    except Exception as e:
+                        _safe_print(f"[Recall][Turn] 关系提取失败（无统一分析器）: {e}")
+                
+                # 一致性检查回退（使用传统 ConsistencyChecker）
+                try:
+                    existing_mems_for_check = self.search(combined_content, user_id=user_id, top_k=5)
+                    if existing_mems_for_check:
+                        consistency = self.consistency_checker.check(
+                            combined_content,
+                            [{'content': m.content} for m in existing_mems_for_check]
+                        )
+                        if not consistency.is_consistent:
+                            for v in consistency.violations:
+                                warning_msg = v.description
+                                consistency_warnings.append(warning_msg)
+                                _safe_print(f"[Recall][Turn] 一致性警告: {warning_msg}")
+                            
+                            # 存储矛盾到 contradiction_manager
+                            if self.contradiction_manager is not None:
+                                try:
+                                    from .models.temporal import TemporalFact, Contradiction, ContradictionType
+                                    from datetime import datetime
+                                    
+                                    for v in consistency.violations:
+                                        contradiction_type = ContradictionType.DIRECT
+                                        type_str = v.type.value if hasattr(v.type, 'value') else str(v.type)
+                                        if 'timeline' in type_str.lower() or 'temporal' in type_str.lower():
+                                            contradiction_type = ContradictionType.TEMPORAL
+                                        elif 'logic' in type_str.lower():
+                                            contradiction_type = ContradictionType.LOGICAL
+                                        
+                                        evidence = v.evidence if hasattr(v, 'evidence') and v.evidence else [combined_content]
+                                        new_text = evidence[0] if len(evidence) > 0 else combined_content
+                                        old_text = evidence[1] if len(evidence) > 1 else ""
+                                        
+                                        new_fact = TemporalFact(
+                                            uuid=str(uuid_module.uuid4()),
+                                            fact=new_text[:200],
+                                            source_text=new_text[:200],
+                                            user_id=user_id
+                                        )
+                                        old_fact = TemporalFact(
+                                            uuid=str(uuid_module.uuid4()),
+                                            fact=old_text[:200],
+                                            source_text=old_text[:200],
+                                            user_id=user_id
+                                        )
+                                        
+                                        contradiction = Contradiction(
+                                            uuid=str(uuid_module.uuid4()),
+                                            old_fact=old_fact,
+                                            new_fact=new_fact,
+                                            contradiction_type=contradiction_type,
+                                            confidence=v.severity if hasattr(v, 'severity') else 0.8,
+                                            detected_at=datetime.now(),
+                                            notes=v.description[:200] if hasattr(v, 'description') else ""
+                                        )
+                                        self.contradiction_manager.add_pending(contradiction)
+                                except Exception as e:
+                                    _safe_print(f"[Recall][Turn] 矛盾记录失败: {e}")
+                except Exception as e:
+                    _safe_print(f"[Recall][Turn] 一致性检查失败（无统一分析器）: {e}")
+            
+            # 5. 分别存储两条记忆（但共享实体和关系）
+            user_memory_id = f"mem_{uuid_module.uuid4().hex[:12]}"
+            ai_memory_id = f"mem_{uuid_module.uuid4().hex[:12]}"
+            
+            # 存储用户消息
+            user_scope = self.storage.get_scope(user_id)
+            user_scope.add(user_message, metadata={
+                'id': user_memory_id,
+                'entities': all_entities,
+                'keywords': keywords,
+                'role': 'user',
+                'character_id': character_id,
+                **(metadata or {})
+            })
+            
+            # 存储 AI 回复
+            user_scope.add(ai_response, metadata={
+                'id': ai_memory_id,
+                'entities': all_entities,
+                'keywords': keywords,
+                'role': 'assistant',
+                'character_id': character_id,
+                **(metadata or {})
+            })
+            
+            # 6. 批量索引更新（两条记忆一起处理）
+            try:
+                # 6.1 实体索引更新
+                if self._entity_index:
+                    for entity in entities:
+                        entity_type = getattr(entity, 'entity_type', 'UNKNOWN')
+                        aliases = getattr(entity, 'aliases', [])
+                        confidence = getattr(entity, 'confidence', 0.5)
+                        # 用户消息
+                        self._entity_index.add_entity_occurrence(
+                            entity_name=entity.name,
+                            turn_id=user_memory_id,
+                            context=user_message[:200],
+                            entity_type=entity_type,
+                            aliases=aliases,
+                            confidence=confidence
+                        )
+                        # AI 回复
+                        self._entity_index.add_entity_occurrence(
+                            entity_name=entity.name,
+                            turn_id=ai_memory_id,
+                            context=ai_response[:200],
+                            entity_type=entity_type,
+                            aliases=aliases,
+                            confidence=confidence
+                        )
+                
+                # 6.2 倒排索引更新
+                if self._inverted_index:
+                    all_keywords = list(set(all_entities + keywords))
+                    self._inverted_index.add_batch(all_keywords, user_memory_id)
+                    self._inverted_index.add_batch(all_keywords, ai_memory_id)
+                
+                # 6.3 N-gram 索引更新
+                if self._ngram_index:
+                    self._ngram_index.add(user_memory_id, user_message)
+                    self._ngram_index.add(ai_memory_id, ai_response)
+                
+                # 6.4 向量索引更新（分别计算 embedding）
+                if self._vector_index and self._vector_index.enabled:
+                    user_embedding = self._vector_index.encode(user_message)
+                    self._vector_index.add(user_memory_id, user_embedding)
+                    ai_embedding = self._vector_index.encode(ai_response)
+                    self._vector_index.add(ai_memory_id, ai_embedding)
+                
+                # 6.5 检索器缓存
+                if self.retriever:
+                    self.retriever.cache_content(user_memory_id, user_message)
+                    self.retriever.cache_content(ai_memory_id, ai_response)
+                    if hasattr(self.retriever, 'cache_entities'):
+                        self.retriever.cache_entities(user_memory_id, all_entities)
+                        self.retriever.cache_entities(ai_memory_id, all_entities)
+            except Exception as e:
+                _safe_print(f"[Recall][Turn] 索引更新失败（不影响主流程）: {e}")
+            
+            # 7. Archive 原文保存（确保100%不遗忘）
+            if self.volume_manager:
+                try:
+                    self.volume_manager.append_turn({
+                        'memory_id': user_memory_id,
+                        'user_id': user_id,
+                        'content': user_message,
+                        'entities': all_entities,
+                        'keywords': keywords,
+                        'role': 'user',
+                        'metadata': metadata or {},
+                        'created_at': time.time()
+                    })
+                    self.volume_manager.append_turn({
+                        'memory_id': ai_memory_id,
+                        'user_id': user_id,
+                        'content': ai_response,
+                        'entities': all_entities,
+                        'keywords': keywords,
+                        'role': 'assistant',
+                        'metadata': metadata or {},
+                        'created_at': time.time()
+                    })
+                except Exception as e:
+                    _safe_print(f"[Recall][Turn] Archive保存失败（不影响主流程）: {e}")
+            
+            # 8. 全文索引 BM25 更新
+            if self.fulltext_index is not None:
+                try:
+                    self.fulltext_index.add(user_memory_id, user_message)
+                    self.fulltext_index.add(ai_memory_id, ai_response)
+                except Exception as e:
+                    _safe_print(f"[Recall][Turn] 全文索引更新失败（不影响主流程）: {e}")
+            
+            # 9. 长期记忆（ConsolidatedMemory）更新
+            try:
+                for entity in entities:
+                    entity_type = getattr(entity, 'entity_type', 'UNKNOWN')
+                    confidence = getattr(entity, 'confidence', 0.5)
+                    aliases = getattr(entity, 'aliases', [])
+                    
+                    consolidated_entity = ConsolidatedEntity(
+                        id=f"entity_{entity.name.lower().replace(' ', '_')}",
+                        name=entity.name,
+                        aliases=aliases if aliases else [],
+                        entity_type=entity_type if entity_type else 'UNKNOWN',
+                        confidence=confidence if confidence else 0.5,
+                        source_turns=[user_memory_id, ai_memory_id],
+                        source_memory_ids=[user_memory_id, ai_memory_id],
+                        last_verified=time.strftime('%Y-%m-%dT%H:%M:%S')
+                    )
+                    self.consolidated_memory.add_or_update(consolidated_entity)
+            except Exception as e:
+                _safe_print(f"[Recall][Turn] 长期记忆更新失败（不影响主流程）: {e}")
+            
+            # 10. Episode 关联更新
+            if current_episode and self.episode_store:
+                try:
+                    entity_ids = []
+                    for e in entities:
+                        if hasattr(e, 'id') and e.id:
+                            entity_ids.append(e.id)
+                        elif hasattr(e, 'name'):
+                            entity_ids.append(f"entity_{e.name.lower().replace(' ', '_')}")
+                    
+                    relation_ids = []
+                    if relations:
+                        for i, rel in enumerate(relations):
+                            if hasattr(rel, 'source_id') and hasattr(rel, 'target_id'):
+                                relation_ids.append(f"rel_{rel.source_id}_{rel.relation_type}_{rel.target_id}")
+                            elif isinstance(rel, dict):
+                                relation_ids.append(f"rel_{rel.get('source')}_{rel.get('relation_type')}_{rel.get('target')}")
+                    
+                    self.episode_store.update_links(
+                        episode_uuid=current_episode.uuid,
+                        memory_ids=[user_memory_id, ai_memory_id],
+                        entity_ids=entity_ids,
+                        relation_ids=relation_ids
+                    )
+                    _safe_print(f"[Recall][Turn] Episode 关联已更新: memories=2, entities={len(entity_ids)}, relations={len(relation_ids)}")
+                except Exception as e:
+                    _safe_print(f"[Recall][Turn] Episode 关联更新失败（不影响主流程）: {e}")
+            
+            # 11. 实体摘要更新
+            if self._entity_summary_enabled and self.entity_summarizer:
+                try:
+                    for entity in entities:
+                        entity_name = entity.name if hasattr(entity, 'name') else str(entity)
+                        self._maybe_update_entity_summary(entity_name)
+                except Exception as e:
+                    _safe_print(f"[Recall][Turn] 实体摘要更新失败（不影响主流程）: {e}")
+            
+            # 12. 性能监控记录
+            try:
+                self.monitor.record(
+                    MetricType.LATENCY,
+                    (time.time() - start_time) * 1000
+                )
+            except Exception:
+                pass  # 忽略性能监控错误
+            
+            processing_time = (time.time() - start_time) * 1000
+            
+            return AddTurnResult(
+                success=True,
+                user_memory_id=user_memory_id,
+                ai_memory_id=ai_memory_id,
+                entities=all_entities,
+                message="对话轮次添加成功",
+                consistency_warnings=consistency_warnings,
+                processing_time_ms=processing_time
+            )
+            
+        except Exception as e:
+            _safe_print(f"[Recall][Turn] 添加失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return AddTurnResult(
                 success=False,
                 message=f"添加失败: {str(e)}"
             )

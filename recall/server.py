@@ -259,6 +259,12 @@ SUPPORTED_CONFIG_KEYS = {
     'BUILD_CONTEXT_MAX_TOKENS',       # 上下文构建最大 tokens
     'RETRIEVAL_LLM_MAX_TOKENS',       # 检索 LLM 过滤最大 tokens
     'DEDUP_LLM_MAX_TOKENS',           # 去重 LLM 确认最大 tokens
+    
+    # ====== v4.2 性能优化配置 ======
+    'EMBEDDING_REUSE_ENABLED',        # 是否启用 Embedding 复用（节省2-4s）
+    'UNIFIED_ANALYZER_ENABLED',       # 是否启用统一分析器（矛盾+关系合并，节省15-25s）
+    'UNIFIED_ANALYSIS_MAX_TOKENS',    # 统一分析器 LLM 最大输出 tokens
+    'TURN_API_ENABLED',               # 是否启用 Turn API（/v1/memories/turn）
 }
 
 
@@ -866,6 +872,27 @@ RETRIEVAL_LLM_MAX_TOKENS=200
 # 去重 LLM 确认最大 tokens（通常较小）
 # Max tokens for dedup LLM confirmation
 DEDUP_LLM_MAX_TOKENS=100
+
+# ============================================================================
+# v4.2 性能优化配置
+# v4.2 Performance Optimization Configuration
+# ============================================================================
+
+# Embedding 复用开关（节省2-4秒/轮次）
+# Enable embedding reuse (saves 2-4s per turn)
+# EMBEDDING_REUSE_ENABLED=true
+
+# 统一分析器开关（合并矛盾检测+关系提取，节省15-25秒/轮次）
+# Enable unified analyzer (combines contradiction + relation, saves 15-25s per turn)
+# UNIFIED_ANALYZER_ENABLED=true
+
+# 统一分析器 LLM 最大输出 tokens
+# Max tokens for unified analyzer LLM response
+UNIFIED_ANALYSIS_MAX_TOKENS=4000
+
+# Turn API 开关（/v1/memories/turn 端点）
+# Enable Turn API endpoint (/v1/memories/turn)
+# TURN_API_ENABLED=true
 '''
 
 
@@ -999,6 +1026,26 @@ class AddMemoryResponse(BaseModel):
     entities: List[str] = []
     message: str = ""
     consistency_warnings: List[str] = []  # 一致性检查警告
+
+
+class AddTurnRequest(BaseModel):
+    """Turn API 请求（v4.2 性能优化）"""
+    user_message: str = Field(..., min_length=1, description="用户消息")
+    ai_response: str = Field(..., min_length=1, description="AI回复")
+    user_id: str = Field(default="default", description="用户ID")
+    character_id: str = Field(default="default", description="角色ID")
+    metadata: Optional[Dict[str, Any]] = Field(default=None, description="元数据")
+
+
+class AddTurnResponse(BaseModel):
+    """Turn API 响应（v4.2 性能优化）"""
+    success: bool
+    user_memory_id: Optional[str] = None
+    ai_memory_id: Optional[str] = None
+    entities: List[str] = []
+    message: str = ""
+    consistency_warnings: List[str] = []
+    processing_time_ms: Optional[float] = None
 
 
 class TemporalFilterRequest(BaseModel):
@@ -1531,6 +1578,59 @@ async def add_memory(request: AddMemoryRequest):
         entities=result.entities,
         message=result.message,
         consistency_warnings=result.consistency_warnings
+    )
+
+
+@app.post("/v1/memories/turn", response_model=AddTurnResponse, tags=["Memories"])
+async def add_turn(request: AddTurnRequest):
+    """添加对话轮次（v4.2 性能优化）
+    
+    将用户消息和AI回复作为一个整体处理，性能优化：
+    1. Embedding 复用：一次计算，多处使用（节省 2-4s）
+    2. 合并 LLM 分析：矛盾检测+关系提取一次调用（节省 15-25s）
+    3. 批量索引更新：减少 I/O 开销
+    
+    总体预期节省时间：15-40s/轮次
+    """
+    # 检查配置是否启用 Turn API
+    turn_api_enabled = os.environ.get('TURN_API_ENABLED', 'true').lower() in ('true', '1', 'yes')
+    if not turn_api_enabled:
+        return AddTurnResponse(
+            success=False,
+            message="Turn API 已禁用，请使用 /v1/memories 分别添加"
+        )
+    
+    engine = get_engine()
+    
+    user_preview = request.user_message[:50].replace('\n', ' ') if len(request.user_message) > 50 else request.user_message.replace('\n', ' ')
+    ai_preview = request.ai_response[:50].replace('\n', ' ') if len(request.ai_response) > 50 else request.ai_response.replace('\n', ' ')
+    _safe_print(f"[Recall][Turn] 📥 Turn API 请求: user_id={request.user_id}, char={request.character_id}")
+    _safe_print(f"[Recall][Turn]    用户消息({len(request.user_message)}字): {user_preview}{'...' if len(request.user_message) > 50 else ''}")
+    _safe_print(f"[Recall][Turn]    AI回复({len(request.ai_response)}字): {ai_preview}{'...' if len(request.ai_response) > 50 else ''}")
+    
+    result = engine.add_turn(
+        user_message=request.user_message,
+        ai_response=request.ai_response,
+        user_id=request.user_id,
+        character_id=request.character_id,
+        metadata=request.metadata
+    )
+    
+    if result.success:
+        _safe_print(f"[Recall][Turn] ✅ 保存成功: user_mem={result.user_memory_id}, ai_mem={result.ai_memory_id}, entities={result.entities}")
+        if result.processing_time_ms:
+            _safe_print(f"[Recall][Turn]    处理时间: {result.processing_time_ms:.1f}ms")
+    else:
+        _safe_print(f"[Recall][Turn] ⏭️ 跳过: {result.message}")
+    
+    return AddTurnResponse(
+        success=result.success,
+        user_memory_id=result.user_memory_id,
+        ai_memory_id=result.ai_memory_id,
+        entities=result.entities,
+        message=result.message,
+        consistency_warnings=result.consistency_warnings,
+        processing_time_ms=result.processing_time_ms
     )
 
 

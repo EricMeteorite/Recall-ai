@@ -8,7 +8,7 @@ import sys
 # 切换到项目根目录
 os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# 目标配置值
+# 目标配置值 (v4.1)
 TARGET_CONFIGS = {
     'FORESHADOWING_LLM_ENABLED': 'true',
     'ELEVEN_LAYER_RETRIEVER_ENABLED': 'true',
@@ -18,6 +18,14 @@ TARGET_CONFIGS = {
     'COMMUNITY_DETECTION_ENABLED': 'false',
     'LLM_RELATION_MODE': 'llm',
     'ENTITY_SUMMARY_ENABLED': 'true',
+}
+
+# v4.2 性能优化配置 (新增)
+V42_CONFIGS = {
+    'EMBEDDING_REUSE_ENABLED': 'true',
+    'UNIFIED_ANALYZER_ENABLED': 'true',
+    'UNIFIED_ANALYSIS_MAX_TOKENS': '4000',
+    'TURN_API_ENABLED': 'true',
 }
 
 def check_template_files():
@@ -104,6 +112,90 @@ def check_python_defaults():
             all_ok = False
         else:
             print(f'✅ {filepath}')
+    
+    return all_ok
+
+
+def check_v42_configs():
+    """检查 v4.2 性能优化配置同步"""
+    print('\n📋 2.5 v4.2 性能优化配置同步检查')
+    print('-' * 50)
+    
+    # 需要检查的文件位置
+    check_locations = {
+        'server.py SUPPORTED_CONFIG_KEYS': 'recall/server.py',
+        'server.py 默认配置模板': 'recall/server.py',
+        'start.ps1 supportedKeys': 'start.ps1',
+        'start.ps1 defaultConfig': 'start.ps1',
+        'start.sh supported_keys': 'start.sh',
+        'start.sh heredoc 模板': 'start.sh',
+        'manage.ps1 defaultConfig': 'manage.ps1',
+        'manage.sh heredoc 模板': 'manage.sh',
+    }
+    
+    all_ok = True
+    for name, filepath in check_locations.items():
+        with open(filepath, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        found = []
+        missing = []
+        for key in V42_CONFIGS.keys():
+            if key in content:
+                found.append(key)
+            else:
+                missing.append(key)
+        
+        if len(found) == len(V42_CONFIGS):
+            print(f'✅ {name}: {len(found)}/{len(V42_CONFIGS)} 配置项')
+        else:
+            print(f'❌ {name}: {len(found)}/{len(V42_CONFIGS)} 配置项')
+            print(f'   缺少: {missing}')
+            all_ok = False
+    
+    # 检查 Python 代码中的默认值
+    print()
+    print('   v4.2 Python 默认值检查:')
+    
+    v42_python_checks = [
+        ('recall/engine.py', 'EMBEDDING_REUSE_ENABLED', 'true'),
+        ('recall/engine.py', 'UNIFIED_ANALYZER_ENABLED', 'true'),
+        ('recall/processor/unified_analyzer.py', 'UNIFIED_ANALYSIS_MAX_TOKENS', '4000'),
+        ('recall/server.py', 'TURN_API_ENABLED', 'true'),
+    ]
+    
+    for filepath, key, expected in v42_python_checks:
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # 匹配 os.environ.get('KEY', 'default')
+            pattern = rf"os\.environ\.get\s*\(\s*['\"]({key})['\"],\s*['\"]([^'\"]+)['\"]"
+            matches = re.findall(pattern, content)
+            
+            if matches:
+                for _, val in matches:
+                    if val.lower() == expected.lower():
+                        print(f'   ✅ {filepath}: {key}={val}')
+                    else:
+                        print(f'   ❌ {filepath}: {key}={val} (应为 {expected})')
+                        all_ok = False
+            else:
+                # 尝试匹配 int(os.environ.get(...)) 模式
+                int_pattern = rf"int\s*\(\s*os\.environ\.get\s*\(\s*['\"]({key})['\"],\s*['\"]([^'\"]+)['\"]"
+                int_matches = re.findall(int_pattern, content)
+                if int_matches:
+                    for _, val in int_matches:
+                        if val == expected:
+                            print(f'   ✅ {filepath}: {key}={val}')
+                        else:
+                            print(f'   ❌ {filepath}: {key}={val} (应为 {expected})')
+                            all_ok = False
+                else:
+                    print(f'   ⚠️  {filepath}: {key} 未找到默认值定义')
+        except FileNotFoundError:
+            print(f'   ❌ {filepath}: 文件不存在')
+            all_ok = False
     
     return all_ok
 
@@ -209,16 +301,17 @@ def check_hot_reload():
 
 def main():
     print('=' * 70)
-    print('配置同步最终验证报告')
+    print('配置同步最终验证报告 (v4.1 + v4.2)')
     print('=' * 70)
     
     t1 = check_template_files()
     t2 = check_python_defaults()
+    t2_5 = check_v42_configs()  # v4.2 新增
     t3 = check_script_parity()
     check_hot_reload()
     
     print('\n' + '=' * 70)
-    if t1 and t2:
+    if t1 and t2 and t2_5 and t3:
         print('✅ 所有配置已同步!')
     else:
         print('❌ 发现配置不一致，请检查上方详情')
