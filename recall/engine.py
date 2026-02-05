@@ -1534,6 +1534,7 @@ class RecallEngine:
                     except Exception as e:
                         _safe_print(f"[Recall] 统一分析异常，回退到分开调用: {e}")
                         _use_unified_analysis = False
+                        task_manager.fail_task(unified_task.id, str(e))
                 elif _use_unified_analysis and not existing_memories:
                     # 没有现有记忆，不需要统一分析（没有矛盾检测的必要），
                     # 回退到单独的关系提取
