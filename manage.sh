@@ -839,18 +839,6 @@ ENTITY_SUMMARY_MIN_FACTS=5
 EPISODE_TRACKING_ENABLED=true
 
 # ----------------------------------------------------------------------------
-# 统一 LLM 分析配置（v4.1.1 性能优化）
-# Unified LLM Analysis Configuration (v4.1.1 Performance Optimization)
-# ----------------------------------------------------------------------------
-# 是否启用统一 LLM 分析（将矛盾检测和关系提取合并为单次调用）
-# Enable unified LLM analysis (merge contradiction detection and relation extraction)
-UNIFIED_LLM_ANALYSIS_ENABLED=true
-
-# 统一分析最大 tokens
-# Max tokens for unified analysis
-UNIFIED_LLM_MAX_TOKENS=2000
-
-# ----------------------------------------------------------------------------
 # LLM Max Tokens 配置
 # LLM Max Tokens Configuration
 # ----------------------------------------------------------------------------

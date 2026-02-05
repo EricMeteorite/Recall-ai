@@ -291,20 +291,6 @@ class VectorIndex:
         embedding = self.encode(text)
         self.add(doc_id, embedding)
     
-    def add_with_embedding(self, doc_id: Any, embedding: np.ndarray):
-        """使用预计算的 embedding 添加文档（避免重复计算 embedding）
-        
-        这是 add_text() 的优化版本，当调用者已经有 embedding 时使用。
-        主要用于去重阶段已计算 embedding 的场景，避免二次 API 调用。
-        
-        Args:
-            doc_id: 文档ID
-            embedding: 预计算的 embedding 向量 (numpy array)
-        """
-        if not self._enabled:
-            return
-        self.add(doc_id, embedding)
-    
     def search(self, query: str, top_k: int = 20) -> List[Tuple[Any, float]]:
         """搜索最相似的文档"""
         if not self._enabled:

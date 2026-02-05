@@ -812,59 +812,9 @@
         // 如果过滤后内容为空，跳过
         if (!contentToSave || contentToSave.trim().length === 0) {
             console.log('[Recall] 过滤后内容为空，跳过保存');
-            // 【优化方案3】如果AI内容为空但有缓冲的用户消息，需要单独发送用户消息
-            if (memorySaveQueue.turnModeEnabled && memorySaveQueue.pendingUserMessage) {
-                const userMsg = memorySaveQueue.pendingUserMessage;
-                memorySaveQueue.pendingUserMessage = null;
-                memorySaveQueue.add({
-                    content: userMsg.content,
-                    user_id: currentCharacterId || userMsg.characterId || 'default',
-                    metadata: {
-                        role: 'user',
-                        source: 'sillytavern',
-                        character_id: currentCharacterId || userMsg.characterId || 'default',
-                        timestamp: userMsg.timestamp
-                    }
-                });
-                console.log('[Recall] AI内容为空，单独发送缓冲的用户消息');
-            }
             return;
         }
         
-        // 【优化方案3】使用对话轮次合并发送（用户消息+AI回复一起处理）
-        if (memorySaveQueue.turnModeEnabled && memorySaveQueue.pendingUserMessage) {
-            console.log('[Recall][Turn] 使用对话轮次模式合并发送');
-            
-            // 【重要】保存用户消息内容，因为 sendTurn 会清空 pendingUserMessage
-            const bufferedUserContent = memorySaveQueue.pendingUserMessage.content;
-            
-            // 长文本暂不分段，完整发送给后端处理
-            // 如果内容过长，后端会自行处理
-            const turnPromise = memorySaveQueue.sendTurn(contentToSave, currentCharacterId);
-            
-            turnPromise.then(result => {
-                if (result.success) {
-                    // 触发伏笔分析（用户消息和AI回复都需要）
-                    if (result.userResult && result.userResult.id && bufferedUserContent) {
-                        notifyForeshadowingAnalyzer(bufferedUserContent, 'user');
-                    }
-                    notifyForeshadowingAnalyzer(contentToSave, 'assistant');
-                    console.log('[Recall][Turn] 对话轮次处理完成');
-                } else if (result.fallback) {
-                    console.log('[Recall][Turn] 使用回退模式完成');
-                    notifyForeshadowingAnalyzer(contentToSave, 'assistant');
-                } else {
-                    console.log('[Recall][Turn] 对话轮次跳过:', result.message);
-                }
-            }).catch(err => {
-                console.warn('[Recall][Turn] 对话轮次处理失败:', err);
-            });
-            
-            console.log(`[Recall][Turn] 对话轮次已提交 (AI回复${contentToSave.length}字)`);
-            return;
-        }
-        
-        // 回退：传统的分段队列处理方式
         // 长文本分段处理
         const chunkSize = pluginSettings.chunkSize || 2000;
         const shouldChunk = pluginSettings.autoChunkLongText && contentToSave.length > chunkSize;
@@ -5459,10 +5409,6 @@ const memorySaveQueue = {
     retryQueue: [],      // 重试队列（保存失败的记忆）
     maxRetries: 3,       // 最大重试次数
     
-    // 【优化方案3】用户消息缓冲 - 等待AI回复后合并发送
-    pendingUserMessage: null,  // { content, timestamp, characterId }
-    turnModeEnabled: true,     // 是否启用对话轮次合并模式
-    
     /**
      * 添加记忆到队列
      * @param {Object} memory 记忆对象 {content, user_id, metadata}
@@ -5632,133 +5578,12 @@ const memorySaveQueue = {
             console.warn('[Recall] 同步本地缓存失败:', e);
             if (taskId) taskTracker.complete(taskId, false, e.message);
         }
-    },
-    
-    /**
-     * 【优化方案3】缓冲用户消息，等待AI回复后合并发送
-     * @param {string} content 用户消息内容
-     * @param {string} characterId 角色ID
-     */
-    bufferUserMessage(content, characterId) {
-        this.pendingUserMessage = {
-            content: content,
-            timestamp: Date.now(),
-            characterId: characterId || 'default'
-        };
-        console.log('[Recall][Turn] 用户消息已缓冲，等待AI回复...');
-    },
-    
-    /**
-     * 【优化方案3】发送完整对话轮次（用户消息+AI回复）
-     * @param {string} aiContent AI回复内容
-     * @param {string} characterId 角色ID
-     * @returns {Promise} 完成时 resolve
-     */
-    async sendTurn(aiContent, characterId) {
-        const userMsg = this.pendingUserMessage;
-        
-        // 如果没有缓冲的用户消息，回退到单独发送AI消息
-        if (!userMsg) {
-            console.log('[Recall][Turn] 无缓冲的用户消息，单独发送AI回复');
-            return this.add({
-                content: aiContent,
-                user_id: characterId || 'default',
-                metadata: {
-                    role: 'assistant',
-                    source: 'sillytavern',
-                    character_id: characterId || 'default',
-                    timestamp: Date.now()
-                }
-            });
-        }
-        
-        // 清除缓冲
-        this.pendingUserMessage = null;
-        
-        // 添加任务跟踪
-        const taskId = taskTracker.add('memory-turn', '保存对话轮次', '用户+AI合并处理');
-        taskTracker.startBackendPolling();
-        
-        try {
-            // 调用新的 /v1/memories/turn 端点
-            const response = await fetch(`${pluginSettings.apiUrl}/v1/memories/turn`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    user_content: userMsg.content,
-                    ai_content: aiContent,
-                    user_id: characterId || userMsg.characterId || 'default',
-                    character_id: characterId || userMsg.characterId || 'default',
-                    timestamp: userMsg.timestamp
-                })
-            });
-            
-            if (response.ok) {
-                const result = await response.json();
-                console.log('[Recall][Turn] 对话轮次保存成功:', {
-                    user_id: result.user_memory_id,
-                    ai_id: result.ai_memory_id,
-                    user_entities: result.user_entities,
-                    ai_entities: result.ai_entities
-                });
-                taskTracker.complete(taskId, true);
-                
-                // 显示一致性警告
-                if (result.consistency_warnings && result.consistency_warnings.length > 0) {
-                    const warningMsg = result.consistency_warnings.join('\n');
-                    safeToastr.warning(warningMsg, '一致性检查警告', { timeOut: 8000 });
-                }
-                
-                return {
-                    success: result.success,
-                    userResult: { id: result.user_memory_id, entities: result.user_entities },
-                    aiResult: { id: result.ai_memory_id, entities: result.ai_entities },
-                    consistency_warnings: result.consistency_warnings || []
-                };
-            } else {
-                throw new Error(`HTTP ${response.status}`);
-            }
-        } catch (e) {
-            console.warn('[Recall][Turn] 对话轮次API调用失败，回退到分开发送:', e.message);
-            taskTracker.complete(taskId, false, '回退到分开发送');
-            
-            // 回退：分开发送用户消息和AI回复
-            const userPromise = this.add({
-                content: userMsg.content,
-                user_id: characterId || userMsg.characterId || 'default',
-                metadata: {
-                    role: 'user',
-                    source: 'sillytavern',
-                    character_id: characterId || userMsg.characterId || 'default',
-                    timestamp: userMsg.timestamp
-                }
-            });
-            
-            const aiPromise = this.add({
-                content: aiContent,
-                user_id: characterId || 'default',
-                metadata: {
-                    role: 'assistant',
-                    source: 'sillytavern',
-                    character_id: characterId || 'default',
-                    timestamp: Date.now()
-                }
-            });
-            
-            const [userResult, aiResult] = await Promise.all([userPromise, aiPromise]);
-            return {
-                success: userResult.success && aiResult.success,
-                userResult: userResult,
-                aiResult: aiResult,
-                fallback: true
-            };
-        }
     }
 };
 
 /**
  * 消息发送时
- * 【优化方案3】缓冲用户消息，等待AI回复后合并发送
+ * 【优化】使用队列保存，不阻塞消息发送
  */
 async function onMessageSent(messageIndex) {
     console.log(`[Recall] MESSAGE_SENT 事件触发, messageIndex=${messageIndex}, enabled=${pluginSettings.enabled}, connected=${isConnected}`);
@@ -5794,37 +5619,32 @@ async function onMessageSent(messageIndex) {
             return;
         }
         
-        // 【优化方案3】缓冲用户消息，等待AI回复后一起发送
-        // 这样可以减少API调用次数和队列等待时间
-        if (memorySaveQueue.turnModeEnabled) {
-            memorySaveQueue.bufferUserMessage(message.mes, currentCharacterId);
-            console.log('[Recall] 用户消息已缓冲，等待AI回复后合并处理');
-        } else {
-            // 回退：直接发送用户消息（旧逻辑）
-            console.log(`[Recall] 正在将用户消息加入保存队列: "${message.mes.substring(0, 50)}..."`);
-            
-            memorySaveQueue.add({
-                content: message.mes,
-                user_id: currentCharacterId || 'default',
-                metadata: { 
-                    role: 'user', 
-                    source: 'sillytavern',
-                    character_id: currentCharacterId || 'default',
-                    timestamp: Date.now()
-                }
-            }).then(result => {
-                if (result.success) {
-                    console.log('[Recall] 已保存用户消息');
-                    notifyForeshadowingAnalyzer(message.mes, 'user');
-                } else if (result.queued) {
-                    console.log('[Recall] 用户消息已加入队列/本地缓存');
-                } else {
-                    console.log('[Recall] 用户消息跳过（重复）:', result.message);
-                }
-            }).catch(err => {
-                console.error('[Recall] 消息保存队列错误:', err);
-            });
-        }
+        // 【关键改动】使用队列保存，不阻塞
+        // 先将记忆加入队列，立即返回让消息显示
+        console.log(`[Recall] 正在将用户消息加入保存队列: "${message.mes.substring(0, 50)}..."`);
+        
+        memorySaveQueue.add({
+            content: message.mes,
+            user_id: currentCharacterId || 'default',
+            metadata: { 
+                role: 'user', 
+                source: 'sillytavern',
+                character_id: currentCharacterId || 'default',
+                timestamp: Date.now()
+            }
+        }).then(result => {
+            if (result.success) {
+                console.log('[Recall] 已保存用户消息');
+                // 【修复】只有记忆保存成功（非重复）才触发伏笔分析
+                notifyForeshadowingAnalyzer(message.mes, 'user');
+            } else if (result.queued) {
+                console.log('[Recall] 用户消息已加入队列/本地缓存');
+            } else {
+                console.log('[Recall] 用户消息跳过（重复）:', result.message);
+            }
+        }).catch(err => {
+            console.error('[Recall] 消息保存队列错误:', err);
+        });
     } catch (e) {
         console.warn('[Recall] 处理用户消息失败:', e);
     }

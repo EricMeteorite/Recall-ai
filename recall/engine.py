@@ -575,9 +575,6 @@ class RecallEngine:
         
         # 12. Recall 4.1: 实体摘要生成器
         self._init_entity_summarizer()
-        
-        # 13. Recall 4.1.1: 统一 LLM 分析器（性能优化）
-        self._init_unified_llm_analyzer()
     
     def _init_llm_relation_extractor(self):
         """初始化 LLM 关系提取器 (Recall 4.1)
@@ -671,30 +668,6 @@ class RecallEngine:
                 pass  # 模块不存在时静默跳过
             except Exception as e:
                 _safe_print(f"[Recall v4.1] 实体摘要生成器初始化失败: {e}")
-    
-    def _init_unified_llm_analyzer(self):
-        """初始化统一 LLM 分析器 (Recall 4.1.1 性能优化)
-        
-        将矛盾检测和关系提取合并为单次 LLM 调用，
-        减少 API 往返时间，提升性能 30-50%。
-        """
-        self._unified_llm_analyzer = None
-        self._unified_analysis_enabled = False
-        
-        unified_enabled = os.environ.get('UNIFIED_LLM_ANALYSIS_ENABLED', 'true').lower() == 'true'
-        if unified_enabled and self.llm_client:
-            try:
-                from .processor.unified_llm_analyzer import UnifiedLLMAnalyzer
-                self._unified_llm_analyzer = UnifiedLLMAnalyzer(
-                    llm_client=self.llm_client,
-                    budget_manager=self.budget_manager if hasattr(self, 'budget_manager') else None
-                )
-                self._unified_analysis_enabled = True
-                _safe_print("[Recall v4.1.1] 统一 LLM 分析器已启用（矛盾检测+关系提取合并）")
-            except ImportError:
-                pass  # 模块不存在时静默跳过
-            except Exception as e:
-                _safe_print(f"[Recall v4.1.1] 统一 LLM 分析器初始化失败: {e}")
     
     def _maybe_update_entity_summary(self, entity_name: str):
         """检查并更新实体摘要（如果需要）- Recall 4.1
@@ -1286,9 +1259,6 @@ class RecallEngine:
         start_time = time.time()
         consistency_warnings = []  # 收集一致性警告
         
-        # 【优化】Embedding 复用变量 - 去重阶段计算的 embedding 可以复用到向量索引
-        _cached_content_embedding = None
-        
         # 获取任务管理器
         task_manager = get_task_manager()
         character_id = metadata.get('character_id', 'default') if metadata else 'default'
@@ -1352,10 +1322,6 @@ class RecallEngine:
                     if existing_items:
                         # 执行三阶段去重
                         dedup_result = self.deduplicator.deduplicate([new_item], existing_items)
-                        
-                        # 【优化】捕获去重阶段计算的 embedding，供后续向量索引复用
-                        if new_item.embedding is not None:
-                            _cached_content_embedding = new_item.embedding
                         
                         # 检查是否有匹配（重复）
                         if dedup_result.matches:
@@ -1442,28 +1408,6 @@ class RecallEngine:
             if extraction_result is None:
                 keywords = self.entity_extractor.extract_keywords(content)
             
-            # === Recall 4.1.1: 检查是否可以使用统一 LLM 分析器 ===
-            # 将矛盾检测和关系提取合并为单次 LLM 调用，显著减少 API 时间
-            _use_unified_analysis = False
-            _unified_result = None
-            _unified_contradictions = []
-            _unified_relations = []
-            
-            if (self._unified_analysis_enabled and 
-                self._unified_llm_analyzer and 
-                check_consistency):
-                # 判断是否需要 LLM（矛盾检测策略非 RULE 或有 LLM 关系提取器）
-                needs_llm_contradiction = (
-                    self.contradiction_manager is not None and
-                    hasattr(self.contradiction_manager, 'strategy') and
-                    self.contradiction_manager.strategy.value != 'rule'
-                )
-                needs_llm_relation = self._llm_relation_extractor is not None
-                
-                if needs_llm_contradiction or needs_llm_relation:
-                    _use_unified_analysis = True
-                    _safe_print("[Recall] 启用统一 LLM 分析（矛盾检测+关系提取合并）")
-            
             # 3. 一致性检查（分两阶段：正则规则 + 可选LLM深度检测）
             if check_consistency:
                 # 任务追踪：一致性检查
@@ -1480,66 +1424,6 @@ class RecallEngine:
                 _safe_print(f"[Recall] 一致性检查: 找到 {len(existing_memories)} 条相关记忆")
                 for i, m in enumerate(existing_memories):
                     _safe_print(f"[Recall]   [{i+1}] {m.content[:30]}...")
-                
-                # === Recall 4.1.1: 如果启用统一分析，执行合并的 LLM 调用 ===
-                # 注意：统一分析需要有现有记忆才有意义（用于矛盾检测），
-                # 如果没有现有记忆，回退到单独的关系提取
-                if _use_unified_analysis and existing_memories:
-                    try:
-                        unified_task = task_manager.create_task(
-                            task_type=TaskType.LLM_ANALYSIS,
-                            name="统一LLM分析",
-                            user_id=user_id,
-                            character_id=character_id,
-                            parent_task_id=parent_task.id
-                        )
-                        task_manager.start_task(unified_task.id, "矛盾检测+关系提取（合并调用）...")
-                        
-                        # 准备现有记忆内容列表
-                        existing_contents = [m.content for m in existing_memories if hasattr(m, 'content')]
-                        
-                        # 执行统一分析
-                        _unified_result = self._unified_llm_analyzer.analyze(
-                            new_content=content,
-                            entities=entities,
-                            existing_memories=existing_contents
-                        )
-                        
-                        if _unified_result.success:
-                            # 提取矛盾结果
-                            _, _unified_contradictions = self._unified_llm_analyzer.convert_to_legacy_format(
-                                _unified_result, user_id
-                            )
-                            # 提取关系结果（保留新格式，后面处理）
-                            _unified_relations = _unified_result.relations
-                            
-                            # 记录矛盾警告
-                            for con in _unified_result.contradictions:
-                                warning_msg = f"[统一分析] {con.reason or con.new_fact_text[:50]}"
-                                consistency_warnings.append(warning_msg)
-                                _safe_print(f"[Recall] 统一分析发现矛盾: {warning_msg}")
-                            
-                            # 将矛盾添加到管理器
-                            if self.contradiction_manager and _unified_contradictions:
-                                for c in _unified_contradictions:
-                                    self.contradiction_manager.add_pending(c)
-                            
-                            _safe_print(f"[Recall] 统一分析完成: 关系数={len(_unified_relations)}, 矛盾数={len(_unified_contradictions)}")
-                            task_manager.complete_task(unified_task.id, 
-                                f"关系{len(_unified_relations)}条, 矛盾{len(_unified_contradictions)}条")
-                        else:
-                            _safe_print(f"[Recall] 统一分析失败，回退到分开调用: {_unified_result.error}")
-                            _use_unified_analysis = False
-                            task_manager.fail_task(unified_task.id, _unified_result.error or "分析失败")
-                    except Exception as e:
-                        _safe_print(f"[Recall] 统一分析异常，回退到分开调用: {e}")
-                        _use_unified_analysis = False
-                        task_manager.fail_task(unified_task.id, str(e))
-                elif _use_unified_analysis and not existing_memories:
-                    # 没有现有记忆，不需要统一分析（没有矛盾检测的必要），
-                    # 回退到单独的关系提取
-                    _safe_print("[Recall] 无现有记忆，跳过统一分析，使用单独关系提取")
-                    _use_unified_analysis = False
                 
                 task_manager.update_task(consistency_task.id, progress=0.3, message=f"规则检测 {len(existing_memories)} 条相关记忆...")
                 
@@ -1609,8 +1493,7 @@ class RecallEngine:
                 
                 # 阶段2：LLM深度矛盾检测（可选，当策略不是RULE时启用）
                 # 这可以检测正则无法捕获的复杂语义矛盾
-                # 【优化】如果已使用统一分析，跳过单独的 LLM 矛盾检测
-                if self.contradiction_manager is not None and existing_memories and not _use_unified_analysis:
+                if self.contradiction_manager is not None and existing_memories:
                     try:
                         from .models.temporal import TemporalFact, Contradiction
                         from .graph import DetectionStrategy
@@ -1771,19 +1654,8 @@ class RecallEngine:
                 
                 if self._vector_index:
                     task_manager.update_task(index_task.id, progress=0.8, message="更新向量索引...")
-                    # 【优化】复用去重阶段计算的 embedding，避免二次 API 调用
-                    if _cached_content_embedding is not None:
-                        import numpy as np
-                        # 将 list 转换为 numpy array
-                        if isinstance(_cached_content_embedding, list):
-                            embedding_array = np.array(_cached_content_embedding, dtype=np.float32)
-                        else:
-                            embedding_array = _cached_content_embedding
-                        self._vector_index.add_with_embedding(memory_id, embedding_array)
-                        _safe_print(f"[Recall] 向量索引: 复用去重阶段 embedding")
-                    else:
-                        # 回退：重新计算 embedding
-                        self._vector_index.add_text(memory_id, content)
+                    # VectorIndex.add_text 接受 (turn_id, text)
+                    self._vector_index.add_text(memory_id, content)
                 
                 task_manager.complete_task(index_task.id, "索引更新完成")
             except Exception as e:
@@ -1854,35 +1726,8 @@ class RecallEngine:
             task_manager.start_task(kg_task.id, "提取关系并更新图谱...")
             
             try:
-                # === Recall 4.1.1: 优先使用统一分析的关系结果（如果已执行）===
-                # 注意：即使 _unified_relations 为空也应该跳过单独的 LLM 调用，
-                # 因为统一分析已经判断没有关系，无需重复调用
-                if _use_unified_analysis:
-                    if _unified_relations:
-                        task_manager.update_task(kg_task.id, progress=0.5, message=f"存储统一分析的 {len(_unified_relations)} 条关系...")
-                        _safe_print(f"[Recall][关系] 使用统一分析结果, 关系数={len(_unified_relations)}")
-                        for rel in _unified_relations:
-                            self.knowledge_graph.add_relation(
-                                source_id=rel.source_id,
-                                target_id=rel.target_id,
-                                relation_type=rel.relation_type,
-                                source_text=rel.source_text,
-                                confidence=rel.confidence,
-                                valid_at=getattr(rel, 'valid_at', None),
-                                invalid_at=getattr(rel, 'invalid_at', None),
-                                fact=getattr(rel, 'fact', '')
-                            )
-                        # 转换为兼容格式供后续使用
-                        relations = [rel.to_legacy_tuple() for rel in _unified_relations]
-                        _safe_print(f"[Recall][关系] 已存储到知识图谱, 总关系数={sum(len(v) for v in self.knowledge_graph.outgoing.values())}")
-                        task_manager.complete_task(kg_task.id, f"提取 {len(_unified_relations)} 条关系", {'relations': len(_unified_relations), 'mode': 'unified'})
-                    else:
-                        # 统一分析完成但没有提取到关系，这是正常情况
-                        relations = []
-                        _safe_print(f"[Recall][关系] 统一分析未发现关系")
-                        task_manager.complete_task(kg_task.id, "未发现关系", {'relations': 0, 'mode': 'unified'})
-                # === Recall 4.1: 其次使用 LLM 关系提取器（如果启用）===
-                elif self._llm_relation_extractor:
+                # === Recall 4.1: 优先使用 LLM 关系提取器（如果启用）===
+                if self._llm_relation_extractor:
                     task_manager.update_task(kg_task.id, progress=0.3, message="LLM 关系提取中...")
                     _safe_print(f"[Recall][关系] 使用 LLM 关系提取器, 实体数={len(entities)}")
                     relations_v2 = self._llm_relation_extractor.extract(content, 0, entities)

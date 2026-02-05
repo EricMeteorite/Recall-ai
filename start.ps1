@@ -207,8 +207,6 @@ function Import-ApiKeys {
         'ENTITY_SUMMARY_ENABLED', 'ENTITY_SUMMARY_MIN_FACTS',
         # Episode 追溯配置
         'EPISODE_TRACKING_ENABLED',
-        # ====== v4.1.1 性能优化配置 ======
-        'UNIFIED_LLM_ANALYSIS_ENABLED', 'UNIFIED_LLM_MAX_TOKENS',
         # ====== v4.1 LLM Max Tokens 配置 ======
         'LLM_DEFAULT_MAX_TOKENS', 'LLM_RELATION_MAX_TOKENS', 'FORESHADOWING_MAX_TOKENS',
         'CONTEXT_EXTRACTION_MAX_TOKENS', 'ENTITY_SUMMARY_MAX_TOKENS', 'SMART_EXTRACTOR_MAX_TOKENS',
@@ -797,18 +795,6 @@ ENTITY_SUMMARY_MIN_FACTS=5
 # 是否启用 Episode 追溯
 # Enable episode tracking
 EPISODE_TRACKING_ENABLED=true
-
-# ----------------------------------------------------------------------------
-# 统一 LLM 分析配置（v4.1.1 性能优化）
-# Unified LLM Analysis Configuration (v4.1.1 Performance Optimization)
-# ----------------------------------------------------------------------------
-# 是否启用统一 LLM 分析（将矛盾检测和关系提取合并为单次调用）
-# Enable unified LLM analysis (merge contradiction detection and relation extraction)
-UNIFIED_LLM_ANALYSIS_ENABLED=true
-
-# 统一分析最大 tokens
-# Max tokens for unified analysis
-UNIFIED_LLM_MAX_TOKENS=2000
 
 # ----------------------------------------------------------------------------
 # LLM Max Tokens 配置
