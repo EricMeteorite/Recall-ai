@@ -153,6 +153,41 @@ def check_v42_configs():
             print(f'   缺少: {missing}')
             all_ok = False
     
+    # 检查配置是否被注释掉（关键检查！）
+    print()
+    print('   v4.2 配置注释检查（确保配置未被 # 注释）:')
+    
+    v42_active_configs = ['EMBEDDING_REUSE_ENABLED', 'UNIFIED_ANALYZER_ENABLED', 'TURN_API_ENABLED']
+    template_files = ['recall/server.py', 'start.ps1', 'start.sh', 'manage.ps1', 'manage.sh']
+    
+    for filepath in template_files:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        commented_configs = []
+        active_configs = []
+        
+        for key in v42_active_configs:
+            # 检查是否有被注释的配置行 (行首有 #)
+            commented_pattern = rf'^#\s*{key}=.+$'
+            if re.search(commented_pattern, content, re.MULTILINE):
+                commented_configs.append(key)
+            
+            # 检查是否有未被注释的配置行
+            active_pattern = rf'^{key}=.+$'
+            if re.search(active_pattern, content, re.MULTILINE):
+                active_configs.append(key)
+        
+        if commented_configs:
+            print(f'   ❌ {filepath}: 以下配置被注释: {commented_configs}')
+            all_ok = False
+        elif len(active_configs) == len(v42_active_configs):
+            print(f'   ✅ {filepath}: 所有 v4.2 配置已启用')
+        else:
+            missing = set(v42_active_configs) - set(active_configs)
+            if missing:
+                print(f'   ⚠️  {filepath}: 缺少配置: {list(missing)}')
+    
     # 检查 Python 代码中的默认值
     print()
     print('   v4.2 Python 默认值检查:')
