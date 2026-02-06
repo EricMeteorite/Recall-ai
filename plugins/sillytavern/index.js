@@ -820,57 +820,9 @@
             return;
         }
         
-        // 长文本分段处理
-        const chunkSize = pluginSettings.chunkSize || 2000;
-        const shouldChunk = pluginSettings.autoChunkLongText && contentToSave.length > chunkSize;
-        const chunks = shouldChunk ? chunkLongText(contentToSave, chunkSize) : [contentToSave];
-        
-        if (chunks.length > 1) {
-            console.log(`[Recall] 长文本(${contentToSave.length}字)分成${chunks.length}段保存`);
-        }
-        
-        const timestamp = Date.now();
-        let firstChunkPromise = null;
-        
-        for (let i = 0; i < chunks.length; i++) {
-            const chunk = chunks[i];
-            const isMultiPart = chunks.length > 1;
-            
-            const promise = memorySaveQueue.add({
-                content: chunk,
-                user_id: currentCharacterId || 'default',
-                metadata: { 
-                    role: 'assistant', 
-                    source: 'sillytavern',
-                    character: message.name || 'AI',
-                    character_id: currentCharacterId || 'default',
-                    timestamp: timestamp,
-                    ...(isMultiPart && {
-                        chunk_index: i + 1,
-                        chunk_total: chunks.length,
-                        original_length: contentToSave.length
-                    })
-                }
-            });
-            
-            if (i === 0) {
-                firstChunkPromise = promise;
-            }
-        }
-        
-        console.log(`[Recall] AI响应已加入保存队列 (${chunks.length}段, 共${contentToSave.length}字)`);
-        
-        if (firstChunkPromise) {
-            firstChunkPromise.then(result => {
-                if (result.success) {
-                    notifyForeshadowingAnalyzer(contentToSave, 'assistant');
-                } else {
-                    console.log('[Recall] AI响应跳过伏笔分析（重复内容）');
-                }
-            }).catch(err => {
-                console.warn('[Recall] 保存AI响应失败:', err);
-            });
-        }
+        // v4.2: 复用 saveAIMessageDirect 以支持 Turn API
+        // 之前这里直接使用 memorySaveQueue.add，完全绕过了 Turn API
+        await saveAIMessageDirect(messageIndex, message, contentToSave);
     }
     
     /**
