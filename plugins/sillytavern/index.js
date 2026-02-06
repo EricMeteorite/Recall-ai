@@ -50,6 +50,10 @@
     let pendingUserMessage = null;
     let pendingUserMessageTimestamp = 0;
     
+    // v4.2: 防止 Turn API 重复处理
+    let turnApiInProgress = false;  // Turn API 正在处理中
+    let lastTurnApiMessageId = null;  // 上一次 Turn API 处理的消息 ID
+    
     /**
      * 智能检测 Recall API 地址
      * 
@@ -5160,7 +5164,17 @@ function onSaveSettings() {
     
     pluginSettings.autoInject = document.getElementById('recall-auto-inject')?.checked ?? true;
     pluginSettings.filterThinking = document.getElementById('recall-filter-thinking')?.checked ?? true;
-    pluginSettings.useTurnApi = document.getElementById('recall-use-turn-api')?.checked ?? true;
+    
+    // v4.2: 如果用户关闭了 Turn API，清理相关状态
+    const newUseTurnApi = document.getElementById('recall-use-turn-api')?.checked ?? true;
+    if (!newUseTurnApi && pluginSettings.useTurnApi) {
+        // 从开启变为关闭，清理状态
+        lastTurnApiMessageId = null;
+        pendingUserMessage = null;
+        console.log('[Recall][Turn] Turn API 已关闭，清理相关状态');
+    }
+    pluginSettings.useTurnApi = newUseTurnApi;
+    
     pluginSettings.autoChunkLongText = document.getElementById('recall-auto-chunk')?.checked ?? true;
     pluginSettings.chunkSize = parseInt(document.getElementById('recall-chunk-size')?.value) || 2000;
     pluginSettings.previewLength = parseInt(document.getElementById('recall-preview-length')?.value) || 200;
@@ -5595,6 +5609,11 @@ async function onMessageSent(messageIndex) {
         
         // v4.2: 如果启用 Turn API，缓存用户消息等待 AI 回复
         if (pluginSettings.useTurnApi) {
+            // 防止重复缓存同一条消息
+            if (pendingUserMessage === message.mes) {
+                console.log('[Recall][Turn] 用户消息已缓存，跳过重复');
+                return;
+            }
             console.log(`[Recall][Turn] 缓存用户消息，等待 AI 回复: "${message.mes.substring(0, 50)}..."`);
             pendingUserMessage = message.mes;
             pendingUserMessageTimestamp = Date.now();
@@ -5756,11 +5775,35 @@ async function saveAIMessageDirect(messageIndex, message, contentToSave) {
         return;
     }
     
+    // v4.2: 防止同一条消息被重复处理
+    // 生成消息唯一标识（基于内容的哈希）
+    const messageHash = contentToSave.substring(0, 100) + '_' + contentToSave.length;
+    
+    // v4.2: 如果 Turn API 正在处理中，检查是否是同一条消息
+    if (turnApiInProgress) {
+        if (lastTurnApiMessageId === messageHash) {
+            console.log('[Recall][Turn] Turn API 正在处理同一条消息，跳过本次调用');
+            return;
+        }
+        // 如果是不同的消息，说明是新的一轮对话，不应该阻塞
+        // 但这种情况不应该发生，因为 Turn API 会在完成前阻塞
+        console.log('[Recall][Turn] Turn API 正在处理，但收到了不同的消息，这可能是并发问题');
+    }
+    
+    // v4.2: 如果 Turn API 启用，且这条消息已经被处理过，跳过（防止重复）
+    // 注意：只在 useTurnApi=true 时检查，避免影响传统模式
+    if (pluginSettings.useTurnApi && lastTurnApiMessageId === messageHash && !pendingUserMessage) {
+        console.log('[Recall][Turn] 这条消息已经通过 Turn API 处理，跳过传统模式');
+        return;
+    }
+    
     // v4.2: 调试日志
     console.log('[Recall][Turn] saveAIMessageDirect 状态:', {
         useTurnApi: pluginSettings.useTurnApi,
         hasPendingUserMessage: !!pendingUserMessage,
-        pendingMsgPreview: pendingUserMessage?.substring(0, 30)
+        pendingMsgPreview: pendingUserMessage?.substring(0, 30),
+        turnApiInProgress: turnApiInProgress,
+        messageHash: messageHash.substring(0, 30) + '...'
     });
     
     // v4.2: 如果启用 Turn API 且有缓存的用户消息，使用 Turn API
@@ -5772,33 +5815,17 @@ async function saveAIMessageDirect(messageIndex, message, contentToSave) {
         pendingUserMessage = null;
         pendingUserMessageTimestamp = 0;
         
-        // 检查用户消息是否超时（超过 5 分钟可能不是同一轮对话）
-        const timeout = 5 * 60 * 1000;  // 5 分钟
-        if (Date.now() - userTimestamp > timeout) {
-            console.log('[Recall][Turn] 用户消息已超时，分别保存');
-            // 先保存用户消息（使用传统方式）
-            memorySaveQueue.add({
-                content: userMsg,
-                user_id: currentCharacterId || 'default',
-                metadata: { 
-                    role: 'user', 
-                    source: 'sillytavern',
-                    character_id: currentCharacterId || 'default',
-                    timestamp: userTimestamp
-                }
-            });
-            // 继续使用传统方式保存 AI 回复
-        } else {
-            // 使用 Turn API 批量保存
-            const result = await saveTurnWithApi(userMsg, contentToSave, message.name);
-            
-            if (result.success) {
-                return;  // 成功，无需继续
-            }
-            
-            if (result.fallback) {
-                // Turn API 失败，回退到传统方式
-                console.log('[Recall][Turn] 回退：先保存用户消息');
+        // 设置处理中标志
+        turnApiInProgress = true;
+        lastTurnApiMessageId = messageHash;
+        
+        try {
+            // 检查用户消息是否超时（超过 5 分钟可能不是同一轮对话）
+            const timeout = 5 * 60 * 1000;  // 5 分钟
+            if (Date.now() - userTimestamp > timeout) {
+                console.log('[Recall][Turn] 用户消息已超时，分别保存');
+                lastTurnApiMessageId = null;  // 清除，允许传统模式保存 AI 消息
+                // 先保存用户消息（使用传统方式）
                 memorySaveQueue.add({
                     content: userMsg,
                     user_id: currentCharacterId || 'default',
@@ -5809,11 +5836,42 @@ async function saveAIMessageDirect(messageIndex, message, contentToSave) {
                         timestamp: userTimestamp
                     }
                 });
-                // 继续使用传统方式保存 AI 回复
+                // 继续使用传统方式保存 AI 回复（在 finally 之后）
             } else {
-                // 非回退失败（如重复），直接返回
-                return;
+                // 使用 Turn API 批量保存
+                const result = await saveTurnWithApi(userMsg, contentToSave, message.name);
+                
+                if (result.success) {
+                    turnApiInProgress = false;  // 清除标志
+                    // 注意：不清除 lastTurnApiMessageId，用于防止同一消息的重复调用
+                    // 它会在下一轮不同消息时被覆盖
+                    return;  // 成功，无需继续
+                }
+                
+                if (result.fallback) {
+                    // Turn API 失败，回退到传统方式
+                    console.log('[Recall][Turn] 回退：先保存用户消息');
+                    lastTurnApiMessageId = null;  // 清除，允许传统模式保存
+                    memorySaveQueue.add({
+                        content: userMsg,
+                        user_id: currentCharacterId || 'default',
+                        metadata: { 
+                            role: 'user', 
+                            source: 'sillytavern',
+                            character_id: currentCharacterId || 'default',
+                            timestamp: userTimestamp
+                        }
+                    });
+                    // 继续使用传统方式保存 AI 回复
+                } else {
+                    // 非回退失败（如重复），直接返回
+                    turnApiInProgress = false;  // 清除标志
+                    return;
+                }
             }
+        } finally {
+            // 确保标志被清除（除非已经在上面清除了）
+            turnApiInProgress = false;
         }
     }
     
@@ -6007,6 +6065,13 @@ function clearAllListsForCharacterSwitch() {
     // 【重要】清空待处理的AI消息队列，避免旧消息保存到新角色
     pendingAIMessages.clear();
     console.log('[Recall] 已清空待处理消息队列');
+    
+    // 【v4.2】清空 Turn API 相关状态，避免旧消息影响新角色
+    pendingUserMessage = null;
+    pendingUserMessageTimestamp = 0;
+    lastTurnApiMessageId = null;
+    turnApiInProgress = false;
+    console.log('[Recall] 已清空 Turn API 状态');
     
     // 【新增】停止选择器学习模式（如果正在进行）
     if (selectorLearningMode) {

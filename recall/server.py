@@ -1545,6 +1545,10 @@ async def add_memory(request: AddMemoryRequest):
     当保存用户消息时（metadata.role='user'），会自动从内容中提取持久条件。
     这是条件自动提取的正确时机，避免在每次生成时重复提取。
     """
+    import uuid as uuid_module
+    request_id = f"mem_{uuid_module.uuid4().hex[:8]}"
+    request_start_time = time.time()
+    
     engine = get_engine()
     
     # 提取 user_id 和 character_id
@@ -1552,9 +1556,13 @@ async def add_memory(request: AddMemoryRequest):
     character_id = request.metadata.get('character_id', 'default') if request.metadata else 'default'
     role = request.metadata.get('role', 'unknown') if request.metadata else 'unknown'
     
+    # 计算消息签名用于追踪
+    msg_hash = f"{hash(request.content[:100]) % 10000:04d}"
+    
     content_preview = request.content[:80].replace('\n', ' ') if len(request.content) > 80 else request.content.replace('\n', ' ')
-    _safe_print(f"[Recall][Memory] 📥 添加请求: user={user_id}, char={character_id}, role={role}")
-    _safe_print(f"[Recall][Memory]    内容({len(request.content)}字): {content_preview}{'...' if len(request.content) > 80 else ''}")
+    _safe_print(f"[Recall][Memory][{request_id}] [IN] ========== 传统API请求开始 ==========")
+    _safe_print(f"[Recall][Memory][{request_id}]    user={user_id}, char={character_id}, role={role}, hash={msg_hash}")
+    _safe_print(f"[Recall][Memory][{request_id}]    内容({len(request.content)}字): {content_preview}{'...' if len(request.content) > 80 else ''}")
     
     result = engine.add(
         content=request.content,
@@ -1562,11 +1570,19 @@ async def add_memory(request: AddMemoryRequest):
         metadata=request.metadata
     )
     
+    total_time_ms = (time.time() - request_start_time) * 1000
+    
     # 记录结果（包括去重跳过的情况）
     if result.success:
-        _safe_print(f"[Recall][Memory] ✅ 保存成功: id={result.id}, entities={result.entities}")
+        _safe_print(f"[Recall][Memory][{request_id}] [OK] 保存成功: id={result.id}")
+        _safe_print(f"[Recall][Memory][{request_id}]    entities={result.entities}, 耗时={total_time_ms:.1f}ms")
+        if result.consistency_warnings:
+            _safe_print(f"[Recall][Memory][{request_id}]    [WARN] 一致性警告: {result.consistency_warnings}")
     else:
-        _safe_print(f"[Recall][Memory] ⏭️ 跳过: {result.message}")
+        _safe_print(f"[Recall][Memory][{request_id}] [SKIP] 跳过保存: {result.message}")
+        _safe_print(f"[Recall][Memory][{request_id}]    耗时={total_time_ms:.1f}ms")
+    
+    _safe_print(f"[Recall][Memory][{request_id}] [OUT] ========== 传统API请求结束 ==========")
     
     # 【注意】条件提取已移至 /v1/foreshadowing/analyze/turn 端点
     # 与伏笔分析使用相同的触发间隔机制（默认每5轮），避免重复分析相同对话历史
@@ -1592,9 +1608,14 @@ async def add_turn(request: AddTurnRequest):
     
     总体预期节省时间：15-40s/轮次
     """
+    import uuid as uuid_module
+    request_id = f"turn_{uuid_module.uuid4().hex[:8]}"
+    request_start_time = time.time()
+    
     # 检查配置是否启用 Turn API
     turn_api_enabled = os.environ.get('TURN_API_ENABLED', 'true').lower() in ('true', '1', 'yes')
     if not turn_api_enabled:
+        _safe_print(f"[Recall][Turn][{request_id}] [WARN] Turn API 已禁用 (TURN_API_ENABLED={os.environ.get('TURN_API_ENABLED', 'not set')})")
         return AddTurnResponse(
             success=False,
             message="Turn API 已禁用，请使用 /v1/memories 分别添加"
@@ -1602,12 +1623,19 @@ async def add_turn(request: AddTurnRequest):
     
     engine = get_engine()
     
+    # 计算消息签名用于追踪重复
+    user_sig = f"{request.user_message[:30]}..." if len(request.user_message) > 30 else request.user_message
+    ai_sig = f"{request.ai_response[:30]}..." if len(request.ai_response) > 30 else request.ai_response
+    msg_hash = f"{hash(request.user_message[:100]) % 10000:04d}_{hash(request.ai_response[:100]) % 10000:04d}"
+    
     user_preview = request.user_message[:50].replace('\n', ' ') if len(request.user_message) > 50 else request.user_message.replace('\n', ' ')
     ai_preview = request.ai_response[:50].replace('\n', ' ') if len(request.ai_response) > 50 else request.ai_response.replace('\n', ' ')
-    _safe_print(f"[Recall][Turn] 📥 Turn API 请求: user_id={request.user_id}, char={request.character_id}")
-    _safe_print(f"[Recall][Turn]    用户消息({len(request.user_message)}字): {user_preview}{'...' if len(request.user_message) > 50 else ''}")
-    _safe_print(f"[Recall][Turn]    AI回复({len(request.ai_response)}字): {ai_preview}{'...' if len(request.ai_response) > 50 else ''}")
+    _safe_print(f"[Recall][Turn][{request_id}] [IN] ========== Turn API 请求开始 ==========")
+    _safe_print(f"[Recall][Turn][{request_id}]    user_id={request.user_id}, char={request.character_id}, msg_hash={msg_hash}")
+    _safe_print(f"[Recall][Turn][{request_id}]    用户消息({len(request.user_message)}字): {user_preview}{'...' if len(request.user_message) > 50 else ''}")
+    _safe_print(f"[Recall][Turn][{request_id}]    AI回复({len(request.ai_response)}字): {ai_preview}{'...' if len(request.ai_response) > 50 else ''}")
     
+    _safe_print(f"[Recall][Turn][{request_id}]    调用 engine.add_turn...")
     result = engine.add_turn(
         user_message=request.user_message,
         ai_response=request.ai_response,
@@ -1616,12 +1644,21 @@ async def add_turn(request: AddTurnRequest):
         metadata=request.metadata
     )
     
+    total_time_ms = (time.time() - request_start_time) * 1000
+    
     if result.success:
-        _safe_print(f"[Recall][Turn] ✅ 保存成功: user_mem={result.user_memory_id}, ai_mem={result.ai_memory_id}, entities={result.entities}")
-        if result.processing_time_ms:
-            _safe_print(f"[Recall][Turn]    处理时间: {result.processing_time_ms:.1f}ms")
+        _safe_print(f"[Recall][Turn][{request_id}] [OK] 保存成功")
+        _safe_print(f"[Recall][Turn][{request_id}]    user_mem={result.user_memory_id}")
+        _safe_print(f"[Recall][Turn][{request_id}]    ai_mem={result.ai_memory_id}")
+        _safe_print(f"[Recall][Turn][{request_id}]    entities={result.entities}")
+        _safe_print(f"[Recall][Turn][{request_id}]    engine处理: {result.processing_time_ms:.1f}ms, 总耗时: {total_time_ms:.1f}ms")
+        if result.consistency_warnings:
+            _safe_print(f"[Recall][Turn][{request_id}]    [WARN] 一致性警告: {result.consistency_warnings}")
     else:
-        _safe_print(f"[Recall][Turn] ⏭️ 跳过: {result.message}")
+        _safe_print(f"[Recall][Turn][{request_id}] [SKIP] 跳过保存: {result.message}")
+        _safe_print(f"[Recall][Turn][{request_id}]    总耗时: {total_time_ms:.1f}ms")
+    
+    _safe_print(f"[Recall][Turn][{request_id}] [OUT] ========== Turn API 请求结束 ==========")
     
     return AddTurnResponse(
         success=result.success,

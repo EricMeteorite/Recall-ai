@@ -1301,6 +1301,12 @@ class RecallEngine:
         # 获取任务管理器
         task_manager = get_task_manager()
         character_id = metadata.get('character_id', 'default') if metadata else 'default'
+        role = metadata.get('role', 'unknown') if metadata else 'unknown'
+        
+        # 生成消息签名用于追踪
+        msg_hash = f"{hash(content[:100]) % 10000:04d}"
+        _safe_print(f"[Engine][Add] 开始处理: user={user_id}, char={character_id}, role={role}, hash={msg_hash}")
+        _safe_print(f"[Engine][Add]    内容长度={len(content)}")
         
         # 创建父任务 - 记忆处理流程
         parent_task = task_manager.create_task(
@@ -1384,7 +1390,8 @@ class RecallEngine:
                         # 检查是否有匹配（重复）
                         if dedup_result.matches:
                             match = dedup_result.matches[0]
-                            _safe_print(f"[Recall] 三阶段去重发现重复: type={match.match_type.value}, conf={match.confidence:.2f}, reason={match.reason}")
+                            _safe_print(f"[Engine][Add] [SKIP] 三阶段去重: type={match.match_type.value}, conf={match.confidence:.2f}")
+                            _safe_print(f"[Engine][Add]    reason={match.reason}")
                             task_manager.complete_task(dedup_task.id, "发现重复记忆")
                             task_manager.complete_task(parent_task.id, "记忆已存在，跳过保存")
                             return AddResult(
@@ -1393,14 +1400,17 @@ class RecallEngine:
                                 entities=[],
                                 message=f"记忆内容已存在（{match.match_type.value}匹配，置信度{match.confidence:.0%}）"
                             )
+                        else:
+                            _safe_print(f"[Engine][Add]    三阶段去重: 未发现重复")
                 except Exception as e:
-                    _safe_print(f"[Recall] 三阶段去重失败，回退到简单匹配: {e}")
+                    _safe_print(f"[Engine][Add] [WARN] 三阶段去重失败，回退简单匹配: {e}")
             
             # 回退：简单字符串精确匹配
             for mem in existing_memories:
                 existing_content = mem.get('content', '').strip()
                 if existing_content == content_normalized:
-                    _safe_print(f"[Recall] 跳过重复记忆: content_len={len(content)}, user={user_id}")
+                    mem_id = mem.get('metadata', {}).get('id', 'unknown')
+                    _safe_print(f"[Engine][Add] [SKIP] 精确匹配去重: mem_id={mem_id}")
                     task_manager.complete_task(dedup_task.id, "发现重复记忆")
                     task_manager.complete_task(parent_task.id, "记忆已存在，跳过保存")
                     return AddResult(
@@ -2040,6 +2050,9 @@ class RecallEngine:
                 {'memory_id': memory_id, 'entities': entity_names, 'elapsed_ms': elapsed_ms}
             )
             
+            _safe_print(f"[Engine][Add] [OK] 保存成功: id={memory_id}, 耗时={elapsed_ms:.1f}ms")
+            _safe_print(f"[Engine][Add]    entities={entity_names}, warnings={len(consistency_warnings)}")
+            
             return AddResult(
                 id=memory_id,
                 success=True,
@@ -2049,7 +2062,8 @@ class RecallEngine:
             )
         
         except Exception as e:
-            _safe_print(f"[Recall] 添加记忆异常: {type(e).__name__}: {e}")
+            elapsed_ms = (time.time() - start_time) * 1000
+            _safe_print(f"[Engine][Add] [FAIL] 添加异常: {type(e).__name__}: {e}, 耗时={elapsed_ms:.1f}ms")
             import traceback
             traceback.print_exc()
             # 标记父任务失败
@@ -2099,13 +2113,20 @@ class RecallEngine:
         entities = []
         relations = []
         
+        # 生成消息签名用于追踪
+        msg_hash = f"{hash(user_message[:100]) % 10000:04d}_{hash(ai_response[:100]) % 10000:04d}"
+        _safe_print(f"[Engine][Turn] 开始处理: user_id={user_id}, char={character_id}, hash={msg_hash}")
+        _safe_print(f"[Engine][Turn]    用户消息长度={len(user_message)}, AI回复长度={len(ai_response)}")
+        
         # 输入验证（与 server.py 的 Pydantic 验证保持一致）
         if not user_message or not user_message.strip():
+            _safe_print(f"[Engine][Turn] [FAIL] 用户消息为空")
             return AddTurnResult(
                 success=False,
                 message="用户消息不能为空"
             )
         if not ai_response or not ai_response.strip():
+            _safe_print(f"[Engine][Turn] [FAIL] AI回复为空")
             return AddTurnResult(
                 success=False,
                 message="AI回复不能为空"
@@ -2113,6 +2134,7 @@ class RecallEngine:
         
         # 合并内容
         combined_content = f"{user_message}\n\n{ai_response}"
+        _safe_print(f"[Engine][Turn]    合并内容长度={len(combined_content)}")
         
         try:
             # 1. 预计算合并内容的 Embedding（复用于去重检查）
@@ -2135,24 +2157,30 @@ class RecallEngine:
             user_exists = False
             ai_exists = False
             
+            _safe_print(f"[Engine][Turn]    精确匹配检查: 对比 {len(existing_memories)} 条现有记忆...")
             for mem in existing_memories:
                 existing_content = mem.get('content', '').strip()
                 if existing_content == user_message_normalized:
                     user_exists = True
+                    _safe_print(f"[Engine][Turn]    [DUP] 用户消息精确匹配: mem_id={mem.get('metadata', {}).get('id', 'unknown')}")
                 if existing_content == ai_response_normalized:
                     ai_exists = True
+                    _safe_print(f"[Engine][Turn]    [DUP] AI回复精确匹配: mem_id={mem.get('metadata', {}).get('id', 'unknown')}")
                 if user_exists and ai_exists:
                     break
             
             if user_exists and ai_exists:
-                _safe_print(f"[Recall][Turn] 精确匹配发现用户消息和AI回复都已存在")
+                _safe_print(f"[Engine][Turn] [SKIP] 精确匹配: 用户消息和AI回复都已存在")
                 return AddTurnResult(
                     success=False,
                     message="对话轮次已存在（用户消息和AI回复都重复）"
                 )
             
+            _safe_print(f"[Engine][Turn]    精确匹配结果: user_exists={user_exists}, ai_exists={ai_exists}")
+            
             # 2.2 语义去重检查（使用 ThreeStageDeduplicator）
             if self.deduplicator is not None and existing_memories:
+                _safe_print(f"[Engine][Turn]    语义去重检查: 启用三阶段去重器...")
                 try:
                     from .processor.three_stage_deduplicator import DedupItem
                     
@@ -2191,16 +2219,22 @@ class RecallEngine:
                         ai_dedup_result = self.deduplicator.deduplicate([ai_item], existing_items)
                         ai_is_dup = len(ai_dedup_result.matches) > 0
                         
+                        _safe_print(f"[Engine][Turn]    语义去重结果: user_dup={user_is_dup}, ai_dup={ai_is_dup}")
+                        
                         if user_is_dup and ai_is_dup:
                             user_match_type = user_dedup_result.matches[0].match_type.value
+                            user_conf = user_dedup_result.matches[0].confidence
                             ai_match_type = ai_dedup_result.matches[0].match_type.value
-                            _safe_print(f"[Recall][Turn] 语义去重: 用户消息({user_match_type}) + AI回复({ai_match_type}) 都重复")
+                            ai_conf = ai_dedup_result.matches[0].confidence
+                            _safe_print(f"[Engine][Turn] [SKIP] 语义去重: 用户消息({user_match_type},{user_conf:.2f}) + AI回复({ai_match_type},{ai_conf:.2f})")
                             return AddTurnResult(
                                 success=False,
                                 message=f"对话轮次已存在（用户消息:{user_match_type}, AI回复:{ai_match_type}）"
                             )
                 except Exception as e:
-                    _safe_print(f"[Recall][Turn] 去重检查失败，继续处理: {e}")
+                    _safe_print(f"[Engine][Turn] [WARN] 去重检查失败，继续处理: {e}")
+            else:
+                _safe_print(f"[Engine][Turn]    跳过语义去重: deduplicator={self.deduplicator is not None}, existing={len(existing_memories) if existing_memories else 0}")
             
             # === Recall 4.1: Episode 创建（去重通过后才创建）===
             current_episode = None
@@ -2221,21 +2255,26 @@ class RecallEngine:
                     current_episode = None
             
             # 3. 实体提取（一次提取，两条消息共享）
+            entity_start = time.time()
             if self.smart_extractor is not None:
                 try:
+                    _safe_print(f"[Engine][Turn]    实体提取: 使用 SmartExtractor...")
                     extraction_result = self.smart_extractor.extract(combined_content)
                     entities = extraction_result.entities
                     all_entities = [e.name for e in entities]
                     keywords = extraction_result.keywords
+                    _safe_print(f"[Engine][Turn]    实体提取完成: {len(entities)}个实体, {len(keywords)}个关键词, 耗时{(time.time()-entity_start)*1000:.1f}ms")
                 except Exception as e:
-                    _safe_print(f"[Recall][Turn] SmartExtractor 失败，回退: {e}")
+                    _safe_print(f"[Engine][Turn] [WARN] SmartExtractor 失败，回退: {e}")
                     entities = self.entity_extractor.extract(combined_content)
                     all_entities = [e.name for e in entities]
                     keywords = self.entity_extractor.extract_keywords(combined_content)
             else:
+                _safe_print(f"[Engine][Turn]    实体提取: 使用基础提取器...")
                 entities = self.entity_extractor.extract(combined_content)
                 all_entities = [e.name for e in entities]
                 keywords = self.entity_extractor.extract_keywords(combined_content)
+                _safe_print(f"[Engine][Turn]    实体提取完成: {len(entities)}个实体, {len(keywords)}个关键词")
             
             # 4. 统一 LLM 分析（矛盾检测 + 关系提取，一次调用）
             # 注意：必须尊重用户的 CONTRADICTION_DETECTION_STRATEGY 设置
@@ -2253,10 +2292,13 @@ class RecallEngine:
                     _safe_print(f"[Recall][Turn] 矛盾检测策略为 RULE，跳过统一分析器")
             
             if use_unified_analyzer_turn:
+                _safe_print(f"[Engine][Turn]    统一分析器: 开始 LLM 分析（矛盾+关系）...")
+                analysis_start = time.time()
                 try:
                     from .processor.unified_analyzer import UnifiedAnalysisInput, AnalysisTask
                     # 获取相关记忆用于矛盾检测
                     existing_mems_for_check = self.search(combined_content, user_id=user_id, top_k=5)
+                    _safe_print(f"[Engine][Turn]    统一分析器: 找到 {len(existing_mems_for_check)} 条相关记忆用于对比")
                     
                     analysis_result = self.unified_analyzer.analyze(UnifiedAnalysisInput(
                         content=combined_content,
@@ -2268,6 +2310,8 @@ class RecallEngine:
                     ))
                     
                     if analysis_result.success:
+                        analysis_time = (time.time() - analysis_start) * 1000
+                        _safe_print(f"[Engine][Turn]    统一分析器完成: 耗时{analysis_time:.1f}ms, 矛盾={len(analysis_result.contradictions)}, 关系={len(analysis_result.relations)}")
                         # 收集一致性警告并存储矛盾到管理器
                         for c in analysis_result.contradictions:
                             warning_msg = f"{c.get('old_fact', '')} vs {c.get('new_fact', '')}"
@@ -2325,7 +2369,8 @@ class RecallEngine:
                                     fact=rel.get('fact', '')
                                 )
                 except Exception as e:
-                    _safe_print(f"[Recall][Turn] 统一分析失败: {e}")
+                    analysis_time = (time.time() - analysis_start) * 1000
+                    _safe_print(f"[Engine][Turn] [WARN] 统一分析失败(耗时{analysis_time:.1f}ms): {e}")
                     # 回退到传统关系提取器
                     if self.knowledge_graph and entities:
                         try:
@@ -2454,6 +2499,8 @@ class RecallEngine:
             # 5. 分别存储两条记忆（但共享实体和关系）
             user_memory_id = f"mem_{uuid_module.uuid4().hex[:12]}"
             ai_memory_id = f"mem_{uuid_module.uuid4().hex[:12]}"
+            
+            _safe_print(f"[Engine][Turn]    保存记忆: user_mem={user_memory_id}, ai_mem={ai_memory_id}")
             
             # 存储用户消息
             user_scope = self.storage.get_scope(user_id)
@@ -2633,6 +2680,10 @@ class RecallEngine:
                 pass  # 忽略性能监控错误
             
             processing_time = (time.time() - start_time) * 1000
+            
+            _safe_print(f"[Engine][Turn] [OK] 处理完成: 总耗时{processing_time:.1f}ms")
+            _safe_print(f"[Engine][Turn]    user_mem={user_memory_id}, ai_mem={ai_memory_id}")
+            _safe_print(f"[Engine][Turn]    entities={all_entities}, warnings={len(consistency_warnings)}")
             
             return AddTurnResult(
                 success=True,
