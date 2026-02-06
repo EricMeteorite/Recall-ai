@@ -2172,6 +2172,14 @@ function loadSettings() {
             const parsed = JSON.parse(saved);
             pluginSettings = { ...defaultSettings, ...parsed };
             
+            // v4.2: 调试日志 - 检查 Turn API 设置
+            console.log('[Recall] 加载设置:', {
+                useTurnApi: pluginSettings.useTurnApi,
+                savedHadUseTurnApi: 'useTurnApi' in parsed,
+                savedValue: parsed.useTurnApi,
+                defaultValue: defaultSettings.useTurnApi
+            });
+            
             // 检查保存的 apiUrl 是否与当前访问的服务器匹配
             // 如果不匹配，说明可能是从其他设备同步过来的旧设置，需要重新检测
             const currentHost = window.location.hostname;
@@ -2896,6 +2904,14 @@ function createUI() {
                                 <!-- 内容由 updateLearnedSelectorsUI() 动态生成 -->
                             </div>
                             <div id="recall-learning-status" class="recall-learning-status" style="display:none;"></div>
+                        </div>
+                        
+                        <div class="recall-setting-group">
+                            <label class="recall-setting-label">
+                                <input type="checkbox" id="recall-use-turn-api" ${pluginSettings.useTurnApi ? 'checked' : ''}>
+                                <span>🚀 Turn API 性能优化 (v4.2)</span>
+                            </label>
+                            <div class="recall-setting-hint">将用户消息和AI回复合并成一次请求保存，减少 30-50% 处理时间</div>
                         </div>
                         
                         <div class="recall-setting-group">
@@ -5192,6 +5208,7 @@ function onSaveSettings() {
     
     pluginSettings.autoInject = document.getElementById('recall-auto-inject')?.checked ?? true;
     pluginSettings.filterThinking = document.getElementById('recall-filter-thinking')?.checked ?? true;
+    pluginSettings.useTurnApi = document.getElementById('recall-use-turn-api')?.checked ?? true;
     pluginSettings.autoChunkLongText = document.getElementById('recall-auto-chunk')?.checked ?? true;
     pluginSettings.chunkSize = parseInt(document.getElementById('recall-chunk-size')?.value) || 2000;
     pluginSettings.previewLength = parseInt(document.getElementById('recall-preview-length')?.value) || 200;
@@ -5786,6 +5803,13 @@ async function saveAIMessageDirect(messageIndex, message, contentToSave) {
         console.log('[Recall] 内容为空，跳过保存');
         return;
     }
+    
+    // v4.2: 调试日志
+    console.log('[Recall][Turn] saveAIMessageDirect 状态:', {
+        useTurnApi: pluginSettings.useTurnApi,
+        hasPendingUserMessage: !!pendingUserMessage,
+        pendingMsgPreview: pendingUserMessage?.substring(0, 30)
+    });
     
     // v4.2: 如果启用 Turn API 且有缓存的用户消息，使用 Turn API
     if (pluginSettings.useTurnApi && pendingUserMessage) {

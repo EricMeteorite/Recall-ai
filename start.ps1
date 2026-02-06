@@ -57,7 +57,7 @@ function Write-Header {
     
     Write-Host ""
     Write-Host "+============================================+" -ForegroundColor Cyan
-    Write-Host "|          Recall AI v4.1.0 Server          |" -ForegroundColor Cyan
+    Write-Host "|          Recall AI v4.2.0 Server          |" -ForegroundColor Cyan
     Write-Host "+============================================+" -ForegroundColor Cyan
     Write-Host ""
 }

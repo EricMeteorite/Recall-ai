@@ -1466,6 +1466,10 @@ class RecallEngine:
             if extraction_result is None:
                 keywords = self.entity_extractor.extract_keywords(content)
             
+            # v4.2: 初始化统一分析器结果变量和控制标志
+            unified_analysis_result = None
+            use_unified_analyzer = False  # 在外层初始化，避免 check_consistency=False 时变量未定义
+            
             # 3. 一致性检查（分两阶段：正则规则 + 可选LLM深度检测）
             if check_consistency:
                 # 任务追踪：一致性检查
@@ -1549,9 +1553,108 @@ class RecallEngine:
                         except Exception as e:
                             _safe_print(f"[Recall] 矛盾记录失败（不影响主流程）: {e}")
                 
+                # === v4.2 优化：使用统一分析器合并矛盾检测和关系提取 ===
                 # 阶段2：LLM深度矛盾检测（可选，当策略不是RULE时启用）
-                # 这可以检测正则无法捕获的复杂语义矛盾
-                if self.contradiction_manager is not None and existing_memories:
+                # v4.2: 如果 unified_analyzer 可用且策略允许 LLM，使用它（合并矛盾检测和关系提取为一次LLM调用）
+                # 注意：必须尊重用户的 CONTRADICTION_DETECTION_STRATEGY 设置
+                use_unified_analyzer = False
+                if self.unified_analyzer and existing_memories:
+                    # 检查矛盾检测策略是否允许使用 LLM
+                    from .graph import DetectionStrategy
+                    if self.contradiction_manager is None:
+                        # 没有矛盾管理器，可以使用统一分析器（仅做关系提取）
+                        use_unified_analyzer = True
+                    elif self.contradiction_manager.strategy != DetectionStrategy.RULE:
+                        # 策略允许 LLM（LLM/MIXED/AUTO），使用统一分析器
+                        use_unified_analyzer = True
+                    else:
+                        # 策略是 RULE，不使用 LLM 矛盾检测，统一分析器也不使用
+                        _safe_print(f"[Recall][v4.2] 矛盾检测策略为 RULE，跳过统一分析器")
+                
+                if use_unified_analyzer:
+                    try:
+                        from .processor.unified_analyzer import UnifiedAnalysisInput, AnalysisTask
+                        
+                        _safe_print(f"[Recall][v4.2] 使用统一分析器 (合并矛盾检测+关系提取)")
+                        
+                        # 任务追踪：统一 LLM 分析
+                        unified_task = task_manager.create_task(
+                            task_type=TaskType.CONTRADICTION_DETECTION,
+                            name="统一LLM分析",
+                            user_id=user_id,
+                            character_id=character_id,
+                            parent_task_id=parent_task.id
+                        )
+                        task_manager.start_task(unified_task.id, "统一分析器处理中...")
+                        
+                        # 准备历史记忆
+                        existing_texts = [m.content if hasattr(m, 'content') else str(m) for m in existing_memories]
+                        
+                        unified_analysis_result = self.unified_analyzer.analyze(UnifiedAnalysisInput(
+                            content=content,
+                            entities=entity_names,  # 使用 entity_names（字符串列表）而不是 entities（对象列表）
+                            existing_memories=existing_texts,
+                            user_id=user_id,
+                            tasks=[AnalysisTask.CONTRADICTION, AnalysisTask.RELATION]  # 使用正确的枚举值
+                        ))
+                        
+                        # 处理矛盾检测结果 (unified_analyzer返回的是字典列表)
+                        if unified_analysis_result.contradictions:
+                            for c in unified_analysis_result.contradictions:
+                                old_fact_text = c.get('old_fact', '')[:50] if c.get('old_fact') else ''
+                                new_fact_text = c.get('new_fact', '')[:50] if c.get('new_fact') else ''
+                                warning_msg = f"[统一分析] {old_fact_text} vs {new_fact_text}"
+                                consistency_warnings.append(warning_msg)
+                                _safe_print(f"[Recall] 统一分析检测到矛盾: {warning_msg}")
+                                
+                                # 将字典转换为 Contradiction 对象后存入管理器
+                                if self.contradiction_manager:
+                                    try:
+                                        from .models.temporal import TemporalFact, Contradiction, ContradictionType
+                                        from datetime import datetime
+                                        import uuid as uuid_module
+                                        
+                                        contradiction_type = ContradictionType.DIRECT
+                                        if c.get('type', '').lower() in ['temporal', 'timeline', '时态矛盾']:
+                                            contradiction_type = ContradictionType.TEMPORAL
+                                        elif c.get('type', '').lower() in ['logical', '逻辑矛盾']:
+                                            contradiction_type = ContradictionType.LOGICAL
+                                        
+                                        new_fact_obj = TemporalFact(
+                                            uuid=str(uuid_module.uuid4()),
+                                            fact=c.get('new_fact', '')[:200],
+                                            source_text=c.get('new_fact', '')[:200],
+                                            user_id=user_id
+                                        )
+                                        old_fact_obj = TemporalFact(
+                                            uuid=str(uuid_module.uuid4()),
+                                            fact=c.get('old_fact', '')[:200],
+                                            source_text=c.get('old_fact', '')[:200],
+                                            user_id=user_id
+                                        )
+                                        
+                                        contradiction_obj = Contradiction(
+                                            uuid=str(uuid_module.uuid4()),
+                                            old_fact=old_fact_obj,
+                                            new_fact=new_fact_obj,
+                                            contradiction_type=contradiction_type,
+                                            confidence=c.get('confidence', 0.8),
+                                            detected_at=datetime.now(),
+                                            notes=warning_msg[:200]
+                                        )
+                                        self.contradiction_manager.add_pending(contradiction_obj)
+                                    except Exception as e:
+                                        _safe_print(f"[Recall] 矛盾对象创建失败（不影响主流程）: {e}")
+                            _safe_print(f"[Recall][v4.2] 统一分析发现 {len(unified_analysis_result.contradictions)} 个矛盾")
+                        
+                        task_manager.complete_task(unified_task.id, f"分析完成，矛盾={len(unified_analysis_result.contradictions)}，关系={len(unified_analysis_result.relations)}")
+                        _safe_print(f"[Recall][v4.2] 统一分析完成: 矛盾={len(unified_analysis_result.contradictions)}, 关系={len(unified_analysis_result.relations)}")
+                    except Exception as e:
+                        _safe_print(f"[Recall][v4.2] 统一分析器失败，回退到传统模式: {e}")
+                        unified_analysis_result = None
+                
+                # 回退：传统 LLM 深度矛盾检测（仅当未使用统一分析器且策略允许LLM时）
+                if not use_unified_analyzer and self.contradiction_manager is not None and existing_memories:
                     try:
                         from .models.temporal import TemporalFact, Contradiction
                         from .graph import DetectionStrategy
@@ -1790,8 +1893,37 @@ class RecallEngine:
             task_manager.start_task(kg_task.id, "提取关系并更新图谱...")
             
             try:
+                # === v4.2 优化：优先使用统一分析器的结果（如果已经分析过）===
+                # 注意：只要 unified_analysis_result 存在，就使用它的结果（即使 relations 为空）
+                # 避免重复调用 LLM
+                if unified_analysis_result is not None:
+                    if unified_analysis_result.relations:
+                        _safe_print(f"[Recall][v4.2] 使用统一分析器的关系结果, 关系数={len(unified_analysis_result.relations)}")
+                        task_manager.update_task(kg_task.id, progress=0.5, message=f"存储 {len(unified_analysis_result.relations)} 条关系...")
+                        # 注意：unified_analyzer返回的是字典列表，不是对象
+                        for rel in unified_analysis_result.relations:
+                            self.knowledge_graph.add_relation(
+                                source_id=rel.get('source'),
+                                target_id=rel.get('target'),
+                                relation_type=rel.get('relation_type'),
+                                source_text=content[:200],
+                                confidence=rel.get('confidence', 0.8),
+                                valid_at=rel.get('valid_at'),
+                                invalid_at=rel.get('invalid_at'),
+                                fact=rel.get('fact', '')
+                            )
+                        # 转换为兼容格式供后续使用（元组格式：source, relation_type, target, source_text）
+                        relations = [(rel.get('source'), rel.get('relation_type'), rel.get('target'), content[:200]) 
+                                     for rel in unified_analysis_result.relations]
+                        _safe_print(f"[Recall][v4.2] 关系已存储到知识图谱, 总关系数={sum(len(v) for v in self.knowledge_graph.outgoing.values())}")
+                        task_manager.complete_task(kg_task.id, f"复用统一分析结果 {len(unified_analysis_result.relations)} 条关系", {'relations': len(unified_analysis_result.relations), 'mode': 'unified'})
+                    else:
+                        # 统一分析器执行了但没提取到关系，这是正常情况（某些内容确实没有关系）
+                        _safe_print(f"[Recall][v4.2] 统一分析器未提取到关系")
+                        relations = []
+                        task_manager.complete_task(kg_task.id, "统一分析器未发现关系", {'relations': 0, 'mode': 'unified'})
                 # === Recall 4.1: 优先使用 LLM 关系提取器（如果启用）===
-                if self._llm_relation_extractor:
+                elif self._llm_relation_extractor:
                     task_manager.update_task(kg_task.id, progress=0.3, message="LLM 关系提取中...")
                     _safe_print(f"[Recall][关系] 使用 LLM 关系提取器, 实体数={len(entities)}")
                     relations_v2 = self._llm_relation_extractor.extract(content, 0, entities)
@@ -2106,7 +2238,21 @@ class RecallEngine:
                 keywords = self.entity_extractor.extract_keywords(combined_content)
             
             # 4. 统一 LLM 分析（矛盾检测 + 关系提取，一次调用）
+            # 注意：必须尊重用户的 CONTRADICTION_DETECTION_STRATEGY 设置
+            use_unified_analyzer_turn = False
             if self.unified_analyzer:
+                from .graph import DetectionStrategy
+                if self.contradiction_manager is None:
+                    # 没有矛盾管理器，可以使用统一分析器
+                    use_unified_analyzer_turn = True
+                elif self.contradiction_manager.strategy != DetectionStrategy.RULE:
+                    # 策略允许 LLM（LLM/MIXED/AUTO），使用统一分析器
+                    use_unified_analyzer_turn = True
+                else:
+                    # 策略是 RULE，不使用 LLM 矛盾检测
+                    _safe_print(f"[Recall][Turn] 矛盾检测策略为 RULE，跳过统一分析器")
+            
+            if use_unified_analyzer_turn:
                 try:
                     from .processor.unified_analyzer import UnifiedAnalysisInput, AnalysisTask
                     # 获取相关记忆用于矛盾检测
@@ -2211,7 +2357,8 @@ class RecallEngine:
                                     )
                         except Exception as fallback_err:
                             _safe_print(f"[Recall][Turn] 回退关系提取也失败: {fallback_err}")
-            else:
+            
+            if not use_unified_analyzer_turn:
                 # 如果 unified_analyzer 未启用，直接使用传统关系提取
                 if self.knowledge_graph and entities:
                     try:

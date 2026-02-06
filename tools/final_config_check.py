@@ -8,7 +8,7 @@ import sys
 # 切换到项目根目录
 os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# 目标配置值 (v4.1)
+# 目标配置值 (v4.2)
 TARGET_CONFIGS = {
     'FORESHADOWING_LLM_ENABLED': 'true',
     'ELEVEN_LAYER_RETRIEVER_ENABLED': 'true',
@@ -336,7 +336,7 @@ def check_hot_reload():
 
 def main():
     print('=' * 70)
-    print('配置同步最终验证报告 (v4.1 + v4.2)')
+    print('配置同步最终验证报告 (v4.2)')
     print('=' * 70)
     
     t1 = check_template_files()

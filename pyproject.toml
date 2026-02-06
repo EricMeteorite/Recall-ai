@@ -1,4 +1,4 @@
-# Recall v4.1 - AI永久记忆系统
+# Recall v4.2 - AI永久记忆系统
 # pyproject.toml
 
 [build-system]
@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "recall-ai"
-version = "4.1.0"
+version = "4.2.0"
 description = "AI永久记忆系统 - 让AI永远不会忘记你说过的每一句话"
 readme = "README.md"
 license = {text = "MIT"}

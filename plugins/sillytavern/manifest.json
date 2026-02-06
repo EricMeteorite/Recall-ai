@@ -6,7 +6,7 @@
     "js": "index.js",
     "css": "style.css",
     "author": "Recall Team",
-    "version": "4.1.0",
+    "version": "4.2.0",
     "description": "Recall - 智能记忆管理系统插件。为 SillyTavern 提供持久化记忆、实体追踪、伏笔管理等功能。",
     "homePage": "https://github.com/your-repo/recall-ai",
     "auto_update": false,

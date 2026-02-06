@@ -1,7 +1,7 @@
-# Recall v4.1 功能状态总览
+# Recall v4.2 功能状态总览
 
-> **生成日期**: 2026-02-01  
-> **当前版本**: v4.1.0  
+> **生成日期**: 2026-02-06  
+> **当前版本**: v4.2.0  
 > **定位**: 通用 AI 知识记忆系统（RP / 代码 / 企业 / Agent 全覆盖）
 
 ---
@@ -269,7 +269,7 @@
 | **CLI 工具** | ✅ | `cli.py` | recall init/add/search/list/delete/stats/serve/consolidate/reset/foreshadowing |
 | **初始化模块** | ✅ | `init.py` | 首次运行初始化逻辑 |
 | **配置管理** | ✅ | `config.py` | LiteConfig/TripleRecallConfig 等 |
-| **版本信息** | ✅ | `version.py` | 版本号管理（v4.1.0） |
+| **版本信息** | ✅ | `version.py` | 版本号管理（v4.2.0） |
 | **入口点** | ✅ | `__main__.py` | python -m recall 入口 |
 | **SillyTavern 插件** | ✅ | `plugins/sillytavern/` | 完整前端集成 |
 
@@ -576,6 +576,7 @@ pip install "recall-ai[enterprise]"
 
 | 版本 | 日期 | 主要变更 |
 |------|------|----------|
+| v4.2.0 | 2026-02-06 | 统一LLM分析器，Turn API批量保存，性能优化 |
 | v4.1.0 | 2026-01-28 | LLM 关系/实体抽取增强，Episode 概念，实体摘要 |
 | v4.0.0 | 2026-01-23 | 三时态模型，11层检索，矛盾检测系统 |
 | v3.6.0 | 2026-01-20 | 语义去重，绝对规则系统，CoreSettings |

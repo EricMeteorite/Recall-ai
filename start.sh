@@ -37,7 +37,7 @@ PORT="${RECALL_PORT:-18888}"
 print_header() {
     echo ""
     echo -e "${CYAN}╔════════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║${NC}         ${BOLD}Recall AI v4.1.0${NC}                  ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}         ${BOLD}Recall AI v4.2.0${NC}                  ${CYAN}║${NC}"
     echo -e "${CYAN}╚════════════════════════════════════════════╝${NC}"
     echo ""
 }

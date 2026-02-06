@@ -35,7 +35,7 @@ USE_CPU=false         # 是否使用 CPU 版 PyTorch（无需显卡）
 print_header() {
     echo ""
     echo -e "${CYAN}╔════════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║${NC}       ${BOLD}Recall AI v4.1.0 安装程序${NC}           ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}       ${BOLD}Recall AI v4.2.0 安装程序${NC}           ${CYAN}║${NC}"
     echo -e "${CYAN}╚════════════════════════════════════════════╝${NC}"
     echo ""
 }

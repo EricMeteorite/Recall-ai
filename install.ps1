@@ -49,7 +49,7 @@ $UseCPU = $false       # 是否使用 CPU 版 PyTorch（无需显卡）
 function Write-Header {
     Write-Host ""
     Write-Host "╔════════════════════════════════════════════╗" -ForegroundColor Cyan
-    Write-Host "║       Recall AI v4.1.0 安装程序           ║" -ForegroundColor Cyan
+    Write-Host "║       Recall AI v4.2.0 安装程序           ║" -ForegroundColor Cyan
     Write-Host "╚════════════════════════════════════════════╝" -ForegroundColor Cyan
     Write-Host ""
 }
