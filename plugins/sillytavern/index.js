@@ -55,6 +55,83 @@
     let lastTurnApiMessageId = null;  // 上一次 Turn API 处理的消息 ID
     
     /**
+     * 远程日志上报 - 将前端日志发送到后端 start.log
+     * 这样用户可以在一个地方看到完整的前后端日志链
+     */
+    const remoteLog = {
+        _queue: [],
+        _sending: false,
+        _enabled: true,
+        
+        // 发送日志到后端
+        async _send(level, message, source = 'plugin') {
+            // 始终在本地 console 输出（无论远程是否可用）
+            const consoleMethod = level === 'error' ? console.error : 
+                                  level === 'warn' ? console.warn : console.log;
+            consoleMethod(`[Recall] ${message}`);
+            
+            // 检查远程日志是否可用（pluginSettings 可能还未初始化）
+            if (!this._enabled) return;
+            if (typeof pluginSettings === 'undefined' || !pluginSettings?.apiUrl) return;
+            
+            // 加入队列
+            this._queue.push({ level, message, source, timestamp: Date.now() });
+            
+            // 异步批量发送，避免阻塞
+            if (!this._sending) {
+                this._sending = true;
+                setTimeout(() => this._flush(), 100);
+            }
+        },
+        
+        async _flush() {
+            if (this._queue.length === 0) {
+                this._sending = false;
+                return;
+            }
+            
+            // 再次检查 pluginSettings 是否可用
+            if (typeof pluginSettings === 'undefined' || !pluginSettings?.apiUrl) {
+                this._sending = false;
+                return;
+            }
+            
+            const items = this._queue.splice(0, 10); // 每次最多发送10条
+            
+            for (const item of items) {
+                try {
+                    await fetch(`${pluginSettings.apiUrl}/v1/log`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(item)
+                    });
+                } catch (e) {
+                    // 静默失败，不影响主流程
+                }
+            }
+            
+            // 如果还有剩余，继续发送
+            if (this._queue.length > 0) {
+                setTimeout(() => this._flush(), 100);
+            } else {
+                this._sending = false;
+            }
+        },
+        
+        // 便捷方法
+        debug(msg) { this._send('debug', msg); },
+        info(msg) { this._send('info', msg); },
+        warn(msg) { this._send('warn', msg); },
+        error(msg) { this._send('error', msg); },
+        
+        // 带来源的方法
+        turn(msg) { this._send('info', msg, 'turn'); },
+        turnError(msg) { this._send('error', msg, 'turn'); },
+        memory(msg) { this._send('info', msg, 'memory'); },
+        memoryError(msg) { this._send('error', msg, 'memory'); }
+    };
+    
+    /**
      * 智能检测 Recall API 地址
      * 
      * 支持两种部署模式：
@@ -5030,14 +5107,13 @@ async function initializeCurrentCharacter() {
  * 检查API连接
  */
 async function checkConnection() {
-    console.log('[Recall] 正在连接:', pluginSettings.apiUrl);
+    remoteLog.info('正在连接: ' + pluginSettings.apiUrl);
     
     // 检查是否有混合内容问题 (HTTPS 页面请求 HTTP API)
     const isPageHttps = window.location.protocol === 'https:';
     const isApiHttp = pluginSettings.apiUrl.startsWith('http://');
     if (isPageHttps && isApiHttp) {
-        console.warn('[Recall] ⚠️ 检测到混合内容问题：当前页面是 HTTPS，但 API 地址是 HTTP');
-        console.warn('[Recall] 浏览器可能会阻止此请求。请考虑：1) 使用 Nginx 反代并启用 HTTPS；2) 使用 HTTP 访问 SillyTavern');
+        remoteLog.warn('⚠️ 混合内容问题：HTTPS页面 + HTTP API，可能被浏览器阻止');
     }
     
     try {
@@ -5055,7 +5131,7 @@ async function checkConnection() {
             const wasConnected = isConnected;
             isConnected = true;
             updateConnectionStatus(true);
-            console.log('[Recall] API 连接成功');
+            remoteLog.info('API 连接成功');
             
             // 如果是首次连接成功
             if (!wasConnected) {
@@ -5085,11 +5161,11 @@ async function checkConnection() {
         // 首次连接失败，尝试智能探测其他地址（只探测一次）
         if (!checkConnection._hasProbed) {
             checkConnection._hasProbed = true;
-            console.log('[Recall] 当前地址连接失败，尝试智能探测...');
+            remoteLog.info('当前地址连接失败，尝试智能探测...');
             const newUrl = await smartConnect();
             
             if (newUrl !== pluginSettings.apiUrl) {
-                console.log(`[Recall] 切换到新地址: ${newUrl}`);
+                remoteLog.info('切换到新地址: ' + newUrl);
                 pluginSettings.apiUrl = newUrl;
                 saveSettings();
                 
@@ -5171,7 +5247,7 @@ function onSaveSettings() {
         // 从开启变为关闭，清理状态
         lastTurnApiMessageId = null;
         pendingUserMessage = null;
-        console.log('[Recall][Turn] Turn API 已关闭，清理相关状态');
+        remoteLog.turn('Turn API 已关闭，清理相关状态');
     }
     pluginSettings.useTurnApi = newUseTurnApi;
     
@@ -5447,27 +5523,37 @@ const memorySaveQueue = {
         taskTracker.startBackendPolling();
         
         try {
-            const response = await fetch(`${pluginSettings.apiUrl}/v1/memories`, {
+            const apiUrl = `${pluginSettings.apiUrl}/v1/memories`;
+            const response = await fetch(apiUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(item.memory)
             });
             
+            // 读取响应体为文本，然后尝试解析 JSON
+            const responseText = await response.text();
+            let result;
+            try {
+                result = JSON.parse(responseText);
+            } catch (parseError) {
+                remoteLog.memoryError(`JSON解析失败 (HTTP ${response.status}): ${responseText.substring(0, 200)}`);
+                throw new Error(`服务器返回非 JSON 响应`);
+            }
+            
             if (response.ok) {
-                // 【修复】解析服务器返回的实际结果，检查是否真的保存成功
-                const result = await response.json();
+                // 使用上面已解析的 result
                 if (result.success) {
                     item.resolve({ 
                         success: true, 
                         id: result.id,
                         consistency_warnings: result.consistency_warnings || []
                     });
-                    console.log('[Recall] 记忆保存成功（队列处理）');
+                    remoteLog.memory('记忆保存成功（队列处理）');
                     taskTracker.complete(taskId, true);
                     
                     // 显示一致性检查警告（如果有）
                     if (result.consistency_warnings && result.consistency_warnings.length > 0) {
-                        console.warn('[Recall] 一致性检查警告:', result.consistency_warnings);
+                        remoteLog.warn('一致性检查警告: ' + result.consistency_warnings.join(', '));
                         // 使用 safeToastr 显示警告，不阻塞流程
                         const warningMsg = result.consistency_warnings.join('\n');
                         safeToastr.warning(warningMsg, '一致性检查警告', { timeOut: 8000 });
@@ -5475,12 +5561,12 @@ const memorySaveQueue = {
                 } else {
                     // 服务器返回成功状态码，但业务上未保存（如重复内容）
                     item.resolve({ success: false, message: result.message });
-                    console.log('[Recall] 记忆跳过:', result.message);
+                    remoteLog.memory('记忆跳过: ' + result.message);
                     taskTracker.complete(taskId, true, result.message);
                 }
             } else if (response.status === 429) {
                 // API 限流，延长间隔并重试
-                console.warn('[Recall] API 限流，将延迟重试');
+                remoteLog.warn('API限流，将延迟重试');
                 this.minInterval = Math.min(this.minInterval * 2, 10000); // 最多 10 秒
                 item.retries++;
                 if (item.retries < this.maxRetries) {
@@ -5497,7 +5583,7 @@ const memorySaveQueue = {
                 throw new Error(`HTTP ${response.status}`);
             }
         } catch (e) {
-            console.warn('[Recall] 记忆保存失败:', e.message);
+            remoteLog.memoryError('记忆保存失败: ' + e.message);
             item.retries++;
             if (item.retries < this.maxRetries) {
                 this.queue.push(item); // 放回队尾
@@ -5535,9 +5621,9 @@ const memorySaveQueue = {
                 pending.shift();
             }
             localStorage.setItem(key, JSON.stringify(pending));
-            console.log('[Recall] 记忆已缓存到本地，等待后续同步');
+            remoteLog.memory('记忆已缓存到本地，等待后续同步');
         } catch (e) {
-            console.warn('[Recall] 本地缓存保存失败:', e);
+            remoteLog.memoryError('本地缓存保存失败: ' + e.message);
         }
     },
     
@@ -5574,17 +5660,17 @@ const memorySaveQueue = {
  * 【优化】使用队列保存，不阻塞消息发送
  */
 async function onMessageSent(messageIndex) {
-    console.log(`[Recall] MESSAGE_SENT 事件触发, messageIndex=${messageIndex}, enabled=${pluginSettings.enabled}, connected=${isConnected}`);
+    remoteLog.memory(`MESSAGE_SENT idx=${messageIndex}, enabled=${pluginSettings.enabled}, connected=${isConnected}`);
     
     if (!pluginSettings.enabled || !isConnected) {
-        console.log('[Recall] 消息保存跳过: 插件未启用或未连接');
+        remoteLog.memory('消息保存跳过: 插件未启用或未连接');
         return;
     }
     
     // 【一致性】统一转为数字类型
     const numericIndex = typeof messageIndex === 'number' ? messageIndex : parseInt(messageIndex, 10);
     if (isNaN(numericIndex)) {
-        console.warn('[Recall] onMessageSent: 无效的消息索引:', messageIndex);
+        remoteLog.memoryError('onMessageSent: 无效的消息索引: ' + messageIndex);
         return;
     }
     
@@ -5593,17 +5679,10 @@ async function onMessageSent(messageIndex) {
         const chat = context.chat;
         const message = chat[numericIndex];
         
-        console.log(`[Recall] 获取到消息:`, {
-            hasMessage: !!message,
-            hasMes: message?.mes ? true : false,
-            mesLength: message?.mes?.length,
-            mesPreview: message?.mes?.substring(0, 50),
-            isUser: message?.is_user,
-            characterId: currentCharacterId
-        });
+        remoteLog.memory(`获取消息: hasMsg=${!!message?.mes}, len=${message?.mes?.length || 0}, preview="${(message?.mes || '').substring(0, 30)}"`);
         
         if (!message || !message.mes) {
-            console.log('[Recall] 消息为空，跳过');
+            remoteLog.memory('消息为空，跳过');
             return;
         }
         
@@ -5611,10 +5690,10 @@ async function onMessageSent(messageIndex) {
         if (pluginSettings.useTurnApi) {
             // 防止重复缓存同一条消息
             if (pendingUserMessage === message.mes) {
-                console.log('[Recall][Turn] 用户消息已缓存，跳过重复');
+                remoteLog.turn('用户消息已缓存，跳过重复');
                 return;
             }
-            console.log(`[Recall][Turn] 缓存用户消息，等待 AI 回复: "${message.mes.substring(0, 50)}..."`);
+            remoteLog.turn(`缓存用户消息: "${message.mes.substring(0, 40)}..."`);
             pendingUserMessage = message.mes;
             pendingUserMessageTimestamp = Date.now();
             return;  // 不立即保存，等待 AI 回复后一起发送
@@ -5622,7 +5701,7 @@ async function onMessageSent(messageIndex) {
         
         // 【传统模式】使用队列保存，不阻塞
         // 先将记忆加入队列，立即返回让消息显示
-        console.log(`[Recall] 正在将用户消息加入保存队列: "${message.mes.substring(0, 50)}..."`);
+        remoteLog.memory(`用户消息加入队列: "${message.mes.substring(0, 40)}..."`);
         
         memorySaveQueue.add({
             content: message.mes,
@@ -5635,19 +5714,19 @@ async function onMessageSent(messageIndex) {
             }
         }).then(result => {
             if (result.success) {
-                console.log('[Recall] 已保存用户消息');
+                remoteLog.memory('已保存用户消息');
                 // 【修复】只有记忆保存成功（非重复）才触发伏笔分析
                 notifyForeshadowingAnalyzer(message.mes, 'user');
             } else if (result.queued) {
-                console.log('[Recall] 用户消息已加入队列/本地缓存');
+                remoteLog.memory('用户消息已加入队列/本地缓存');
             } else {
-                console.log('[Recall] 用户消息跳过（重复）:', result.message);
+                remoteLog.memory('用户消息跳过（重复）: ' + result.message);
             }
         }).catch(err => {
-            console.error('[Recall] 消息保存队列错误:', err);
+            remoteLog.memoryError('消息保存队列错误: ' + err.message);
         });
     } catch (e) {
-        console.warn('[Recall] 处理用户消息失败:', e);
+        remoteLog.memoryError('处理用户消息失败: ' + e.message);
     }
 }
 
@@ -5771,7 +5850,7 @@ async function saveAIMessageDirect(messageIndex, message, contentToSave) {
     contentToSave = cleanHtmlArtifacts(contentToSave);
     
     if (!contentToSave || contentToSave.trim().length === 0) {
-        console.log('[Recall] 内容为空，跳过保存');
+        remoteLog.memory('内容为空，跳过保存');
         return;
     }
     
@@ -5782,29 +5861,23 @@ async function saveAIMessageDirect(messageIndex, message, contentToSave) {
     // v4.2: 如果 Turn API 正在处理中，检查是否是同一条消息
     if (turnApiInProgress) {
         if (lastTurnApiMessageId === messageHash) {
-            console.log('[Recall][Turn] Turn API 正在处理同一条消息，跳过本次调用');
+            remoteLog.turn('[DUP] Turn API 正在处理同一条消息，跳过本次调用');
             return;
         }
         // 如果是不同的消息，说明是新的一轮对话，不应该阻塞
         // 但这种情况不应该发生，因为 Turn API 会在完成前阻塞
-        console.log('[Recall][Turn] Turn API 正在处理，但收到了不同的消息，这可能是并发问题');
+        remoteLog.warn('Turn API 正在处理，但收到了不同的消息，可能是并发问题');
     }
     
     // v4.2: 如果 Turn API 启用，且这条消息已经被处理过，跳过（防止重复）
     // 注意：只在 useTurnApi=true 时检查，避免影响传统模式
     if (pluginSettings.useTurnApi && lastTurnApiMessageId === messageHash && !pendingUserMessage) {
-        console.log('[Recall][Turn] 这条消息已经通过 Turn API 处理，跳过传统模式');
+        remoteLog.turn('[DUP] 消息已通过 Turn API 处理，跳过传统模式');
         return;
     }
     
     // v4.2: 调试日志
-    console.log('[Recall][Turn] saveAIMessageDirect 状态:', {
-        useTurnApi: pluginSettings.useTurnApi,
-        hasPendingUserMessage: !!pendingUserMessage,
-        pendingMsgPreview: pendingUserMessage?.substring(0, 30),
-        turnApiInProgress: turnApiInProgress,
-        messageHash: messageHash.substring(0, 30) + '...'
-    });
+    remoteLog.memory(`saveAIMessageDirect: useTurnApi=${pluginSettings.useTurnApi}, hasPending=${!!pendingUserMessage}, inProgress=${turnApiInProgress}`);
     
     // v4.2: 如果启用 Turn API 且有缓存的用户消息，使用 Turn API
     if (pluginSettings.useTurnApi && pendingUserMessage) {
@@ -5823,7 +5896,7 @@ async function saveAIMessageDirect(messageIndex, message, contentToSave) {
             // 检查用户消息是否超时（超过 5 分钟可能不是同一轮对话）
             const timeout = 5 * 60 * 1000;  // 5 分钟
             if (Date.now() - userTimestamp > timeout) {
-                console.log('[Recall][Turn] 用户消息已超时，分别保存');
+                remoteLog.turn('用户消息已超时(>5min)，分别保存');
                 lastTurnApiMessageId = null;  // 清除，允许传统模式保存 AI 消息
                 // 先保存用户消息（使用传统方式）
                 memorySaveQueue.add({
@@ -5850,7 +5923,7 @@ async function saveAIMessageDirect(messageIndex, message, contentToSave) {
                 
                 if (result.fallback) {
                     // Turn API 失败，回退到传统方式
-                    console.log('[Recall][Turn] 回退：先保存用户消息');
+                    remoteLog.turn('[回退] 先保存用户消息');
                     lastTurnApiMessageId = null;  // 清除，允许传统模式保存
                     memorySaveQueue.add({
                         content: userMsg,
@@ -5881,7 +5954,7 @@ async function saveAIMessageDirect(messageIndex, message, contentToSave) {
     const chunks = shouldChunk ? chunkLongText(contentToSave, chunkSize) : [contentToSave];
     
     if (chunks.length > 1) {
-        console.log(`[Recall] 长文本(${contentToSave.length}字)分成${chunks.length}段保存`);
+        remoteLog.memory(`长文本(${contentToSave.length}字)分成${chunks.length}段保存`);
     }
     
     const timestamp = Date.now();
@@ -5942,22 +6015,29 @@ async function saveAIMessageDirect(messageIndex, message, contentToSave) {
  */
 async function saveTurnWithApi(userMessage, aiResponse, characterName = null) {
     if (!isConnected || !pluginSettings.enabled) {
-        console.log('[Recall][Turn] 未连接或已禁用，跳过');
+        remoteLog.turn('未连接或已禁用，跳过');
         return { success: false, message: '未连接' };
     }
     
     const userId = currentCharacterId || 'default';
     const charId = characterName || currentCharacterId || 'default';
     
-    console.log(`[Recall][Turn] 使用 Turn API 批量保存`);
-    console.log(`[Recall][Turn]   用户消息(${userMessage.length}字): "${userMessage.substring(0, 50)}..."`);
-    console.log(`[Recall][Turn]   AI回复(${aiResponse.length}字): "${aiResponse.substring(0, 50)}..."`);
+    // 生成消息签名用于追踪
+    const msgHash = `${(userMessage.substring(0, 50) + aiResponse.substring(0, 50)).length}_${Date.now() % 10000}`;
+    
+    remoteLog.turn(`========== Turn API 开始 [${msgHash}] ==========`);
+    remoteLog.turn(`user_id=${userId}, char=${charId}`);
+    remoteLog.turn(`用户消息(${userMessage.length}字): "${userMessage.substring(0, 50)}..."`);
+    remoteLog.turn(`AI回复(${aiResponse.length}字): "${aiResponse.substring(0, 50)}..."`);
     
     const taskId = taskTracker.add('turn-save', '批量保存对话', '使用 Turn API');
     taskTracker.startBackendPolling();
     
     try {
-        const response = await fetch(`${pluginSettings.apiUrl}/v1/memories/turn`, {
+        const apiUrl = `${pluginSettings.apiUrl}/v1/memories/turn`;
+        remoteLog.turn(`请求 URL: ${apiUrl}`);
+        
+        const response = await fetch(apiUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -5972,21 +6052,36 @@ async function saveTurnWithApi(userMessage, aiResponse, characterName = null) {
             })
         });
         
-        const result = await response.json();
+        // 检查 HTTP 状态码
+        if (!response.ok) {
+            const errorText = await response.text();
+            remoteLog.turnError(`HTTP 错误 ${response.status}: ${errorText.substring(0, 200)}`);
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        // 读取响应体为文本，然后尝试解析 JSON
+        const responseText = await response.text();
+        let result;
+        try {
+            result = JSON.parse(responseText);
+        } catch (parseError) {
+            remoteLog.turnError(`JSON 解析失败: ${responseText.substring(0, 200)}`);
+            throw new Error(`服务器返回非 JSON 响应`);
+        }
         
         if (result.success) {
             taskTracker.complete(taskId, true);
-            console.log(`[Recall][Turn] ✅ 保存成功: user=${result.user_memory_id}, ai=${result.ai_memory_id}`);
-            if (result.processing_time_ms) {
-                console.log(`[Recall][Turn]   处理时间: ${result.processing_time_ms.toFixed(0)}ms`);
-            }
+            const procTime = result.processing_time_ms ? result.processing_time_ms.toFixed(0) : '?';
+            remoteLog.turn(`[OK] 保存成功: user=${result.user_memory_id}, ai=${result.ai_memory_id}, 耗时=${procTime}ms`);
             
             // 显示一致性检查警告
             if (result.consistency_warnings && result.consistency_warnings.length > 0) {
                 const warningMsg = result.consistency_warnings.join('\n');
-                console.warn('[Recall][Turn] 一致性警告:', warningMsg);
+                remoteLog.warn(`一致性警告: ${warningMsg}`);
                 safeToastr.warning(warningMsg, '一致性检查警告', { timeOut: 8000 });
             }
+            
+            remoteLog.turn(`========== Turn API 完成 ==========`);
             
             // 触发伏笔分析（使用合并内容）
             notifyForeshadowingAnalyzer(userMessage + '\n' + aiResponse, 'turn');
@@ -5994,15 +6089,27 @@ async function saveTurnWithApi(userMessage, aiResponse, characterName = null) {
             return { success: true, result };
         } else {
             taskTracker.complete(taskId, false, result.message || '保存失败');
-            console.log(`[Recall][Turn] ⏭️ 跳过: ${result.message}`);
+            remoteLog.turn(`[SKIP] 跳过: ${result.message}`);
+            remoteLog.turn(`========== Turn API 完成 ==========`);
             return { success: false, message: result.message };
         }
     } catch (e) {
         taskTracker.complete(taskId, false, e.message);
-        console.error('[Recall][Turn] Turn API 调用失败:', e);
+        remoteLog.turnError(`Turn API 调用失败: ${e.message}`);
+        remoteLog.turnError(`请求 URL: ${pluginSettings.apiUrl}/v1/memories/turn`);
+        remoteLog.turn(`========== Turn API 失败，回退传统模式 ==========`);
+        
+        // 显示错误通知，帮助用户诊断问题
+        if (e.message.includes('非 JSON') || e.message.includes('Unexpected')) {
+            safeToastr.error(
+                `Turn API 返回了非 JSON 响应。请检查：\n1. 后端服务是否正常运行\n2. API URL 是否正确: ${pluginSettings.apiUrl}\n3. 反向代理是否正确配置`,
+                'Recall API 错误',
+                { timeOut: 10000 }
+            );
+        }
         
         // 回退到传统保存方式
-        console.log('[Recall][Turn] 回退到传统保存方式...');
+        remoteLog.turn('回退到传统保存方式...');
         return { success: false, fallback: true, error: e.message };
     }
 }
@@ -6011,23 +6118,23 @@ async function saveTurnWithApi(userMessage, aiResponse, characterName = null) {
  * 聊天切换时（角色/群组切换）
  */
 async function onChatChanged() {
-    console.log('[Recall] ▶▶▶ onChatChanged 被触发');
+    remoteLog.info('▶▶▶ onChatChanged 被触发');
     
     // 获取当前角色信息
     const context = SillyTavern.getContext();
     const characterId = context.characterId;
     const character = characterId !== undefined ? context.characters[characterId] : null;
     
-    console.log('[Recall] onChatChanged - characterId:', characterId, 'character:', character?.name, 'groupId:', context.groupId);
+    remoteLog.info(`角色信息: id=${characterId}, name=${character?.name || 'null'}, group=${context.groupId || 'null'}`);
     
     // 清除旧角色的记忆注入，避免残留
     try {
         if (context.setExtensionPrompt) {
             context.setExtensionPrompt('recall_memory', '', 0, 0, false, 0);
-            console.log('[Recall] 已清除旧角色的记忆注入');
+            remoteLog.debug('已清除旧角色的记忆注入');
         }
     } catch (e) {
-        console.warn('[Recall] 清除旧注入失败:', e);
+        remoteLog.warn('清除旧注入失败: ' + e.message);
     }
     
     // 【重要】角色切换时，清空所有列表数据，确保新角色数据能正确加载
@@ -6035,16 +6142,16 @@ async function onChatChanged() {
     
     if (character) {
         currentCharacterId = character.name || `char_${characterId}`;
-        console.log(`[Recall] 切换到角色: ${currentCharacterId}`);
+        remoteLog.info('切换到角色: ' + currentCharacterId);
     } else if (context.groupId) {
         currentCharacterId = `group_${context.groupId}`;
-        console.log(`[Recall] 切换到群组: ${currentCharacterId}`);
+        remoteLog.info('切换到群组: ' + currentCharacterId);
     } else {
         currentCharacterId = 'default';
-        console.log('[Recall] onChatChanged - 未检测到角色，使用 default');
+        remoteLog.info('未检测到角色，使用 default');
     }
     
-    console.log('[Recall] onChatChanged - 准备加载数据，isConnected:', isConnected);
+    remoteLog.info('准备加载数据, connected=' + isConnected);
     // 【优化】使用 Promise.all 并行加载，避免阻塞
     try {
         await Promise.all([
@@ -6052,9 +6159,9 @@ async function onChatChanged() {
             loadForeshadowings(),
             loadPersistentContexts()
         ]);
-        console.log('[Recall] onChatChanged - 数据加载完成');
+        remoteLog.info('数据加载完成');
     } catch (e) {
-        console.warn('[Recall] onChatChanged - 部分数据加载失败:', e);
+        remoteLog.warn('部分数据加载失败: ' + e.message);
     }
 }
 
@@ -6064,14 +6171,14 @@ async function onChatChanged() {
 function clearAllListsForCharacterSwitch() {
     // 【重要】清空待处理的AI消息队列，避免旧消息保存到新角色
     pendingAIMessages.clear();
-    console.log('[Recall] 已清空待处理消息队列');
+    remoteLog.info('已清空待处理消息队列');
     
     // 【v4.2】清空 Turn API 相关状态，避免旧消息影响新角色
     pendingUserMessage = null;
     pendingUserMessageTimestamp = 0;
     lastTurnApiMessageId = null;
     turnApiInProgress = false;
-    console.log('[Recall] 已清空 Turn API 状态');
+    remoteLog.turn('已清空 Turn API 状态');
     
     // 【新增】停止选择器学习模式（如果正在进行）
     if (selectorLearningMode) {

@@ -1401,6 +1401,42 @@ async def health():
     }
 
 
+# ==================== 前端日志上报 ====================
+
+class FrontendLogRequest(BaseModel):
+    """前端日志上报请求"""
+    level: str = Field(default="info", description="日志级别: debug/info/warn/error")
+    message: str = Field(..., description="日志消息")
+    source: str = Field(default="plugin", description="日志来源")
+    timestamp: Optional[float] = Field(default=None, description="前端时间戳")
+
+@app.post("/v1/log", tags=["Logging"])
+async def frontend_log(request: FrontendLogRequest):
+    """接收前端日志并写入 start.log
+    
+    这样用户可以在一个地方（start.log）看到完整的前后端日志链。
+    """
+    level_icon = {
+        "debug": "[DEBUG]",
+        "info": "[INFO]",
+        "warn": "[WARN]",
+        "error": "[ERROR]"
+    }.get(request.level.lower(), "[INFO]")
+    
+    # 格式化日志
+    log_msg = f"[Frontend][{request.source}] {level_icon} {request.message}"
+    
+    # 根据级别打印（会被重定向到 start.log）
+    if request.level.lower() == "error":
+        _safe_print(f"[ERROR] {log_msg}")
+    elif request.level.lower() == "warn":
+        _safe_print(f"[WARN] {log_msg}")
+    else:
+        _safe_print(log_msg)
+    
+    return {"success": True}
+
+
 # ==================== 任务追踪 API ====================
 
 @app.get("/v1/tasks/active", tags=["Tasks"])
@@ -1651,7 +1687,8 @@ async def add_turn(request: AddTurnRequest):
         _safe_print(f"[Recall][Turn][{request_id}]    user_mem={result.user_memory_id}")
         _safe_print(f"[Recall][Turn][{request_id}]    ai_mem={result.ai_memory_id}")
         _safe_print(f"[Recall][Turn][{request_id}]    entities={result.entities}")
-        _safe_print(f"[Recall][Turn][{request_id}]    engine处理: {result.processing_time_ms:.1f}ms, 总耗时: {total_time_ms:.1f}ms")
+        proc_time = result.processing_time_ms if result.processing_time_ms else 0
+        _safe_print(f"[Recall][Turn][{request_id}]    engine处理: {proc_time:.1f}ms, 总耗时: {total_time_ms:.1f}ms")
         if result.consistency_warnings:
             _safe_print(f"[Recall][Turn][{request_id}]    [WARN] 一致性警告: {result.consistency_warnings}")
     else:
