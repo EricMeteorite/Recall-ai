@@ -1119,26 +1119,43 @@ def add_batch(
     all_entities = []
     all_ngram_data = []  # (memory_id, content) 对 — ngram_index.add(turn, content) 需要完整原文
     
-    for item, embedding in zip(items, embeddings):
-        result = self._add_single_fast(
-            content=item['content'],
-            embedding=embedding,
-            metadata=item.get('metadata', {}),
-            user_id=user_id,
-            skip_dedup=skip_dedup,
-            skip_llm=skip_llm,
-        )
-        if result:
-            memory_id, entities, keywords = result
-            memory_ids.append(memory_id)
-            all_entities.extend([(e.name, memory_id) for e in entities])
-            all_keywords.extend([(kw, memory_id) for kw in keywords])
-            all_ngram_data.append((memory_id, item['content']))  # ngram 需要完整原文
+    errors = []  # 记录失败项: [{"index": i, "error": "..."}]
+    for i, (item, embedding) in enumerate(zip(items, embeddings)):
+        # ⚠️ 合并 item 顶层字段到 metadata（source/tags/category/content_type）
+        # MCP add_batch schema 中 source/tags 是顶层键，需合并才能被 MetadataIndex 索引
+        merged_metadata = {
+            **(item.get('metadata', {})),
+            'source': item.get('source', ''),
+            'tags': item.get('tags', []),
+            'category': item.get('category', ''),
+            'content_type': item.get('content_type', 'custom'),
+        }
+        try:
+            result = self._add_single_fast(
+                content=item['content'],
+                embedding=embedding,
+                metadata=merged_metadata,  # 合并后的 metadata
+                user_id=user_id,
+                skip_dedup=skip_dedup,
+                skip_llm=skip_llm,
+            )
+            if result:
+                memory_id, entities, keywords = result
+                memory_ids.append(memory_id)
+                all_entities.extend([(e.name, memory_id) for e in entities])
+                all_keywords.extend([(kw, memory_id) for kw in keywords])
+                all_ngram_data.append((memory_id, item['content']))  # ngram 需要完整原文
+        except Exception as e:
+            errors.append({"index": i, "error": str(e)})
+            logging.warning(f"add_batch item {i} failed: {e}")
     
     # 3. 批量更新索引（一次 IO）
     self._batch_update_indexes(all_keywords, all_entities, all_ngram_data)
     
-    return memory_ids
+    # 4. 返回结构化结果（含部分失败信息）
+    if errors:
+        logging.warning(f"add_batch: {len(errors)}/{len(items)} 条失败")
+    return memory_ids  # 调用方可通过 len(memory_ids) < len(items) 判断部分失败
 
 def _add_single_fast(self, content, embedding, metadata, user_id, skip_dedup, skip_llm):
     """单条快速添加（add_batch 内部使用，跳过重复计算）
@@ -1152,7 +1169,7 @@ def _add_single_fast(self, content, embedding, metadata, user_id, skip_dedup, sk
         None: 如果去重命中（跳过）
         Tuple[str, List, List]: (memory_id, entities, keywords) — 用于外层批量索引更新
     """
-    memory_id = str(uuid.uuid4())
+    memory_id = f"mem_{uuid.uuid4().hex[:12]}"  # 与 engine.add() L1739 格式一致
     
     # 去重检查（可跳过）
     if not skip_dedup:
@@ -1191,6 +1208,17 @@ def _add_single_fast(self, content, embedding, metadata, user_id, skip_dedup, sk
     if self._vector_index and self._vector_index.enabled:
         self._vector_index.add(memory_id, embedding)
     
+    # ⚠️ 更新 MetadataIndex（必须！否则 source/tags 过滤检索失效）
+    # MetadataIndex 在 Phase 3 任务 3.3 新建，此处确保 add_batch 写入的数据可被过滤检索
+    if self._metadata_index:
+        self._metadata_index.add(
+            memory_id=memory_id,
+            source=metadata.get('source', ''),
+            tags=metadata.get('tags', []),
+            category=metadata.get('category', ''),
+            content_type=metadata.get('content_type', ''),
+        )
+    
     return (memory_id, entities, keywords)
 
 def _batch_update_indexes(self, all_keywords, all_entities, all_ngram_data):
@@ -1199,6 +1227,7 @@ def _batch_update_indexes(self, all_keywords, all_entities, all_ngram_data):
     Args:
         all_keywords: [(keyword, memory_id), ...] 
         all_entities: [(entity_name, memory_id), ...]
+        all_ngram_data: [(memory_id, content), ...] — ngram 需要完整原文
     """
     # 批量更新倒排索引（通过公开 API 以兼容 Phase 2 WAL 改造）
     if self._inverted_index and all_keywords:
@@ -1839,6 +1868,7 @@ def register_tools(app: Server, engine: RecallEngine):
 ```python
 """Recall MCP Server 入口"""
 import asyncio
+import os
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from recall.engine import RecallEngine
@@ -1892,23 +1922,23 @@ def register_resources(app: Server, engine: RecallEngine):
     async def read_resource(uri: str):
         if uri == "recall://memories":
             memories = engine.list_memories(limit=100)
-            return json.dumps(memories, ensure_ascii=False, indent=2)
+            return [TextContent(type="text", text=json.dumps(memories, ensure_ascii=False, indent=2))]
         elif uri == "recall://entities":
             entities = engine.list_entities()
-            return json.dumps(entities, ensure_ascii=False, indent=2)
+            return [TextContent(type="text", text=json.dumps(entities, ensure_ascii=False, indent=2))]
         elif uri == "recall://stats":
             stats = engine.get_stats()
-            return json.dumps(stats, ensure_ascii=False, indent=2)
+            return [TextContent(type="text", text=json.dumps(stats, ensure_ascii=False, indent=2))]
         elif uri.startswith("recall://memories/"):
             memory_id = unquote(uri.split("/")[-1])  # URL 解码
             memory = engine.get(memory_id)
-            return json.dumps(memory, ensure_ascii=False, indent=2)
+            return [TextContent(type="text", text=json.dumps(memory, ensure_ascii=False, indent=2))]
         elif uri.startswith("recall://entities/"):
             entity_name = unquote(uri.split("/")[-1])  # URL 解码（中文实体名等）
             entity = engine.get_entity_detail(entity_name)
-            return json.dumps(entity, ensure_ascii=False, indent=2)
+            return [TextContent(type="text", text=json.dumps(entity, ensure_ascii=False, indent=2))]
         else:
-            return json.dumps({"error": f"Unknown resource: {uri}"})
+            return [TextContent(type="text", text=json.dumps({"error": f"Unknown resource: {uri}"}))]
 ```
 
 ### 任务 4.4：MCP Transport — SSE 支持
@@ -1975,7 +2005,10 @@ async def _async_main():
         from recall.mcp.transport import create_sse_app
         sse_app = create_sse_app(app)
         port = int(os.environ.get('MCP_PORT', '8765'))
-        uvicorn.run(sse_app, host="0.0.0.0", port=port)
+        # ⚠️ 不能用 uvicorn.run()（同步阻塞），必须用异步 serve()
+        config = uvicorn.Config(sse_app, host="0.0.0.0", port=port)
+        server = uvicorn.Server(config)
+        await server.serve()
     else:
         from mcp.server.stdio import stdio_server
         async with stdio_server() as (read, write):
@@ -2050,6 +2083,7 @@ __all__ = ['PromptManager']
 
 ```python
 import os
+from recall.mode import RecallMode
 
 class PromptManager:
     """Prompt 模板管理器
@@ -2153,6 +2187,7 @@ knowledge_base: |
 | `processor/foreshadowing_analyzer.py` | `ANALYSIS_PROMPT_ZH`(L200) + `ANALYSIS_PROMPT_EN`(L246) — 类变量 | `templates/foreshadowing_analysis.yaml` |
 | `processor/context_tracker.py` | `self.extraction_prompt`(L290) + L1812 内联 f-string — 共 2 处 | `templates/context_extraction.yaml` |
 | `processor/entity_summarizer.py` | `SUMMARIZE_PROMPT`(L36) — 模块级变量 | `templates/entity_summary.yaml` |
+| `processor/memory_summarizer.py` | `self.summary_prompt`(L99) — 实例变量 | `templates/memory_summary.yaml` |
 | `processor/unified_analyzer.py` | `UNIFIED_ANALYSIS_PROMPT`(L67) — 模块级变量 | `templates/unified_analysis.yaml` |
 
 **改动方式**：每个文件只需改一行——将硬编码字符串替换为 `self.prompt_manager.render('template_name', ...)`。原字符串成为 YAML 模板中的 `default` 变体。
@@ -2244,12 +2279,13 @@ class LLMClient:
         2. model 名称前缀匹配（兜底）
         3. 默认 openai（兼容所有 OpenAI 格式的中转站）
         """
-        # 1. 按 api_base 域名检测
+        # 1. 按 api_base 域名检测（使用 urlparse 精确匹配，避免子串误判）
         if self.api_base:
-            base_lower = self.api_base.lower()
-            if 'anthropic.com' in base_lower:
+            from urllib.parse import urlparse
+            hostname = urlparse(self.api_base.lower()).hostname or ''
+            if hostname.endswith('.anthropic.com') or hostname == 'api.anthropic.com':
                 return 'anthropic'
-            if 'googleapis.com' in base_lower or 'generativelanguage' in base_lower:
+            if hostname.endswith('.googleapis.com') or 'generativelanguage' in hostname:
                 return 'google'
             # 其他任何地址（包括中转站）→ 走 OpenAI SDK
             return 'openai'
@@ -2473,7 +2509,7 @@ async def achat(self, messages, max_tokens=None, temperature=0.7, **kwargs):
     if self._provider == 'anthropic':
         return await self._achat_anthropic(messages, max_tokens, temperature, stop=kwargs.get('stop'))
     elif self._provider == 'google':
-        return await self._achat_google(messages, max_tokens, temperature)
+        return await self._achat_google(messages, max_tokens, temperature, stop=kwargs.get('stop'))
     else:
         return await self._achat_openai(messages, max_tokens, temperature, **kwargs)
 
@@ -2542,8 +2578,8 @@ async def _achat_anthropic(self, messages, max_tokens, temperature, stop=None):
         raw_response=response
     )
 
-async def _achat_google(self, messages, max_tokens, temperature):
-    """Google 异步路径（对齐同步版 _chat_google，正确提取 system_instruction）"""
+async def _achat_google(self, messages, max_tokens, temperature, stop=None):
+    """Google 异步路径（对齐同步版 _chat_google，正确提取 system_instruction + stop_sequences）"""
     import time
     start_time = time.time()
     # 提取 system 消息（与同步版 _chat_google 逻辑一致）
@@ -2561,7 +2597,11 @@ async def _achat_google(self, messages, max_tokens, temperature):
     contents = [{'role': 'user' if m['role'] == 'user' else 'model',
                  'parts': [m['content']]} for m in chat_messages]
     response = await model.generate_content_async(
-        contents, generation_config={'max_output_tokens': max_tokens, 'temperature': temperature}
+        contents, generation_config={
+            'max_output_tokens': max_tokens,
+            'temperature': temperature,
+            'stop_sequences': stop or [],  # 对齐同步版 _chat_google
+        }
     )
     latency = (time.time() - start_time) * 1000
     return LLMResponse(
@@ -2857,7 +2897,7 @@ MODEL_DIMENSIONS = {
 anthropic = ["anthropic>=0.30.0"]
 google = ["google-generativeai>=0.8.0"]
 voyage = ["voyageai>=0.3.0"]
-reranker = ["cohere>=5.0"]
+reranker = ["cohere>=5.0", "sentence-transformers>=2.2"]
 all-llm = ["anthropic>=0.30.0", "google-generativeai>=0.8.0", "voyageai>=0.3.0"]
 ```
 
@@ -3325,7 +3365,7 @@ from .mode import RecallMode, get_mode_config  # v5.0 便捷再导出
 
 ---
 
-> **本文档版本**：v1.12（伪代码终极校准版）  
+> **本文档版本**：v1.13（端到端数据流修复版）  
 > **状态**：待审批  
 > **v1.1 审计**：修正了 ~20 处行号引用、文件行数统计、RELATION_TYPES 数量；新增任务 1.11 配置管道统一同步  
 > **v1.2 更新**：任务 6.2 从存根扩展为完整 Embedding 自适应方案  
@@ -3371,3 +3411,6 @@ from .mode import RecallMode, get_mode_config  # v5.0 便捷再导出
 > **数据流修复(1)**：`_batch_update_indexes` 签名从 `(all_keywords, all_entities)` → `(all_keywords, all_entities, all_ngram_data)`，add_batch 新增收集 `(memory_id, content)` 对  
 > **验证清单扩展(11项)**：12.2+2（WAL crash 保护 + compact 原子写入）；12.3+3（MetadataIndex atexit + metadata=None + ngram API 修正）；12.5+3（render ValueError + template KeyError + builtin_dir）；12.6+3（_achat_google + _achat_anthropic stop + achat 路由）  
 > **配置模板验证**：5 项全部 CONFIRMED（start.ps1/sh 5/17 抽检真实、manage.ps1 英文 UI + 时态子标题缺失、server.py 126 键、engine.py 3 默认值 'false'、9 新变量不存在）
+> **v1.13 更新**：端到端数据流修复（4 个并行子代理交叉验证 — Phase1-3 源码精验 14PASS/3FAIL/4WARN、Phase4-7 伪代码验证 62PASS/5FAIL/11WARN、配置统一终审 9PASS/2WARN、AI可执行性 6PASS/1FAIL/7WARN）—  
+> **CRITICAL 修复(8)**：(1) `_add_single_fast` 中 `memory_id = str(uuid.uuid4())` → `f"mem_{uuid.uuid4().hex[:12]}"`（与 engine.add() L1739 的 ID 格式一致，避免两种格式混存导致检索/删除不一致）；(2) `_add_single_fast` 缺少 MetadataIndex.add() 调用 → 新增 `self._metadata_index.add(memory_id, source, tags, category, content_type)`（否则 add_batch 写入的数据无法被 source/tags 过滤检索到，端到端数据流断裂）；(3) `add_batch` 循环中 item 顶层 source/tags 未合并入 metadata → 新增 `merged_metadata` 合并逻辑（MCP add_batch schema 中 source/tags 是顶层键，不在 metadata 内，导致传递到 _add_single_fast 后 metadata 里无 source 字段）；(4) `add_batch` 逐条处理无错误隔离 → 新增 `try/except` 包裹每条 _add_single_fast，收集 errors 列表（高吞吐爬虫场景单条失败不应中断整个 batch）；(5) MCP `read_resource()` 返回裸 `str` → 改为 `[TextContent(type="text", text=json.dumps(...))]`（与 call_tool 风格一致，符合 MCP 协议要求）；(6) `PromptManager` manager.py 缺少 `from recall.mode import RecallMode` 导入 → 新增 import（`__init__(self, mode: RecallMode)` 类型注解无法解析）；(7) 任务 5.3 Prompt 迁移表遗漏 `processor/memory_summarizer.py` → 新增行 `self.summary_prompt`(L99) → `templates/memory_summary.yaml`（源码确认 L99 有 `self.summary_prompt = """请对以下记忆内容进行摘要…"""`）；(8) `_detect_provider()` 子串匹配 `'anthropic.com' in url` 对 `anthropic-mirror.com` 误判 → 改用 `urlparse().hostname` 精确域名匹配（`host.endswith('.anthropic.com') or host == 'api.anthropic.com'`）  
+> **HIGH WARN 修复(5)**：(1) `mcp_server.py` SSE 分支 `uvicorn.run()` 是同步阻塞调用，在 async 函数中直接调用会阻塞事件循环 → 改为 `await uvicorn.Server(uvicorn.Config(...)).serve()`；(2) `_achat_google` 缺少 `stop_sequences` 参数传递（同步版 `_chat_google` 有）→ 签名新增 `stop=None`，generation_config 新增 `'stop_sequences': stop or []`，achat 路由透传 `stop=kwargs.get('stop')`；(3) `mcp_server.py` SSE 分支使用 `os.environ.get()` 但顶部缺少 `import os` → 新增导入；(4) `reranker` 可选依赖组仅含 `cohere>=5.0` → 新增 `sentence-transformers>=2.2`（`CrossEncoderReranker` 需要）；(5) `_batch_update_indexes` docstring 缺少 `all_ngram_data` 参数说明 → 补充完整 Args 文档
