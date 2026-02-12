@@ -35,8 +35,8 @@
 | 4 | `processor/consistency.py` | L50-71 | `AttributeType` 枚举 — 15 种属性中 11 种 RP 特化（HAIR_COLOR/SPECIES 等） | 中 |
 | 5 | `processor/consistency.py` | L139-179 | `COLOR_SYNONYMS`, `RELATIONSHIP_OPPOSITES`, `STATE_OPPOSITES` 纯 RP 词典 | 中 |
 | 6 | `processor/context_tracker.py` | L50-73 | `ContextType` 枚举 — 6/15 种为 RP 特化（CHARACTER_TRAIT/WORLD_SETTING 等） | 低 |
-| 7 | `processor/foreshadowing.py` | 全文 1234 行 | 伏笔追踪器 — 纯 RP 叙事功能 | **高** |
-| 8 | `processor/foreshadowing_analyzer.py` | 全文 852 行 | 伏笔 LLM 分析器 — 纯 RP | **高** |
+| 7 | `processor/foreshadowing.py` | 全文 1211 行 | 伏笔追踪器 — 纯 RP 叙事功能 | **高** |
+| 8 | `processor/foreshadowing_analyzer.py` | 全文 823 行 | 伏笔 LLM 分析器 — 纯 RP | **高** |
 | 9 | `engine.py` | L287-300 | 初始化 `foreshadowing_tracker/analyzer` | 高 |
 | 10 | `engine.py` | L3297-3306 | `build_context()` 第 5 层硬注入活跃伏笔 | 高 |
 | 11 | `engine.py` | L1303/2077/3179 | `character_id` 贯穿 `add()`(metadata提取)/`add_turn()`(显式参数)/`build_context()`(显式参数) | 中 |
@@ -53,13 +53,13 @@
 
 | # | 文件 | 行号 | 问题 | 严重度 |
 |---|------|------|------|:------:|
-| 1 | `index/temporal_index.py` | L276-338 | `query_at_time()` / `query_range()` — O(n) 全扫描，不用已有的排序列表 | **高** |
+| 1 | `index/temporal_index.py` | L276-335 | `query_at_time()` / `query_range()` — O(n) 全扫描，不用已有的排序列表 | **高** |
 | 2 | `index/temporal_index.py` | L426/L454 | `query_before()` / `query_after()` — 同样 O(n) | 高 |
 | 3 | `index/inverted_index.py` | L31-35 | `_save()` — 每次全量 JSON dump 整个索引 | **高** |
 | 4 | `graph/backends/json_backend.py` | L143-157 | `add_node()` / `add_edge()` — 每次写操作触发全量 `_save()` | **高** |
 | 5 | `storage/volume_manager.py` | L142-183 | `get_turn_by_memory_id()` — O(全磁盘) 逐行扫描 | 中 |
 | 6 | `storage/volume_manager.py` | L185-245 | `search_content()` — O(全磁盘) 逐行扫描 | 中 |
-| 7 | `index/ngram_index.py` | L154-191 | `_raw_text_fallback_search()` — O(n) 全内存扫描 | 中 |
+| 7 | `index/ngram_index.py` | L154-190 | `_raw_text_fallback_search()` — O(n) 全内存扫描 | 中 |
 | 8 | `engine.py` | L1280+ | 单次 `add()` — 10+ 次磁盘 IO、2-3 次网络调用、无批量优化 | **高** |
 | 9 | （全局） | — | 无 batch/bulk API 端点 | **高** |
 
@@ -225,7 +225,13 @@ else:
 |------|--------|--------|----------|
 | 导入 | 无条件导入 foreshadowing | 条件导入 | 通用模式不导入 |
 
-> **⚠️ 重要**：engine.py 顶部（L22-27 范围）有 `from recall.processor.foreshadowing import ForeshadowingTracker` 和 `from recall.processor.foreshadowing_analyzer import ForeshadowingAnalyzer` 的顶层导入。实施时必须**删除这些顶层导入**，改为下方 `__init__` 中 `if self._mode.foreshadowing_enabled:` 内的条件导入。否则通用模式仍会加载伏笔模块并可能触发不必要的依赖。
+> **⚠️ 重要**：engine.py 顶部有 **3 处** foreshadowing 相关顶层导入需要改为条件导入：
+> 1. L20-25 的 `from .processor import (... ForeshadowingTracker ... ForeshadowingAnalyzer, ForeshadowingAnalyzerConfig, AnalysisResult ...)` — 整个 `from .processor import (...)` 块中包含 `ForeshadowingTracker`(L21)、`ForeshadowingAnalyzer`(L23)、`ForeshadowingAnalyzerConfig`(L23)、`AnalysisResult`(L23)，需将这 4 个名称从该导入块中移除，改为下方 `__init__` 中 `if self._mode.foreshadowing_enabled:` 内的条件导入。保留该块中的 `EntityExtractor, ConsistencyChecker, MemorySummarizer, ScenarioDetector, ContextTracker, ContextType`。
+> 2. L29 的 `from .processor.foreshadowing import Foreshadowing` — 独立一行，需整行删除并改为条件导入。
+>
+> 否则通用模式仍会加载伏笔模块并可能触发不必要的依赖。
+>
+> **⚠️ 同样重要**：`RecallEngine.__init__` 签名中有 `foreshadowing_config: Optional[ForeshadowingAnalyzerConfig] = None` 参数（L138）。该参数在通用/知识库模式下应仍被接受但忽略（不报错不处理），确保向后兼容。
 | 初始化 | 无条件创建 tracker/analyzer | `if mode.foreshadowing_enabled:` | 通用模式跳过 |
 | `add()` L1303 | `character_id` 从 metadata 提取后直接使用 | `if mode.character_dimension_enabled:` 使用，否则强制 `"default"` | 通用模式不隔离角色 |
 | `build_context()` L5 伏笔层 | 无条件注入伏笔 | `if mode.foreshadowing_enabled:` | 通用模式跳过伏笔层 |
@@ -237,16 +243,24 @@ else:
 from recall.mode import get_mode_config
 
 class RecallEngine:
-    def __init__(self, ...):
+    def __init__(self, ..., foreshadowing_config=None):
         self._mode = get_mode_config()
         
         # 伏笔系统（仅 RP 模式）
         if self._mode.foreshadowing_enabled:
-            from recall.processor.foreshadowing import ForeshadowingTracker
-            from recall.processor.foreshadowing_analyzer import ForeshadowingAnalyzer
+            # 条件导入：从顶层 import 块按到此处
+            from recall.processor.foreshadowing import ForeshadowingTracker, Foreshadowing
+            from recall.processor.foreshadowing_analyzer import (
+                ForeshadowingAnalyzer, ForeshadowingAnalyzerConfig, AnalysisResult
+            )
             self.foreshadowing_tracker = ForeshadowingTracker(...)
-            self.foreshadowing_analyzer = ForeshadowingAnalyzer(...)
+            self.foreshadowing_analyzer = ForeshadowingAnalyzer(
+                tracker=self.foreshadowing_tracker,
+                config=foreshadowing_config,  # 原 L295-300 逻辑不变
+                ...
+            )
         else:
+            # 通用/知识库模式：foreshadowing_config 被忽略
             self.foreshadowing_tracker = None
             self.foreshadowing_analyzer = None
     
@@ -323,19 +337,26 @@ async def create_foreshadowing(...):
 **改动文件**：`recall/storage/layer0_core.py`  
 **改动行号**：L67-92
 
-**原代码**：
+**原代码结构**（L76-88，每个分支都有独立的 join/append 逻辑）：
 ```python
 if scenario == 'roleplay':
     scene_parts = [self.character_card, self.world_setting, self.writing_style]
+    scene_text = '\n\n'.join(p for p in scene_parts if p)
+    if scene_text:
+        parts.append(scene_text)
 elif scenario == 'coding':
     scene_parts = [self.code_standards, self.naming_conventions]
+    scene_text = '\n\n'.join(p for p in scene_parts if p)
+    if scene_text:
+        parts.append(scene_text)
+# ← 绝对规则在下方 L88 无条件注入
 ```
 
-**新增逻辑**（在 `elif scenario == 'coding'` 之后追加）：
+**新增逻辑**（在 `elif scenario == 'coding':` 分支的 `parts.append(scene_text)` 之后追加）：
 ```python
 elif scenario == 'general':
-    # 通用模式：只注入绝对规则（absolute_rules 已在上方处理）
-    scene_parts = []
+    # 通用模式：不注入场景特定内容，只依赖下方 L88 的绝对规则注入
+    pass
 ```
 
 **新增字段**（可选，在 CoreSettings 类中追加）：
@@ -746,9 +767,11 @@ fulltext_enabled = os.environ.get('FULLTEXT_ENABLED', 'false')          # 应为
 | 16 | server.py LLM Max Tokens 各条注释措辞 | server.py: `通用场景`/`Default max tokens for LLM calls`/`实体多时需要更多`；其他: `通用默认值`/`Default max tokens for LLM output`/`实体多时需要大值` | 统一为其他 4 个模板格式 |
 | 17 | start.sh IVF-HNSW 单参数注释格式 | start.ps1: `HNSW 图连接数（越大召回越高，内存越大，推荐 32）`；start.sh: `HNSW 图连接数 M（推荐 32，越大精度越高但构建越慢）`（EF_CONSTRUCTION/EF_SEARCH 同理） | 统一为 start.ps1 格式 |
 
-**修复**：以 `start.ps1` 为基准，将 `start.sh` 的 9 处全部统一。同时修复跨模板的 8 处差异：统一“时态知识图谱配置”子标题格式；删除 `server.py` 中 LLM Max Tokens 节多余说明文字；统一注释措辞；修复 `manage.sh` 的 v4.1 标题格式；统一 LLM Max Tokens 各条注释；统一 IVF-HNSW 单参数注释。
+**修复**：以 `start.ps1` 为基准，将 `start.sh` 的 9 处全部统一。同时修复跨模板的 9 处差异：统一“时态知识图谱配置”子标题格式；删除 `server.py` 中 LLM Max Tokens 节多余说明文字；统一注释措辞；修复 `manage.sh` 的 v4.1 标题格式；统一 LLM Max Tokens 各条注释；统一 IVF-HNSW 单参数注释；统一 SUPPORTED_CONFIG_KEYS 注释版本号。
 
-> **原则**：所有 5 处配置模板（start.ps1, start.sh, manage.ps1, manage.sh, server.py get_default_config_content）的每一行必须字符级别完全一致。共计 **17 处差异**需统一。
+| 18 | SUPPORTED_CONFIG_KEYS 注释版本号 | server.py: `v4.1.1 LLM Max Tokens 配置`；start.ps1: `v4.1 LLM Max Tokens 配置` | 统一为 `v4.1` 格式 |
+
+> **原则**：所有 5 处配置模板（start.ps1, start.sh, manage.ps1, manage.sh, server.py get_default_config_content）的每一行必须字符级别完全一致。共计 **18 处差异**需统一。
 
 ---
 
@@ -760,7 +783,7 @@ fulltext_enabled = os.environ.get('FULLTEXT_ENABLED', 'false')          # 应为
 ### 任务 2.1：时态索引利用排序列表实现 O(log n) 查询
 
 **改动文件**：`recall/index/temporal_index.py`  
-**改动行号**：L276-338, L426-487
+**改动行号**：L276-335, L426-487
 
 **问题**：代码已用 `bisect.insort()` 维护了 `_sorted_by_fact_start` 等排序列表，但 `query_at_time()`、`query_range()`、`query_before()`、`query_after()` 全部使用 `for doc_id, entry in self.entries.items()` 暴力遍历。
 
@@ -1169,7 +1192,7 @@ def _add_single_fast(self, content, embedding, metadata, user_id, skip_dedup, sk
         None: 如果去重命中（跳过）
         Tuple[str, List, List]: (memory_id, entities, keywords) — 用于外层批量索引更新
     """
-    memory_id = f"mem_{uuid.uuid4().hex[:12]}"  # 与 engine.add() L1739 格式一致
+    memory_id = f"mem_{uuid.uuid4().hex[:12]}"  # 与 engine.add() L1737 格式一致
     
     # 去重检查（可跳过）
     if not skip_dedup:
@@ -1425,8 +1448,15 @@ from .metadata_index import MetadataIndex
 
 ```python
 def search(self, query, user_id="default", top_k=10,
-           source=None, tags=None, category=None, content_type=None):
-    """搜索记忆 — 支持元数据过滤"""
+           filters=None,              # ← 保留现有参数
+           temporal_context=None,      # ← 保留现有参数
+           config_preset=None,         # ← 保留现有参数
+           source=None, tags=None, category=None, content_type=None):  # v5.0 新增
+    """搜索记忆 — 支持元数据过滤
+    
+    ➡️ 现有参数 filters/temporal_context/config_preset 保持不变，
+       新增 source/tags/category/content_type 作为便捷参数，内部通过 MetadataIndex 实现。
+    """
     # 1. 如果有元数据过滤条件，先缩小候选集
     if any([source, tags, category, content_type]):
         allowed_ids = self._metadata_index.query(
@@ -2183,7 +2213,7 @@ knowledge_base: |
 |------|--------------------------------------|--------|
 | `processor/smart_extractor.py` | `EXTRACTION_PROMPT`(L202) + `EXTRACTION_PROMPT_V2`(L227) — 类变量 | `templates/entity_extraction.yaml` |
 | `graph/llm_relation_extractor.py` | `RELATION_EXTRACTION_PROMPT`(L71) — 模块级变量 | `templates/relation_extraction.yaml` |
-| `processor/consistency.py` | L1351 内联 f-string（`你是一个严格的规则检查器…`） | `templates/contradiction_detection.yaml` |
+| `processor/consistency.py` | L1352 内联 f-string（`你是一个严格的规则检查器…`） | `templates/contradiction_detection.yaml` |
 | `processor/foreshadowing_analyzer.py` | `ANALYSIS_PROMPT_ZH`(L200) + `ANALYSIS_PROMPT_EN`(L246) — 类变量 | `templates/foreshadowing_analysis.yaml` |
 | `processor/context_tracker.py` | `self.extraction_prompt`(L290) + L1812 内联 f-string — 共 2 处 | `templates/context_extraction.yaml` |
 | `processor/entity_summarizer.py` | `SUMMARIZE_PROMPT`(L36) — 模块级变量 | `templates/entity_summary.yaml` |
@@ -3223,7 +3253,8 @@ from .mode import RecallMode, get_mode_config  # v5.0 便捷再导出
 - [ ] `RECALL_MODE=general` + `FORESHADOWING_ENABLED=true` → 伏笔功能正常
 - [ ] Turn 模型新增字段不影响现有数据加载
 - [ ] `/v1/mode` 端点返回正确的模式信息
-- [ ] engine.py 顶层不再有 foreshadowing 的无条件 import（已改为 `__init__` 内条件导入）
+- [ ] engine.py 顶层不再有 foreshadowing 的无条件 import（L20-25 `from .processor import (...)` 块中移除 ForeshadowingTracker/Analyzer，L29 `from .processor.foreshadowing import Foreshadowing` 已删除，改为 `__init__` 内条件导入）
+- [ ] 通用模式下 `foreshadowing_config` 参数被接受但忽略（不报错）
 - [ ] 通用模式下 `turn.effective_content` 正确返回 `content` 字段内容
 - [ ] 模式切换（修改 `RECALL_MODE`）后重启服务，行为正确切换
 
@@ -3349,7 +3380,7 @@ from .mode import RecallMode, get_mode_config  # v5.0 便捷再导出
 - [ ] 通过脚本启动和直接 `python -m recall` 启动，行为完全一致
 - [ ] 新安装用户默认配置包含所有 v5.0 配置项
 - [ ] `start.sh` 的 9 处配置模板差异已全部修复（见任务 1.11.4 清单）
-- [ ] 新增的 2 处跨模板差异（#16 LLM Max Tokens 注释措辞、#17 IVF-HNSW 参数注释）已修复
+- [ ] 新增的 3 处跨模板差异（#16 LLM Max Tokens 注释措辞、#17 IVF-HNSW 参数注释、#18 SUPPORTED_CONFIG_KEYS 注释版本号）已修复
 - [ ] `start.ps1` 遗留的多余“时态知识图谱配置”子标题已清理
 - [ ] `base.py` 和 `api_backend.py` 的 `MODEL_DIMENSIONS` 已合并为单一来源
 - [ ] `knowledge_graph.py` 和 `temporal_knowledge_graph.py` 的 `RELATION_TYPES` 已统一为单一来源
@@ -3365,8 +3396,12 @@ from .mode import RecallMode, get_mode_config  # v5.0 便捷再导出
 
 ---
 
-> **本文档版本**：v1.13（端到端数据流修复版）  
+> **本文档版本**：v1.15（二次全面终审版）  
 > **状态**：待审批  
+> **v1.15 更新**：二次全面终审（源码行号精确校验 + 方法签名交叉验证 + 配置一致性确认 + 数据流完整性验证）—
+> **行号修正(4处)**：(1) §1.1 #7 foreshadowing.py 行数从 1234 修正为 1211（v1.3 误将 1211 改为 1234，实际文件仍为 1211 行）；(2) §1.1 #8 foreshadowing_analyzer.py 行数从 852 修正为 823（v1.3/v1.8 连续错误校准，实际文件为 823 行）；(3) §1.2 #1 temporal_index.py 范围从 L276-338 修正为 L276-335（query_range 结尾在 L335）；(4) §1.2 #7 ngram_index.py 范围从 L154-191 修正为 L154-190（_raw_text_fallback_search 结尾在 L190）
+> **Prompt 位置修正(1处)**：Task 5.3 consistency.py inline f-string 行号从 L1351 修正为 L1352（`prompt = f"""` 赋值在 L1352）
+> **通过验证(无需修改)**：§1.1 余 14 项行号精确匹配；§1.2 余 5 项行号精确匹配；全部 24 项方法签名精确匹配（add/add_turn/build_context/search/get_paginated/delete/get_stats/get/extract/all_entities/add_entity_occurrence/get_entity/add/chat/achat/complete/embed/encode/encode_batch 等）；13 项配置模板检查全部 PASS；12 项数据流检查全部 PASS（属性命名 7/7、AddResult.id/AddTurnResult 字段、Turn 模型、TemporalKnowledgeGraph 实例、get_relations_for_entity 存在性）；8 项 Prompt 位置 7 精确匹配 + 1 修正
 > **v1.1 审计**：修正了 ~20 处行号引用、文件行数统计、RELATION_TYPES 数量；新增任务 1.11 配置管道统一同步  
 > **v1.2 更新**：任务 6.2 从存根扩展为完整 Embedding 自适应方案  
 > **v1.3 更新**：全面二次审计修正 — 修复了 foreshadowing.py(1211→1234) / foreshadowing_analyzer.py(823→853) 行数；修正 15+ 处行号偏差；修正任务 1.6 一致性检查器 5 个不存在的方法名；修正 Phase 3 `embed_batch`→`encode_batch`；修正任务 1.2 `add()` 的 character_id 描述（metadata 提取非显式参数）；新增 `voyageai`/`cohere` 到 pyproject.toml 可选依赖；新增 `temporal_knowledge_graph.py` RELATION_TYPES 同步注意事项；新增 `base.py` MODEL_DIMENSIONS 去重注意事项；扩展任务 1.11.4 从 1 处差异到 9 处完整清单；验证清单 12.9 新增 4 项检查  
@@ -3412,5 +3447,9 @@ from .mode import RecallMode, get_mode_config  # v5.0 便捷再导出
 > **验证清单扩展(11项)**：12.2+2（WAL crash 保护 + compact 原子写入）；12.3+3（MetadataIndex atexit + metadata=None + ngram API 修正）；12.5+3（render ValueError + template KeyError + builtin_dir）；12.6+3（_achat_google + _achat_anthropic stop + achat 路由）  
 > **配置模板验证**：5 项全部 CONFIRMED（start.ps1/sh 5/17 抽检真实、manage.ps1 英文 UI + 时态子标题缺失、server.py 126 键、engine.py 3 默认值 'false'、9 新变量不存在）
 > **v1.13 更新**：端到端数据流修复（4 个并行子代理交叉验证 — Phase1-3 源码精验 14PASS/3FAIL/4WARN、Phase4-7 伪代码验证 62PASS/5FAIL/11WARN、配置统一终审 9PASS/2WARN、AI可执行性 6PASS/1FAIL/7WARN）—  
-> **CRITICAL 修复(8)**：(1) `_add_single_fast` 中 `memory_id = str(uuid.uuid4())` → `f"mem_{uuid.uuid4().hex[:12]}"`（与 engine.add() L1739 的 ID 格式一致，避免两种格式混存导致检索/删除不一致）；(2) `_add_single_fast` 缺少 MetadataIndex.add() 调用 → 新增 `self._metadata_index.add(memory_id, source, tags, category, content_type)`（否则 add_batch 写入的数据无法被 source/tags 过滤检索到，端到端数据流断裂）；(3) `add_batch` 循环中 item 顶层 source/tags 未合并入 metadata → 新增 `merged_metadata` 合并逻辑（MCP add_batch schema 中 source/tags 是顶层键，不在 metadata 内，导致传递到 _add_single_fast 后 metadata 里无 source 字段）；(4) `add_batch` 逐条处理无错误隔离 → 新增 `try/except` 包裹每条 _add_single_fast，收集 errors 列表（高吞吐爬虫场景单条失败不应中断整个 batch）；(5) MCP `read_resource()` 返回裸 `str` → 改为 `[TextContent(type="text", text=json.dumps(...))]`（与 call_tool 风格一致，符合 MCP 协议要求）；(6) `PromptManager` manager.py 缺少 `from recall.mode import RecallMode` 导入 → 新增 import（`__init__(self, mode: RecallMode)` 类型注解无法解析）；(7) 任务 5.3 Prompt 迁移表遗漏 `processor/memory_summarizer.py` → 新增行 `self.summary_prompt`(L99) → `templates/memory_summary.yaml`（源码确认 L99 有 `self.summary_prompt = """请对以下记忆内容进行摘要…"""`）；(8) `_detect_provider()` 子串匹配 `'anthropic.com' in url` 对 `anthropic-mirror.com` 误判 → 改用 `urlparse().hostname` 精确域名匹配（`host.endswith('.anthropic.com') or host == 'api.anthropic.com'`）  
+> **CRITICAL 修复(8)**：(1) `_add_single_fast` 中 `memory_id = str(uuid.uuid4())` → `f"mem_{uuid.uuid4().hex[:12]}"`（与 engine.add() L1737 的 ID 格式一致，避免两种格式混存导致检索/删除不一致）；(2) `_add_single_fast` 缺少 MetadataIndex.add() 调用 → 新增 `self._metadata_index.add(memory_id, source, tags, category, content_type)`（否则 add_batch 写入的数据无法被 source/tags 过滤检索到，端到端数据流断裂）；(3) `add_batch` 循环中 item 顶层 source/tags 未合并入 metadata → 新增 `merged_metadata` 合并逻辑（MCP add_batch schema 中 source/tags 是顶层键，不在 metadata 内，导致传递到 _add_single_fast 后 metadata 里无 source 字段）；(4) `add_batch` 逐条处理无错误隔离 → 新增 `try/except` 包裹每条 _add_single_fast，收集 errors 列表（高吞吐爬虫场景单条失败不应中断整个 batch）；(5) MCP `read_resource()` 返回裸 `str` → 改为 `[TextContent(type="text", text=json.dumps(...))]`（与 call_tool 风格一致，符合 MCP 协议要求）；(6) `PromptManager` manager.py 缺少 `from recall.mode import RecallMode` 导入 → 新增 import（`__init__(self, mode: RecallMode)` 类型注解无法解析）；(7) 任务 5.3 Prompt 迁移表遗漏 `processor/memory_summarizer.py` → 新增行 `self.summary_prompt`(L99) → `templates/memory_summary.yaml`（源码确认 L99 有 `self.summary_prompt = """请对以下记忆内容进行摘要…"""`）；(8) `_detect_provider()` 子串匹配 `'anthropic.com' in url` 对 `anthropic-mirror.com` 误判 → 改用 `urlparse().hostname` 精确域名匹配（`host.endswith('.anthropic.com') or host == 'api.anthropic.com'`）  
 > **HIGH WARN 修复(5)**：(1) `mcp_server.py` SSE 分支 `uvicorn.run()` 是同步阻塞调用，在 async 函数中直接调用会阻塞事件循环 → 改为 `await uvicorn.Server(uvicorn.Config(...)).serve()`；(2) `_achat_google` 缺少 `stop_sequences` 参数传递（同步版 `_chat_google` 有）→ 签名新增 `stop=None`，generation_config 新增 `'stop_sequences': stop or []`，achat 路由透传 `stop=kwargs.get('stop')`；(3) `mcp_server.py` SSE 分支使用 `os.environ.get()` 但顶部缺少 `import os` → 新增导入；(4) `reranker` 可选依赖组仅含 `cohere>=5.0` → 新增 `sentence-transformers>=2.2`（`CrossEncoderReranker` 需要）；(5) `_batch_update_indexes` docstring 缺少 `all_ngram_data` 参数说明 → 补充完整 Args 文档
+> **v1.14 更新**：独立全面终审（源码精确校验 + 伪代码签名验证 + 配置一致性交叉审计）—
+> **CRITICAL 修复(3)**：(1) 任务 1.2 foreshadowing 导入行号从 "L22-27" 修正为 "L20-29"，并明确标注 3 处需条件化的导入（L20-25 `from .processor import (...)` 块中的 ForeshadowingTracker/ForeshadowingAnalyzer/ForeshadowingAnalyzerConfig/AnalysisResult + L29 `from .processor.foreshadowing import Foreshadowing`），原描述错误地写为 `from recall.processor.foreshadowing import ForeshadowingTracker`（实际是 `from .processor import (...)`）；(2) 任务 3.4 search() 伪代码的签名**丢失了现有 3 个参数** `filters`/`temporal_context`/`config_preset` → 修复为在现有完整签名基础上追加 `source`/`tags`/`category`/`content_type` 新参数，确保不破坏现有 API；(3) 任务 1.2 engine.py `__init__` 的 `foreshadowing_config: Optional[ForeshadowingAnalyzerConfig] = None` 参数未被文档化处理 → 新增说明：该参数在非 RP 模式下仍然接受但忽略，确保向后兼容
+> **MEDIUM 修复(3)**：(1) 任务 1.4 get_injection_text() 伪代码 `scene_parts = []` 与实际代码结构不一致（实际每个分支有独立的 join/append 逻辑）→ 修正为显示完整原代码结构 + 新分支用 `pass` 而非误导性的 `scene_parts = []`；(2) `_add_single_fast` memory_id 行号引用 L1739 → L1737（off-by-2 修正）；(3) 配置一致性表新增第 18 处差异：SUPPORTED_CONFIG_KEYS 注释中 server.py 写 `v4.1.1` 而 start.ps1 写 `v4.1`，应统一为 `v4.1`
+> **验证清单扩展(2项)**：12.1 新增 `foreshadowing_config` 参数兼容性验证 + foreshadowing 导入精确到 3 处（L20-25 块 + L29）；12.9 新增 #18 SUPPORTED_CONFIG_KEYS 注释版本号差异
