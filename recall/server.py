@@ -1067,6 +1067,7 @@ class AddMemoryRequest(BaseModel):
     tags: Optional[List[str]] = Field(default=None, description="标签列表")
     category: Optional[str] = Field(default=None, description="分类（如 tech/finance/entertainment）")
     content_type: Optional[str] = Field(default=None, description="内容类型（如 news_article/video_transcript/text）")
+    event_time: Optional[str] = Field(default=None, description="事件发生时间（ISO格式，如 2025-01-20 或 2025-01-20T10:00:00+08:00）")
     metadata: Optional[Dict[str, Any]] = Field(default=None, description="元数据（自由格式，source/tags等也可放在这里）")
 
 
@@ -1127,6 +1128,8 @@ class SearchRequest(BaseModel):
     tags: Optional[List[str]] = Field(default=None, description="按标签过滤（v5.0）")
     category: Optional[str] = Field(default=None, description="按类别过滤（v5.0）")
     content_type: Optional[str] = Field(default=None, description="按内容类型过滤（v5.0）")
+    event_time_start: Optional[str] = Field(default=None, description="事件时间范围起点（YYYY-MM-DD 或 ISO格式，v5.0）")
+    event_time_end: Optional[str] = Field(default=None, description="事件时间范围终点（YYYY-MM-DD 或 ISO格式，v5.0）")
 
 
 class SearchResultItem(BaseModel):
@@ -1658,6 +1661,8 @@ async def add_memory(request: AddMemoryRequest):
         merged_metadata['category'] = request.category
     if request.content_type is not None:
         merged_metadata['content_type'] = request.content_type
+    if request.event_time is not None:
+        merged_metadata['event_time'] = request.event_time
     
     character_id = merged_metadata.get('character_id', 'default')
     role = merged_metadata.get('role', 'unknown')
@@ -1841,8 +1846,8 @@ async def search_memories(request: SearchRequest):
         _safe_print(f"[Recall][Memory]    配置预设: {request.config_preset}")
     
     # v5.0: 元数据过滤日志
-    if any([request.source, request.tags, request.category, request.content_type]):
-        _safe_print(f"[Recall][Memory]    元数据过滤: source={request.source}, tags={request.tags}, category={request.category}, content_type={request.content_type}")
+    if any([request.source, request.tags, request.category, request.content_type, request.event_time_start, request.event_time_end]):
+        _safe_print(f"[Recall][Memory]    元数据过滤: source={request.source}, tags={request.tags}, category={request.category}, content_type={request.content_type}, event_time={request.event_time_start}~{request.event_time_end}")
     
     try:
         engine = get_engine()
@@ -1857,6 +1862,8 @@ async def search_memories(request: SearchRequest):
             tags=request.tags,
             category=request.category,
             content_type=request.content_type,
+            event_time_start=request.event_time_start,
+            event_time_end=request.event_time_end,
         )
     except Exception as e:
         import traceback

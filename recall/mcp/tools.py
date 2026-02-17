@@ -149,14 +149,18 @@ def register_tools(app: Server, engine: RecallEngine):
             ),
             Tool(
                 name="recall_search_filtered",
-                description="按来源/标签过滤搜索记忆（v5.0）",
+                description="按来源/标签/分类/事件时间过滤搜索记忆（v5.0）",
                 inputSchema={
                     "type": "object",
                     "properties": {
                         "query": {"type": "string"},
                         "user_id": {"type": "string", "default": "default"},
                         "source": {"type": "string", "description": "按来源过滤"},
-                        "tags": {"type": "array", "items": {"type": "string"}},
+                        "tags": {"type": "array", "items": {"type": "string"}, "description": "按标签过滤"},
+                        "category": {"type": "string", "description": "按分类过滤"},
+                        "content_type": {"type": "string", "description": "按内容类型过滤"},
+                        "event_time_start": {"type": "string", "description": "事件时间范围起点（YYYY-MM-DD 或 ISO格式）"},
+                        "event_time_end": {"type": "string", "description": "事件时间范围终点（YYYY-MM-DD 或 ISO格式）"},
                         "top_k": {"type": "integer", "default": 10},
                     },
                     "required": ["query"]
@@ -268,6 +272,10 @@ def register_tools(app: Server, engine: RecallEngine):
                 top_k=arguments.get("top_k", 10),
                 source=arguments.get("source"),
                 tags=arguments.get("tags"),
+                category=arguments.get("category"),
+                content_type=arguments.get("content_type"),
+                event_time_start=arguments.get("event_time_start"),
+                event_time_end=arguments.get("event_time_end"),
             )
             text = "\n\n".join([f"[{r.score:.2f}] {r.content[:200]}" for r in results])
             return [TextContent(type="text", text=text or "未找到相关记忆")]

@@ -1868,6 +1868,7 @@ class RecallEngine:
                         tags=metadata.get('tags', []) if metadata else [],
                         category=metadata.get('category', '') if metadata else '',
                         content_type=metadata.get('content_type', '') if metadata else '',
+                        event_time=metadata.get('event_time', '') if metadata else '',
                     )
                 
                 task_manager.complete_task(index_task.id, "索引更新完成")
@@ -2226,6 +2227,7 @@ class RecallEngine:
                 tags=metadata.get('tags', []) if metadata else [],
                 category=metadata.get('category', '') if metadata else '',
                 content_type=metadata.get('content_type', '') if metadata else '',
+                event_time=metadata.get('event_time', '') if metadata else '',
             )
         
         # 规则级关系提取（与 add() 步骤 6 一致，但只用规则模式，保持批量高吞吐）
@@ -2988,6 +2990,8 @@ class RecallEngine:
         tags: Optional[List[str]] = None,
         category: Optional[str] = None,
         content_type: Optional[str] = None,
+        event_time_start: Optional[str] = None,
+        event_time_end: Optional[str] = None,
     ) -> List[SearchResult]:
         """搜索记忆
         
@@ -3002,14 +3006,17 @@ class RecallEngine:
             tags: v5.0 元数据过滤 - 标签
             category: v5.0 元数据过滤 - 类别
             content_type: v5.0 元数据过滤 - 内容类型
+            event_time_start: v5.0 事件时间范围起点（YYYY-MM-DD 或 ISO）
+            event_time_end: v5.0 事件时间范围终点（YYYY-MM-DD 或 ISO）
         
         Returns:
             List[SearchResult]: 搜索结果
         """
         # v5.0: 元数据过滤
-        if any([source, tags, category, content_type]) and self._metadata_index:
+        if any([source, tags, category, content_type, event_time_start, event_time_end]) and self._metadata_index:
             allowed_ids = self._metadata_index.query(
-                source=source, tags=tags, category=category, content_type=content_type
+                source=source, tags=tags, category=category, content_type=content_type,
+                event_time_start=event_time_start, event_time_end=event_time_end,
             )
         else:
             allowed_ids = None
