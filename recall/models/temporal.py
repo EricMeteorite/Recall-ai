@@ -180,11 +180,15 @@ class TemporalFact:
     def to_dict(self) -> Dict[str, Any]:
         """转换为可序列化的字典"""
         result = asdict(self)
-        # 转换 datetime 为 ISO 格式字符串
+        # 转换 datetime 为 ISO 格式字符串（兼容已经是字符串的情况）
         for key in ['valid_from', 'valid_until', 'known_at', 'superseded_at', 
                     'created_at', 'expired_at']:
             if result[key] is not None:
-                result[key] = result[key].isoformat()
+                if isinstance(result[key], datetime):
+                    result[key] = result[key].isoformat()
+                elif not isinstance(result[key], str):
+                    result[key] = str(result[key])
+                # 已经是 str 则保持不变
         return result
     
     @classmethod
@@ -294,10 +298,14 @@ class UnifiedNode:
         result = asdict(self)
         result['node_type'] = self.node_type.value
         
-        # 转换 datetime 为 ISO 格式
+        # 转换 datetime 为 ISO 格式（兼容已经是字符串的情况）
         for key in ['created_at', 'updated_at', 'valid_at', 'expired_at']:
             if result[key] is not None:
-                result[key] = result[key].isoformat()
+                if isinstance(result[key], datetime):
+                    result[key] = result[key].isoformat()
+                elif not isinstance(result[key], str):
+                    result[key] = str(result[key])
+                # 已经是 str 则保持不变
         
         # 移除私有字段
         result.pop('_attribute_schema', None)

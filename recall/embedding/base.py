@@ -31,7 +31,7 @@ class EmbeddingConfig:
     api_model: str = "text-embedding-3-small"  # OpenAI 默认
     
     # 通用配置
-    dimension: int = 384  # 向量维度（会根据后端自动调整）
+    dimension: Optional[int] = 384  # 向量维度（None 时自动查表）
     batch_size: int = 32
     normalize: bool = True
     
@@ -50,22 +50,27 @@ class EmbeddingConfig:
         """[已弃用] 请使用 lite()"""
         return cls.lite()
     
-    # 模型维度映射（与 api_backend.py 保持一致）
-    MODEL_DIMENSIONS = {
-        # OpenAI
-        "text-embedding-3-small": 1536,
-        "text-embedding-3-large": 3072,
-        "text-embedding-ada-002": 1536,
-        # 硅基流动
-        "BAAI/bge-large-zh-v1.5": 1024,
-        "BAAI/bge-large-en-v1.5": 1024,
-        "BAAI/bge-m3": 1024,
-    }
+    # 模型维度映射（单一来源：从 api_backend.py 导入）
+    @staticmethod
+    def _get_model_dimensions() -> dict:
+        try:
+            from .api_backend import APIEmbeddingBackend
+            return APIEmbeddingBackend.MODEL_DIMENSIONS
+        except ImportError:
+            # 兜底：最小维度表
+            return {
+                "text-embedding-3-small": 1536,
+                "text-embedding-3-large": 3072,
+                "text-embedding-ada-002": 1536,
+                "BAAI/bge-large-zh-v1.5": 1024,
+                "BAAI/bge-large-en-v1.5": 1024,
+                "BAAI/bge-m3": 1024,
+            }
     
     @classmethod
     def cloud_openai(cls, api_key: str, api_base: str = None, model: str = "text-embedding-3-small") -> 'EmbeddingConfig':
         """Cloud 模式 - OpenAI API"""
-        dimension = cls.MODEL_DIMENSIONS.get(model, 1536)
+        dimension = cls._get_model_dimensions().get(model, 1536)
         return cls(
             backend=EmbeddingBackendType.OPENAI,
             api_key=api_key,
@@ -83,7 +88,7 @@ class EmbeddingConfig:
     @classmethod
     def cloud_siliconflow(cls, api_key: str, model: str = "BAAI/bge-large-zh-v1.5") -> 'EmbeddingConfig':
         """Cloud 模式 - 硅基流动 API"""
-        dimension = cls.MODEL_DIMENSIONS.get(model, 1024)
+        dimension = cls._get_model_dimensions().get(model, 1024)
         return cls(
             backend=EmbeddingBackendType.SILICONFLOW,
             api_key=api_key,
@@ -99,7 +104,7 @@ class EmbeddingConfig:
         return cls.cloud_siliconflow(api_key, model)
     
     @classmethod
-    def cloud_custom(cls, api_key: str, api_base: str, api_model: str, dimension: int = 1536) -> 'EmbeddingConfig':
+    def cloud_custom(cls, api_key: str, api_base: str, api_model: str, dimension: int = None) -> 'EmbeddingConfig':
         """Cloud 模式 - 自定义 OpenAI 兼容 API
         
         适用于：

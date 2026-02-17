@@ -61,33 +61,71 @@ class LLMClient:
         self.timeout = timeout
         self.max_retries = max_retries
         
-        # 初始化 OpenAI 客户端
+        # 初始化客户端
         self._client = None
+        # v5.0: 自动检测提供商（零新增配置）
+        self._provider = self._detect_provider()
+    
+    def _detect_provider(self) -> str:
+        """根据 api_base 域名和 model 名称自动检测提供商"""
+        if self.api_base:
+            from urllib.parse import urlparse
+            hostname = urlparse(self.api_base.lower()).hostname or ''
+            if hostname.endswith('.anthropic.com') or hostname == 'api.anthropic.com':
+                return 'anthropic'
+            if hostname.endswith('.googleapis.com') or 'generativelanguage' in hostname:
+                return 'google'
+            return 'openai'
+        if self.model:
+            model_lower = self.model.lower()
+            if model_lower.startswith('claude'):
+                return 'anthropic'
+            if model_lower.startswith('gemini'):
+                return 'google'
+        return 'openai'
     
     @property
     def client(self):
-        """获取 OpenAI 客户端"""
+        """获取 LLM 客户端（v5.0: 自动选择后端）"""
         if self._client is None:
-            try:
-                from openai import OpenAI
-                
-                # 创建客户端
-                client_kwargs = {
-                    "api_key": self.api_key,
-                    "timeout": self.timeout,
-                }
-                
-                # 设置自定义 API 地址
-                if self.api_base:
-                    client_kwargs["base_url"] = self.api_base
-                
-                self._client = OpenAI(**client_kwargs)
-                    
-            except ImportError:
-                raise ImportError(
-                    "openai 未安装。请运行: pip install openai"
-                )
+            if self._provider == 'anthropic':
+                self._client = self._create_anthropic_client()
+            elif self._provider == 'google':
+                self._client = self._create_google_client()
+            else:
+                self._client = self._create_openai_client()
         return self._client
+    
+    def _create_openai_client(self):
+        """创建 OpenAI 客户端"""
+        try:
+            from openai import OpenAI
+            client_kwargs = {
+                "api_key": self.api_key,
+                "timeout": self.timeout,
+            }
+            if self.api_base:
+                client_kwargs["base_url"] = self.api_base
+            return OpenAI(**client_kwargs)
+        except ImportError:
+            raise ImportError("openai 未安装。请运行: pip install openai")
+    
+    def _create_anthropic_client(self):
+        """创建 Anthropic 客户端"""
+        try:
+            from anthropic import Anthropic
+            return Anthropic(api_key=self.api_key, timeout=self.timeout)
+        except ImportError:
+            raise ImportError("使用 Claude 模型需要安装 anthropic: pip install anthropic")
+    
+    def _create_google_client(self):
+        """创建 Google Generative AI 客户端"""
+        try:
+            import google.generativeai as genai
+            genai.configure(api_key=self.api_key)
+            return genai
+        except ImportError:
+            raise ImportError("使用 Gemini 模型需要安装 google-generativeai: pip install google-generativeai")
     
     def complete(
         self,
@@ -122,9 +160,18 @@ class LLMClient:
         stop: Optional[List[str]] = None,
         **kwargs
     ) -> LLMResponse:
-        """聊天补全 - 使用 OpenAI SDK，带速率限制处理"""
+        """聊天补全 - v5.0: 自动路由到对应提供商"""
         if max_tokens is None:
             max_tokens = int(os.environ.get('LLM_DEFAULT_MAX_TOKENS', '2000'))
+        if self._provider == 'anthropic':
+            return self._chat_anthropic(messages, max_tokens, temperature, stop)
+        elif self._provider == 'google':
+            return self._chat_google(messages, max_tokens, temperature, stop)
+        else:
+            return self._chat_openai(messages, max_tokens, temperature, stop, **kwargs)
+    
+    def _chat_openai(self, messages, max_tokens, temperature, stop, **kwargs):
+        """OpenAI 聊天补全 - 带速率限制处理"""
         start_time = time.time()
         
         for attempt in range(self.max_retries):
@@ -173,6 +220,78 @@ class LLMClient:
         
         raise RuntimeError("LLM调用失败")
     
+    def _chat_anthropic(self, messages, max_tokens, temperature, stop):
+        """Anthropic 聊天补全"""
+        start_time = time.time()
+        system_msg = ""
+        chat_messages = []
+        for msg in messages:
+            if msg['role'] == 'system':
+                system_msg += msg['content'] + "\n"
+            else:
+                chat_messages.append(msg)
+        kwargs = {}
+        if system_msg.strip():
+            kwargs['system'] = system_msg.strip()
+        if stop:
+            kwargs['stop_sequences'] = stop if isinstance(stop, list) else [stop]
+        response = self.client.messages.create(
+            model=self.model,
+            messages=chat_messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            **kwargs,
+        )
+        latency = (time.time() - start_time) * 1000
+        return LLMResponse(
+            content=response.content[0].text,
+            model=response.model,
+            usage={
+                'prompt_tokens': response.usage.input_tokens,
+                'completion_tokens': response.usage.output_tokens,
+                'total_tokens': response.usage.input_tokens + response.usage.output_tokens
+            },
+            latency_ms=latency,
+            raw_response=response
+        )
+    
+    def _chat_google(self, messages, max_tokens, temperature, stop):
+        """Google 聊天补全"""
+        start_time = time.time()
+        system_msg = ""
+        chat_messages = []
+        for msg in messages:
+            if msg['role'] == 'system':
+                system_msg += msg['content'] + "\n"
+            else:
+                chat_messages.append(msg)
+        model_kwargs = {}
+        if system_msg.strip():
+            model_kwargs['system_instruction'] = system_msg.strip()
+        model = self.client.GenerativeModel(self.model, **model_kwargs)
+        contents = [{'role': 'user' if m['role'] == 'user' else 'model',
+                     'parts': [m['content']]} for m in chat_messages]
+        response = model.generate_content(
+            contents,
+            generation_config={
+                'max_output_tokens': max_tokens,
+                'temperature': temperature,
+                'stop_sequences': stop or [],
+            }
+        )
+        latency = (time.time() - start_time) * 1000
+        return LLMResponse(
+            content=response.text,
+            model=self.model,
+            usage={
+                'prompt_tokens': getattr(response.usage_metadata, 'prompt_token_count', 0),
+                'completion_tokens': getattr(response.usage_metadata, 'candidates_token_count', 0),
+                'total_tokens': getattr(response.usage_metadata, 'total_token_count', 0),
+            },
+            latency_ms=latency,
+            raw_response=response
+        )
+    
     async def achat(
         self,
         messages: List[Dict[str, str]],
@@ -180,19 +299,26 @@ class LLMClient:
         temperature: float = 0.7,
         **kwargs
     ) -> LLMResponse:
-        """异步聊天补全
+        """异步聊天补全 - v5.0: 自动路由到对应提供商
         
         Args:
             max_tokens: 最大输出 token 数，默认从 LLM_DEFAULT_MAX_TOKENS 环境变量读取
         """
-        from openai import AsyncOpenAI
-        
         if max_tokens is None:
             max_tokens = int(os.environ.get('LLM_DEFAULT_MAX_TOKENS', '2000'))
+        if self._provider == 'anthropic':
+            return await self._achat_anthropic(messages, max_tokens, temperature, **kwargs)
+        elif self._provider == 'google':
+            return await self._achat_google(messages, max_tokens, temperature, **kwargs)
+        else:
+            return await self._achat_openai(messages, max_tokens, temperature, **kwargs)
+    
+    async def _achat_openai(self, messages, max_tokens, temperature, **kwargs):
+        """异步 OpenAI 聊天补全"""
+        from openai import AsyncOpenAI
         
         start_time = time.time()
         
-        # 创建异步客户端
         client_kwargs = {
             "api_key": self.api_key,
             "timeout": self.timeout,
@@ -224,12 +350,114 @@ class LLMClient:
             raw_response=response
         )
     
+    async def _achat_anthropic(self, messages, max_tokens, temperature, **kwargs):
+        """异步 Anthropic 聊天补全"""
+        try:
+            from anthropic import AsyncAnthropic
+        except ImportError:
+            raise ImportError("使用 Claude 模型需要安装 anthropic: pip install anthropic")
+        
+        start_time = time.time()
+        
+        async_client = AsyncAnthropic(api_key=self.api_key, timeout=self.timeout)
+        
+        system_msg = ""
+        chat_messages = []
+        for msg in messages:
+            if msg['role'] == 'system':
+                system_msg += msg['content'] + "\n"
+            else:
+                chat_messages.append(msg)
+        
+        ak = {}
+        if system_msg.strip():
+            ak['system'] = system_msg.strip()
+        stop = kwargs.get('stop')
+        if stop:
+            ak['stop_sequences'] = stop if isinstance(stop, list) else [stop]
+        
+        response = await async_client.messages.create(
+            model=self.model,
+            messages=chat_messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            **ak,
+        )
+        
+        latency = (time.time() - start_time) * 1000
+        
+        return LLMResponse(
+            content=response.content[0].text,
+            model=response.model,
+            usage={
+                'prompt_tokens': response.usage.input_tokens,
+                'completion_tokens': response.usage.output_tokens,
+                'total_tokens': response.usage.input_tokens + response.usage.output_tokens
+            },
+            latency_ms=latency,
+            raw_response=response
+        )
+    
+    async def _achat_google(self, messages, max_tokens, temperature, **kwargs):
+        """异步 Google 聊天补全"""
+        try:
+            import google.generativeai as genai
+        except ImportError:
+            raise ImportError("使用 Gemini 模型需要安装 google-generativeai: pip install google-generativeai")
+        
+        start_time = time.time()
+        
+        genai.configure(api_key=self.api_key)
+        
+        system_msg = ""
+        chat_messages = []
+        for msg in messages:
+            if msg['role'] == 'system':
+                system_msg += msg['content'] + "\n"
+            else:
+                chat_messages.append(msg)
+        
+        model_kwargs = {}
+        if system_msg.strip():
+            model_kwargs['system_instruction'] = system_msg.strip()
+        
+        model = genai.GenerativeModel(self.model, **model_kwargs)
+        
+        contents = [{'role': 'user' if m['role'] == 'user' else 'model',
+                     'parts': [m['content']]} for m in chat_messages]
+        
+        stop = kwargs.get('stop')
+        response = await model.generate_content_async(
+            contents,
+            generation_config={
+                'max_output_tokens': max_tokens,
+                'temperature': temperature,
+                'stop_sequences': stop or [],
+            }
+        )
+        
+        latency = (time.time() - start_time) * 1000
+        
+        return LLMResponse(
+            content=response.text,
+            model=self.model,
+            usage={
+                'prompt_tokens': getattr(response.usage_metadata, 'prompt_token_count', 0),
+                'completion_tokens': getattr(response.usage_metadata, 'candidates_token_count', 0),
+                'total_tokens': getattr(response.usage_metadata, 'total_token_count', 0),
+            },
+            latency_ms=latency,
+            raw_response=response
+        )
+    
     def embed(
         self,
         texts: Union[str, List[str]],
         model: Optional[str] = None
     ) -> List[List[float]]:
         """获取嵌入向量"""
+        if self._provider != 'openai':
+            raise NotImplementedError("请使用 APIEmbeddingBackend 进行 Embedding")
         if isinstance(texts, str):
             texts = [texts]
         

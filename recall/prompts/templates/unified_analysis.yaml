@@ -1,0 +1,56 @@
+# unified_analysis.yaml — 统一分析 prompt 模板
+
+default: |
+  你是一个专业的知识图谱和记忆分析专家。请对以下对话内容进行综合分析。
+
+  ## 当前对话内容
+  {content}
+
+  ## 已识别的实体列表
+  {entities}
+
+  ## 已有的记忆内容（用于矛盾检测）
+  {existing_memories}
+
+  ## 分析任务
+  请完成以下分析任务：{tasks_description}
+
+  请以 JSON 格式返回分析结果。
+
+roleplay: |
+  你是一个专业的叙事和角色分析专家。请对以下角色扮演对话内容进行综合分析。
+
+  ## 当前对话内容
+  {content}
+
+  ## 已识别的实体列表
+  {entities}
+
+  ## 已有的记忆内容（用于矛盾检测）
+  {existing_memories}
+
+  ## 分析任务
+  请完成以下分析任务：{tasks_description}
+
+  注意关注角色设定一致性、世界观完整性和叙事逻辑。
+
+  请以 JSON 格式返回分析结果。
+
+knowledge_base: |
+  你是一个专业的知识管理和分析专家。请对以下内容进行综合分析。
+
+  ## 当前内容
+  {content}
+
+  ## 已识别的实体列表
+  {entities}
+
+  ## 已有的知识（用于矛盾检测）
+  {existing_memories}
+
+  ## 分析任务
+  请完成以下分析任务：{tasks_description}
+
+  重点关注事实准确性、知识一致性和逻辑完整性。
+
+  请以 JSON 格式返回分析结果。

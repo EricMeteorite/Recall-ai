@@ -203,6 +203,10 @@ class ConsistencyChecker:
             absolute_rules: 绝对规则列表，用户定义的必须遵守的规则
             llm_client: LLM客户端，用于语义规则检测（可选，无则回退到关键词检测）
         """
+        # v5.0 模式感知
+        from recall.mode import get_mode_config
+        self._mode = get_mode_config()
+        
         # ========== 绝对规则（用户自定义）==========
         # 过滤空字符串、纯空白规则，并去重（保持顺序）
         raw_rules = absolute_rules or []
@@ -349,90 +353,95 @@ class ConsistencyChecker:
         self.current_turn = turn_id
         violations = []
         
+        # v5.0: 模式感知 — 非 RP 模式下跳过 RP 特有检查
+        rp_enabled = self._mode.rp_consistency_enabled
+        
         # 1. 提取新内容中的各类信息
-        new_attributes = self._extract_all_attributes(new_content)
-        new_states = self._extract_states(new_content)
-        new_relationships = self._extract_relationships(new_content)
-        new_negations = self._extract_negations(new_content)
         new_events = self._extract_timeline_events(new_content, turn_id)
         
-        # 2. 构建现有记忆的事实库
-        # 注意：使用 AttributeType 作为 key，保持类型一致性
-        existing_attributes: Dict[str, Dict[AttributeType, List[Tuple[str, str]]]] = {}
-        existing_states: Dict[str, Dict[AttributeType, List[Tuple[str, str]]]] = {}
-        existing_relationships: Dict[Tuple[str, str], List[Tuple[str, str]]] = {}
-        existing_negations: Dict[str, Dict[str, str]] = {}
+        if rp_enabled:
+            new_attributes = self._extract_all_attributes(new_content)
+            new_states = self._extract_states(new_content)
+            new_relationships = self._extract_relationships(new_content)
+            new_negations = self._extract_negations(new_content)
         
-        for memory in existing_memories:
-            memory_content = memory.get('content', memory.get('text', ''))
-            source = memory_content[:50] + '...' if len(memory_content) > 50 else memory_content
+            # 2. 构建现有记忆的事实库
+            # 注意：使用 AttributeType 作为 key，保持类型一致性
+            existing_attributes: Dict[str, Dict[AttributeType, List[Tuple[str, str]]]] = {}
+            existing_states: Dict[str, Dict[AttributeType, List[Tuple[str, str]]]] = {}
+            existing_relationships: Dict[Tuple[str, str], List[Tuple[str, str]]] = {}
+            existing_negations: Dict[str, Dict[str, str]] = {}
             
-            # 提取属性
-            mem_attrs = self._extract_all_attributes(memory_content)
-            for entity, attrs in mem_attrs.items():
-                if entity not in existing_attributes:
-                    existing_attributes[entity] = {}
-                for attr_type, value in attrs.items():
-                    if attr_type not in existing_attributes[entity]:
-                        existing_attributes[entity][attr_type] = []
-                    existing_attributes[entity][attr_type].append((value, source))
+            for memory in existing_memories:
+                memory_content = memory.get('content', memory.get('text', ''))
+                source = memory_content[:50] + '...' if len(memory_content) > 50 else memory_content
+                
+                # 提取属性
+                mem_attrs = self._extract_all_attributes(memory_content)
+                for entity, attrs in mem_attrs.items():
+                    if entity not in existing_attributes:
+                        existing_attributes[entity] = {}
+                    for attr_type, value in attrs.items():
+                        if attr_type not in existing_attributes[entity]:
+                            existing_attributes[entity][attr_type] = []
+                        existing_attributes[entity][attr_type].append((value, source))
+                
+                # 提取状态
+                mem_states = self._extract_states(memory_content)
+                for entity, states in mem_states.items():
+                    if entity not in existing_states:
+                        existing_states[entity] = {}
+                    for state_type, value in states.items():
+                        if state_type not in existing_states[entity]:
+                            existing_states[entity][state_type] = []
+                        existing_states[entity][state_type].append((value, source))
+                
+                # 提取关系
+                mem_rels = self._extract_relationships(memory_content)
+                for (e1, e2), rel in mem_rels.items():
+                    key = (e1, e2)
+                    if key not in existing_relationships:
+                        existing_relationships[key] = []
+                    existing_relationships[key].append((rel, source))
+                
+                # 提取否定声明
+                mem_negs = self._extract_negations(memory_content)
+                for entity, actions in mem_negs.items():
+                    if entity not in existing_negations:
+                        existing_negations[entity] = {}
+                    existing_negations[entity].update(actions)
             
-            # 提取状态
-            mem_states = self._extract_states(memory_content)
-            for entity, states in mem_states.items():
-                if entity not in existing_states:
-                    existing_states[entity] = {}
-                for state_type, value in states.items():
-                    if state_type not in existing_states[entity]:
-                        existing_states[entity][state_type] = []
-                    existing_states[entity][state_type].append((value, source))
+            # 3. 检测属性冲突
+            violations.extend(self._check_attribute_conflicts(
+                new_attributes, existing_attributes, new_content
+            ))
             
-            # 提取关系
-            mem_rels = self._extract_relationships(memory_content)
-            for (e1, e2), rel in mem_rels.items():
-                key = (e1, e2)
-                if key not in existing_relationships:
-                    existing_relationships[key] = []
-                existing_relationships[key].append((rel, source))
+            # 4. 检测状态冲突
+            violations.extend(self._check_state_conflicts(
+                new_states, existing_states, new_content
+            ))
             
-            # 提取否定声明
-            mem_negs = self._extract_negations(memory_content)
-            for entity, actions in mem_negs.items():
-                if entity not in existing_negations:
-                    existing_negations[entity] = {}
-                existing_negations[entity].update(actions)
+            # 5. 检测关系冲突
+            violations.extend(self._check_relationship_conflicts(
+                new_relationships, existing_relationships, new_content
+            ))
+            
+            # 6. 检测否定句违反
+            violations.extend(self._check_negation_violations(
+                new_content, existing_negations
+            ))
+            
+            # 8. 检测生死矛盾（角色死后不能行动）
+            violations.extend(self._check_death_consistency(
+                new_content, existing_states
+            ))
         
-        # 3. 检测属性冲突
-        violations.extend(self._check_attribute_conflicts(
-            new_attributes, existing_attributes, new_content
-        ))
-        
-        # 4. 检测状态冲突
-        violations.extend(self._check_state_conflicts(
-            new_states, existing_states, new_content
-        ))
-        
-        # 5. 检测关系冲突
-        violations.extend(self._check_relationship_conflicts(
-            new_relationships, existing_relationships, new_content
-        ))
-        
-        # 6. 检测否定句违反
-        violations.extend(self._check_negation_violations(
-            new_content, existing_negations
-        ))
-        
-        # 7. 检测时间线冲突（完整版）
+        # 7. 检测时间线冲突（通用，所有模式都执行）
         violations.extend(self._check_timeline_full(
             new_content, new_events, existing_memories
         ))
         
-        # 8. 检测生死矛盾（角色死后不能行动）
-        violations.extend(self._check_death_consistency(
-            new_content, existing_states
-        ))
-        
-        # 9. 检测绝对规则违反（用户自定义规则）
+        # 9. 检测绝对规则违反（通用，所有模式都执行）
         violations.extend(self._check_absolute_rules(new_content))
         
         return ConsistencyResult(

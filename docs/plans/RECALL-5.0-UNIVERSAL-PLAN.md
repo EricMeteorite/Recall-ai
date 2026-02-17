@@ -3244,155 +3244,155 @@ from .mode import RecallMode, get_mode_config  # v5.0 便捷再导出
 
 ### 12.1 Phase 1 验证
 
-- [ ] `RECALL_MODE` 不设置 → 所有现有测试通过（RP 行为不变）
-- [ ] `RECALL_MODE=invalid_value` → 日志输出 warning 并回退到 roleplay 模式
-- [ ] `RECALL_MODE=general` → 伏笔 API 返回禁用提示，不注入伏笔
-- [ ] `RECALL_MODE=general` → character_id 被忽略，数据不按角色隔离
-- [ ] `RECALL_MODE=general` → 一致性检查跳过 HAIR_COLOR/SPECIES 等
-- [ ] `RECALL_MODE=general` → 图谱关系类型包含通用类型
-- [ ] `RECALL_MODE=general` + `FORESHADOWING_ENABLED=true` → 伏笔功能正常
-- [ ] Turn 模型新增字段不影响现有数据加载
-- [ ] `/v1/mode` 端点返回正确的模式信息
-- [ ] engine.py 顶层不再有 foreshadowing 的无条件 import（L20-25 `from .processor import (...)` 块中移除 ForeshadowingTracker/Analyzer，L29 `from .processor.foreshadowing import Foreshadowing` 已删除，改为 `__init__` 内条件导入）
-- [ ] 通用模式下 `foreshadowing_config` 参数被接受但忽略（不报错）
-- [ ] 通用模式下 `turn.effective_content` 正确返回 `content` 字段内容
-- [ ] 模式切换（修改 `RECALL_MODE`）后重启服务，行为正确切换
+- [x] `RECALL_MODE` 不设置 → 所有现有测试通过（RP 行为不变）
+- [x] `RECALL_MODE=invalid_value` → 日志输出 warning 并回退到 roleplay 模式
+- [x] `RECALL_MODE=general` → 伏笔 API 返回禁用提示，不注入伏笔
+- [x] `RECALL_MODE=general` → character_id 被忽略，数据不按角色隔离
+- [x] `RECALL_MODE=general` → 一致性检查跳过 HAIR_COLOR/SPECIES 等
+- [x] `RECALL_MODE=general` → 图谱关系类型包含通用类型
+- [x] `RECALL_MODE=general` + `FORESHADOWING_ENABLED=true` → 伏笔功能正常
+- [x] Turn 模型新增字段不影响现有数据加载
+- [x] `/v1/mode` 端点返回正确的模式信息
+- [x] engine.py 顶层不再有 foreshadowing 的无条件 import（L20-25 `from .processor import (...)` 块中移除 ForeshadowingTracker/Analyzer，L29 `from .processor.foreshadowing import Foreshadowing` 已删除，改为 `__init__` 内条件导入）
+- [x] 通用模式下 `foreshadowing_config` 参数被接受但忽略（不报错）
+- [x] 通用模式下 `turn.effective_content` 正确返回 `content` 字段内容
+- [x] 模式切换（修改 `RECALL_MODE`）后重启服务，行为正确切换
 
 ### 12.1.1 Phase 1 配置统一验证
 
-- [ ] `start.ps1` 和 `start.sh` 的 supportedKeys 包含所有 6 个 P1 新变量
-- [ ] `manage.ps1` 和 `manage.sh` 的默认配置模板包含 v5.0 section
-- [ ] `server.py` `get_default_config_content()` 包含 v5.0 section
-- [ ] `manage.ps1` UI 为中文，与 `manage.sh` 完全一致
-- [ ] `start.ps1` 和 `start.sh` 配置模板 section 标题完全一致
-- [ ] `engine.py` 3 个默认值已修复为 `'true'`（TEMPORAL_GRAPH_ENABLED / CONTRADICTION_DETECTION_ENABLED / FULLTEXT_ENABLED）
-- [ ] 原先通过脚本启动和直接 Python 启动的行为完全一致
+- [x] `start.ps1` 和 `start.sh` 的 supportedKeys 包含所有 6 个 P1 新变量
+- [x] `manage.ps1` 和 `manage.sh` 的默认配置模板包含 v5.0 section
+- [x] `server.py` `get_default_config_content()` 包含 v5.0 section
+- [x] `manage.ps1` UI 为中文，与 `manage.sh` 完全一致
+- [x] `start.ps1` 和 `start.sh` 配置模板 section 标题完全一致
+- [x] `engine.py` 3 个默认值已修复为 `'true'`（TEMPORAL_GRAPH_ENABLED / CONTRADICTION_DETECTION_ENABLED / FULLTEXT_ENABLED）
+- [x] 原先通过脚本启动和直接 Python 启动的行为完全一致
 
 ### 12.2 Phase 2 验证
 
-- [ ] temporal_index `query_at_time()` 结果与旧实现一致（正确性）
-- [ ] temporal_index `query_range()` 结果与旧实现一致
-- [ ] temporal_index `query_before()` 新增 `_sorted_by_fact_end` / `_sorted_by_system_end` 排序列表已正确初始化和维护
-- [ ] temporal_index `query_after()` 使用 `_sorted_by_fact_start` / `_sorted_by_system_start`（非 `_sorted_fact`）
-- [ ] 10 万条数据下 temporal_index 查询 < 10ms（性能）
-- [ ] inverted_index WAL 追加写入正常，重启后 WAL 重放正确
-- [ ] inverted_index WAL 重放含 `try/except json.JSONDecodeError` 保护，崩溃后不完整行被安全跳过
-- [ ] inverted_index 压缩后主文件与内存状态一致
-- [ ] inverted_index `_compact()` 使用 `os.replace()` 原子替换（先写 `.tmp` 再替换），崩溃时不损坏主文件
-- [ ] json_backend 延迟保存不丢数据，`flush()` 后全部持久化
-- [ ] json_backend `__init__` 中注册了 `atexit.register(self.flush)` 确保正常退出不丢数据
-- [ ] json_backend `_unindex_entry()` 正确从 `_sorted_by_fact_end` / `_sorted_by_system_end` 移除条目
-- [ ] volume_manager memory_id 索引 O(1) 查找正确
+- [x] temporal_index `query_at_time()` 结果与旧实现一致（正确性）
+- [x] temporal_index `query_range()` 结果与旧实现一致
+- [x] temporal_index `query_before()` 新增 `_sorted_by_fact_end` / `_sorted_by_system_end` 排序列表已正确初始化和维护
+- [x] temporal_index `query_after()` 使用 `_sorted_by_fact_start` / `_sorted_by_system_start`（非 `_sorted_fact`）
+- [x] 10 万条数据下 temporal_index 查询 < 10ms（性能）
+- [x] inverted_index WAL 追加写入正常，重启后 WAL 重放正确
+- [x] inverted_index WAL 重放含 `try/except json.JSONDecodeError` 保护，崩溃后不完整行被安全跳过
+- [x] inverted_index 压缩后主文件与内存状态一致
+- [x] inverted_index `_compact()` 使用 `os.replace()` 原子替换（先写 `.tmp` 再替换），崩溃时不损坏主文件
+- [x] json_backend 延迟保存不丢数据，`flush()` 后全部持久化
+- [x] json_backend `__init__` 中注册了 `atexit.register(self.flush)` 确保正常退出不丢数据
+- [x] json_backend `_unindex_entry()` 正确从 `_sorted_by_fact_end` / `_sorted_by_system_end` 移除条目
+- [x] volume_manager memory_id 索引 O(1) 查找正确
 
 ### 12.3 Phase 3 验证
 
-- [ ] `POST /v1/memories/batch` 批量添加 100 条 < 30 秒
-- [ ] `add_batch()` 在 `embedding_backend` 未初始化时抛出明确错误
-- [ ] `_add_single_fast()` 在 `skip_llm=True` 时使用 `force_mode=ExtractionMode.RULES` 而非 LLM
-- [ ] `_add_single_fast()` 返回 `(memory_id, entities, keywords)` 元组，外层正确累积
-- [ ] 批量添加后所有索引（倒排/向量/实体/元数据/ngram）正确更新
-- [ ] `_batch_update_indexes` 使用公开 API（`add_batch()`、`add_entity_occurrence()`、`ngram_index.add(mid, content)`），不直接操作内部数据结构
-- [ ] `_batch_update_indexes` 接收 `all_ngram_data` 参数（`(memory_id, content)` 对列表），`ngram_index.add()` 接收完整原文而非关键词
-- [ ] `search(source="bilibili")` 只返回来源为 bilibili 的记忆
-- [ ] `search(tags=["热点"])` 过滤正确
-- [ ] `MetadataIndex.__init__()` 注册了 `atexit.register(self.flush)` 确保退出不丢数据
-- [ ] `_add_single_fast()` 中 `**(metadata or {})` 防御 None 值（非 `**metadata`）
+- [x] `POST /v1/memories/batch` 批量添加 100 条 < 30 秒
+- [x] `add_batch()` 在 `embedding_backend` 未初始化时抛出明确错误
+- [x] `_add_single_fast()` 在 `skip_llm=True` 时使用 `force_mode=ExtractionMode.RULES` 而非 LLM
+- [x] `_add_single_fast()` 返回 `(memory_id, entities, keywords)` 元组，外层正确累积
+- [x] 批量添加后所有索引（倒排/向量/实体/元数据/ngram）正确更新
+- [x] `_batch_update_indexes` 使用公开 API（`add_batch()`、`add_entity_occurrence()`、`ngram_index.add(mid, content)`），不直接操作内部数据结构
+- [x] `_batch_update_indexes` 接收 `all_ngram_data` 参数（`(memory_id, content)` 对列表），`ngram_index.add()` 接收完整原文而非关键词
+- [x] `search(source="bilibili")` 只返回来源为 bilibili 的记忆
+- [x] `search(tags=["热点"])` 过滤正确
+- [x] `MetadataIndex.__init__()` 注册了 `atexit.register(self.flush)` 确保退出不丢数据
+- [x] `_add_single_fast()` 中 `**(metadata or {})` 防御 None 值（非 `**metadata`）
 
 ### 12.4 Phase 4 验证
 
-- [ ] MCP Server stdio 模式正常启动
-- [ ] Claude Desktop 通过 MCP 调用 `recall_add` 成功
-- [ ] Claude Desktop 通过 MCP 调用 `recall_search` 成功
-- [ ] MCP Resources `recall://memories` 返回正确
-- [ ] `recall-mcp` 命令行入口可用
-- [ ] engine.py 新增方法 `list_entities()`、`traverse_graph()`、`list_memories()`、`get_entity_detail()` 均可正常调用
-- [ ] `recall_list` 正确解包 `get_paginated()` 返回的 `(memories, total)` 元组
-- [ ] `recall_search` 使用 `r.metadata.get("source")` 而非 `getattr(r, "source")` 进行过滤
-- [ ] `recall_search` 使用属性访问（`r.score`）而非字典索引访问 `SearchResult`
-- [ ] `list_entities()` 调用 `_entity_index.all_entities()` 而非不存在的 `get_all_entities()`
-- [ ] `traverse_graph()` 调用 `knowledge_graph.get_relations_for_entity()` 而非不存在的 `get_edges_for_node()`
-- [ ] `traverse_graph()` BFS 使用 `collections.deque.popleft()` 而非 `list.pop(0)`
-- [ ] `recall_delete` 检查 `engine.delete()` 的布尔返回值，不存在时返回"记忆不存在"
-- [ ] MCP Resources 中 URI 路径经过 `urllib.parse.unquote()` 解码（支持中文实体名）
-- [ ] `recall-mcp` 入口指向同步 `main()` 函数（内部 `asyncio.run(_async_main())`），非直接 async
+- [x] MCP Server stdio 模式正常启动
+- [x] Claude Desktop 通过 MCP 调用 `recall_add` 成功
+- [x] Claude Desktop 通过 MCP 调用 `recall_search` 成功
+- [x] MCP Resources `recall://memories` 返回正确
+- [x] `recall-mcp` 命令行入口可用
+- [x] engine.py 新增方法 `list_entities()`、`traverse_graph()`、`list_memories()`、`get_entity_detail()` 均可正常调用
+- [x] `recall_list` 正确解包 `get_paginated()` 返回的 `(memories, total)` 元组
+- [x] `recall_search` 使用 `r.metadata.get("source")` 而非 `getattr(r, "source")` 进行过滤
+- [x] `recall_search` 使用属性访问（`r.score`）而非字典索引访问 `SearchResult`
+- [x] `list_entities()` 调用 `_entity_index.all_entities()` 而非不存在的 `get_all_entities()`
+- [x] `traverse_graph()` 调用 `knowledge_graph.get_relations_for_entity()` 而非不存在的 `get_edges_for_node()`
+- [x] `traverse_graph()` BFS 使用 `collections.deque.popleft()` 而非 `list.pop(0)`
+- [x] `recall_delete` 检查 `engine.delete()` 的布尔返回值，不存在时返回"记忆不存在"
+- [x] MCP Resources 中 URI 路径经过 `urllib.parse.unquote()` 解码（支持中文实体名）
+- [x] `recall-mcp` 入口指向同步 `main()` 函数（内部 `asyncio.run(_async_main())`），非直接 async
 
 ### 12.5 Phase 5 验证
 
-- [ ] PromptManager 加载所有 YAML 模板无错误
-- [ ] PromptManager `render()` 对不存在的 template_name 抛出明确 `ValueError`（非 KeyError）
-- [ ] PromptManager `render()` 对缺少 mode key 和 'default' key 的模板抛出明确 `ValueError`（非 AttributeError）
-- [ ] PromptManager `_load_templates()` 在内置模板目录不存在时不报错（首次安装场景）
-- [ ] 各模块使用 PromptManager 渲染的 prompt 与原硬编码结果一致
-- [ ] 用户自定义 prompt 覆盖正常工作
-- [ ] PromptManager 使用 `RECALL_DATA_ROOT`（非 `RECALL_DATA_PATH`）读取用户自定义模板
-- [ ] PromptManager docstring 描述为 `str.format()` 变量渲染（非 Jinja2）
-- [ ] `pyyaml>=6.0` 已添加到 `pyproject.toml` 核心依赖中
+- [x] PromptManager 加载所有 YAML 模板无错误
+- [x] PromptManager `render()` 对不存在的 template_name 抛出明确 `ValueError`（非 KeyError）
+- [x] PromptManager `render()` 对缺少 mode key 和 'default' key 的模板抛出明确 `ValueError`（非 AttributeError）
+- [x] PromptManager `_load_templates()` 在内置模板目录不存在时不报错（首次安装场景）
+- [x] 各模块使用 PromptManager 渲染的 prompt 与原硬编码结果一致
+- [x] 用户自定义 prompt 覆盖正常工作
+- [x] PromptManager 使用 `RECALL_DATA_ROOT`（非 `RECALL_DATA_PATH`）读取用户自定义模板
+- [x] PromptManager docstring 描述为 `str.format()` 变量渲染（非 Jinja2）
+- [x] `pyyaml>=6.0` 已添加到 `pyproject.toml` 核心依赖中
 
 ### 12.6 Phase 6 验证
 
 **LLM 自适应：**
-- [ ] `LLM_API_BASE=https://api.anthropic.com` + `LLM_MODEL=claude-3-5-sonnet` → 自动检测 Anthropic 并正常调用
-- [ ] `LLM_API_BASE=https://generativelanguage.googleapis.com` + `LLM_MODEL=gemini-pro` → 自动检测 Google 并正常调用
-- [ ] 无 `LLM_API_BASE` + `LLM_MODEL=claude-3-5-sonnet` → 按模型名兜底检测 Anthropic
-- [ ] `LLM_API_BASE=https://my-proxy.com/v1` + `LLM_MODEL=claude-3-5-sonnet` → 走 OpenAI SDK（中转站场景）
-- [ ] 未安装 `anthropic` 时指向 `anthropic.com` 给出清晰错误提示
-- [ ] OpenAI / 硅基流动 / Ollama 等现有 OpenAI 兼容配置行为完全不变
-- [ ] 不存在任何新的 LLM 配置变量（无 LLM_PROVIDER / ANTHROPIC_API_KEY / GOOGLE_API_KEY）
-- [ ] `_chat_anthropic` 中 `system=""` 或 `system="  "` 不会传给 API（`strip() or None` 处理）
-- [ ] `_chat_anthropic` 中 `stop=None` 时不传 `stop_sequences` 参数（避免 API 报错）
-- [ ] `_chat_google` 正确将 system 消息提取为 `system_instruction` 参数传给 `GenerativeModel()`
-- [ ] `_achat_google` 与同步版 `_chat_google` 行为一致：提取 system 消息为 `system_instruction`，非 system 消息不映射为 `role='user'`
-- [ ] `_achat_anthropic` 正确转发 `stop` 参数为 `stop_sequences`（与同步版 `_chat_anthropic` 一致）
-- [ ] `achat()` 路由 Anthropic 时传递 `stop=kwargs.get('stop')`
-- [ ] `RerankerFactory.create()` 遇到未知 backend 值时输出 warning 日志后降级为 builtin
+- [x] `LLM_API_BASE=https://api.anthropic.com` + `LLM_MODEL=claude-3-5-sonnet` → 自动检测 Anthropic 并正常调用
+- [x] `LLM_API_BASE=https://generativelanguage.googleapis.com` + `LLM_MODEL=gemini-pro` → 自动检测 Google 并正常调用
+- [x] 无 `LLM_API_BASE` + `LLM_MODEL=claude-3-5-sonnet` → 按模型名兜底检测 Anthropic
+- [x] `LLM_API_BASE=https://my-proxy.com/v1` + `LLM_MODEL=claude-3-5-sonnet` → 走 OpenAI SDK（中转站场景）
+- [x] 未安装 `anthropic` 时指向 `anthropic.com` 给出清晰错误提示
+- [x] OpenAI / 硅基流动 / Ollama 等现有 OpenAI 兼容配置行为完全不变
+- [x] 不存在任何新的 LLM 配置变量（无 LLM_PROVIDER / ANTHROPIC_API_KEY / GOOGLE_API_KEY）
+- [x] `_chat_anthropic` 中 `system=""` 或 `system="  "` 不会传给 API（`strip() or None` 处理）
+- [x] `_chat_anthropic` 中 `stop=None` 时不传 `stop_sequences` 参数（避免 API 报错）
+- [x] `_chat_google` 正确将 system 消息提取为 `system_instruction` 参数传给 `GenerativeModel()`
+- [x] `_achat_google` 与同步版 `_chat_google` 行为一致：提取 system 消息为 `system_instruction`，非 system 消息不映射为 `role='user'`
+- [x] `_achat_anthropic` 正确转发 `stop` 参数为 `stop_sequences`（与同步版 `_chat_anthropic` 一致）
+- [x] `achat()` 路由 Anthropic 时传递 `stop=kwargs.get('stop')`
+- [x] `RerankerFactory.create()` 遇到未知 backend 值时输出 warning 日志后降级为 builtin
 
 **Embedding 自适应：**
-- [ ] `EMBEDDING_API_BASE=https://generativelanguage.googleapis.com` + `EMBEDDING_MODEL=text-embedding-004` → 自动检测 Google 并通过 `google-generativeai` SDK 调用
-- [ ] `EMBEDDING_API_BASE=https://api.voyageai.com/v1` + `EMBEDDING_MODEL=voyage-3` → 自动检测 Voyage AI 并通过 `voyageai` SDK 调用
-- [ ] `EMBEDDING_API_BASE=https://api.siliconflow.cn/v1` + OpenAI 兼容模型 → 行为与现在完全一致
-- [ ] `EMBEDDING_API_BASE=https://api.openai.com/v1` → 行为与现在完全一致
-- [ ] 未设 `EMBEDDING_DIMENSION` 时 → 从扩展后的 `MODEL_DIMENSIONS` 自动查表
-- [ ] 手动设 `EMBEDDING_DIMENSION=512` 时 → 覆盖自动查表值
-- [ ] 未安装 `google-generativeai` 时指向 `googleapis.com` 给出清晰错误提示
-- [ ] 未安装 `voyageai` 时指向 `voyageai.com` 给出清晰错误提示
-- [ ] 不存在任何新的 Embedding 配置变量（仍只使用 EMBEDDING_API_KEY / EMBEDDING_API_BASE / EMBEDDING_MODEL / EMBEDDING_DIMENSION）
+- [x] `EMBEDDING_API_BASE=https://generativelanguage.googleapis.com` + `EMBEDDING_MODEL=text-embedding-004` → 自动检测 Google 并通过 `google-generativeai` SDK 调用
+- [x] `EMBEDDING_API_BASE=https://api.voyageai.com/v1` + `EMBEDDING_MODEL=voyage-3` → 自动检测 Voyage AI 并通过 `voyageai` SDK 调用
+- [x] `EMBEDDING_API_BASE=https://api.siliconflow.cn/v1` + OpenAI 兼容模型 → 行为与现在完全一致
+- [x] `EMBEDDING_API_BASE=https://api.openai.com/v1` → 行为与现在完全一致
+- [x] 未设 `EMBEDDING_DIMENSION` 时 → 从扩展后的 `MODEL_DIMENSIONS` 自动查表
+- [x] 手动设 `EMBEDDING_DIMENSION=512` 时 → 覆盖自动查表值
+- [x] 未安装 `google-generativeai` 时指向 `googleapis.com` 给出清晰错误提示
+- [x] 未安装 `voyageai` 时指向 `voyageai.com` 给出清晰错误提示
+- [x] 不存在任何新的 Embedding 配置变量（仍只使用 EMBEDDING_API_KEY / EMBEDDING_API_BASE / EMBEDDING_MODEL / EMBEDDING_DIMENSION）
 
 ### 12.7 Phase 7 验证
 
-- [ ] `RERANKER_BACKEND=builtin` → 行为与现在完全一致
-- [ ] `RERANKER_BACKEND=cohere` → 使用 Cohere Rerank API
-- [ ] `RERANKER_BACKEND=cross-encoder` → 使用本地 Cross-Encoder 模型
+- [x] `RERANKER_BACKEND=builtin` → 行为与现在完全一致
+- [x] `RERANKER_BACKEND=cohere` → 使用 Cohere Rerank API
+- [x] `RERANKER_BACKEND=cross-encoder` → 使用本地 Cross-Encoder 模型
 
 ### 12.8 全局回归验证
 
-- [ ] **所有 18 个现有测试文件通过**
-- [ ] RP 模式下 SillyTavern 插件功能完整（伏笔/角色/一致性检查）
-- [ ] 通用模式下爬虫数据批量写入 + 元数据过滤正常
-- [ ] 知识库模式下纯知识管理正常（无 RP 功能干扰）
+- [x] **所有 18 个现有测试文件通过**
+- [x] RP 模式下 SillyTavern 插件功能完整（伏笔/角色/一致性检查）
+- [x] 通用模式下爬虫数据批量写入 + 元数据过滤正常
+- [x] 知识库模式下纯知识管理正常（无 RP 功能干扰）
 
 ### 12.9 配置统一全局验证
 
-- [ ] `start.ps1` 和 `start.sh` 的 supportedKeys 完全一致（逻辑等价）
-- [ ] `manage.ps1` 和 `manage.sh` 的默认配置模板完全一致（变量名 + 默认值 + 注释）
-- [ ] `start.ps1` 和 `start.sh` 的默认配置模板**字符级别完全一致**（含 section 标题、括号、注释详细度）
-- [ ] `server.py` `get_default_config_content()` 与脚本模板完全一致
-- [ ] `server.py` `SUPPORTED_CONFIG_KEYS` 包含所有 9 个 5.0 新变量
-- [ ] 通过脚本启动和直接 `python -m recall` 启动，行为完全一致
-- [ ] 新安装用户默认配置包含所有 v5.0 配置项
-- [ ] `start.sh` 的 9 处配置模板差异已全部修复（见任务 1.11.4 清单）
-- [ ] 新增的 3 处跨模板差异（#16 LLM Max Tokens 注释措辞、#17 IVF-HNSW 参数注释、#18 SUPPORTED_CONFIG_KEYS 注释版本号）已修复
-- [ ] `start.ps1` 遗留的多余“时态知识图谱配置”子标题已清理
-- [ ] `base.py` 和 `api_backend.py` 的 `MODEL_DIMENSIONS` 已合并为单一来源
-- [ ] `knowledge_graph.py` 和 `temporal_knowledge_graph.py` 的 `RELATION_TYPES` 已统一为单一来源
+- [x] `start.ps1` 和 `start.sh` 的 supportedKeys 完全一致（逻辑等价）
+- [x] `manage.ps1` 和 `manage.sh` 的默认配置模板完全一致（变量名 + 默认值 + 注释）
+- [x] `start.ps1` 和 `start.sh` 的默认配置模板**字符级别完全一致**（含 section 标题、括号、注释详细度）
+- [x] `server.py` `get_default_config_content()` 与脚本模板完全一致
+- [x] `server.py` `SUPPORTED_CONFIG_KEYS` 包含所有 9 个 5.0 新变量
+- [x] 通过脚本启动和直接 `python -m recall` 启动，行为完全一致
+- [x] 新安装用户默认配置包含所有 v5.0 配置项
+- [x] `start.sh` 的 9 处配置模板差异已全部修复（见任务 1.11.4 清单）
+- [x] 新增的 3 处跨模板差异（#16 LLM Max Tokens 注释措辞、#17 IVF-HNSW 参数注释、#18 SUPPORTED_CONFIG_KEYS 注释版本号）已修复
+- [x] `start.ps1` 遗留的多余“时态知识图谱配置”子标题已清理
+- [x] `base.py` 和 `api_backend.py` 的 `MODEL_DIMENSIONS` 已合并为单一来源
+- [x] `knowledge_graph.py` 和 `temporal_knowledge_graph.py` 的 `RELATION_TYPES` 已统一为单一来源
 
 ### 12.10 版本与依赖验证
 
-- [ ] `recall/version.py` 版本号已更新为 `5.0.0`
-- [ ] `pyproject.toml` 版本号已更新为 `5.0.0`
-- [ ] `recall/__init__.py` 通过 `from .version import __version__` 自动继承正确版本
-- [ ] `recall/config.py` 已新增 `from .mode import RecallMode, get_mode_config` 便捷再导出
-- [ ] `pyproject.toml` 核心依赖已包含 `pyyaml>=6.0`（PromptManager 需要）
-- [ ] `docs/FEATURE-STATUS.md` 已新增 v5.0 功能状态章节
+- [x] `recall/version.py` 版本号已更新为 `5.0.0`
+- [x] `pyproject.toml` 版本号已更新为 `5.0.0`
+- [x] `recall/__init__.py` 通过 `from .version import __version__` 自动继承正确版本
+- [x] `recall/config.py` 已新增 `from .mode import RecallMode, get_mode_config` 便捷再导出
+- [x] `pyproject.toml` 核心依赖已包含 `pyyaml>=6.0`（PromptManager 需要）
+- [x] `docs/FEATURE-STATUS.md` 已新增 v5.0 功能状态章节
 
 ---
 

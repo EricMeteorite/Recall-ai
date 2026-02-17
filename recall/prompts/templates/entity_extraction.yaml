@@ -1,0 +1,28 @@
+# entity_extraction.yaml — 实体抽取 prompt 模板
+# 每个 key 对应一种 RecallMode，'default' 为兜底
+
+default: |
+  请从以下文本中提取所有实体（人物、地点、组织、物品等）。
+
+  文本：{content}
+
+  请以 JSON 格式返回：
+  [{{"name": "实体名", "type": "实体类型", "description": "简要描述"}}]
+
+roleplay: |
+  请从以下角色扮演对话中提取所有实体（角色、地点、物品、事件等）。
+  注意识别角色名、NPC名、地名、道具名等 RP 特有实体。
+
+  对话内容：{content}
+
+  请以 JSON 格式返回：
+  [{{"name": "实体名", "type": "实体类型", "description": "简要描述"}}]
+
+knowledge_base: |
+  请从以下知识文档中提取所有关键实体（概念、术语、人物、组织等）。
+  重点关注专业术语和核心概念。
+
+  文档内容：{content}
+
+  请以 JSON 格式返回：
+  [{{"name": "实体名", "type": "实体类型", "description": "简要描述"}}]

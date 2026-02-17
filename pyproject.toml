@@ -1,4 +1,4 @@
-# Recall v4.2 - AI永久记忆系统
+# Recall v5.0 - AI永久记忆系统
 # pyproject.toml
 
 [build-system]
@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "recall-ai"
-version = "4.2.0"
+version = "5.0.0"
 description = "AI永久记忆系统 - 让AI永远不会忘记你说过的每一句话"
 readme = "README.md"
 license = {text = "MIT"}
@@ -54,6 +54,7 @@ dependencies = [
     "rich>=13.0",              # 终端美化
     "numpy>=1.24",             # 数值计算
     "pybloom-live>=4.0",       # 布隆过滤器
+    "pyyaml>=6.0",             # YAML配置（PromptManager）
 ]
 
 [project.optional-dependencies]
@@ -109,11 +110,24 @@ full = [
     "faiss-cpu>=1.7",              # 向量索引
 ]
 
+# MCP 服务
+mcp = ["mcp>=1.0.0", "httpx-sse>=0.4.0", "uvicorn>=0.30.0", "starlette>=0.38.0"]
+
+# LLM 提供商
+anthropic = ["anthropic>=0.30.0"]
+google = ["google-generativeai>=0.8.0"]
+voyage = ["voyageai>=0.3.0"]
+all-llm = ["anthropic>=0.30.0", "google-generativeai>=0.8.0", "voyageai>=0.3.0"]
+
+# 重排序后端
+reranker = ["cohere>=5.0", "sentence-transformers>=2.2"]
+
 # 开发依赖
 dev = ["pytest>=7.0", "black", "ruff"]
 
 [project.scripts]
 recall = "recall.cli:main"
+recall-mcp = "recall.mcp_server:main"
 
 [project.urls]
 Homepage = "https://github.com/recall-ai/recall"

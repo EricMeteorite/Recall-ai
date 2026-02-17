@@ -1,7 +1,7 @@
-# Recall v4.2 功能状态总览
+# Recall v5.0 功能状态总览
 
-> **生成日期**: 2026-02-10  
-> **当前版本**: v4.2.0  
+> **生成日期**: 2026-02-15  
+> **当前版本**: v5.0.0  
 > **定位**: 通用 AI 知识记忆系统（RP / 代码 / 企业 / Agent 全覆盖）
 
 ---
@@ -658,6 +658,75 @@ pip install "recall-ai[enterprise-cpu]"
 - litellm, openai, httpx（LLM）
 - fastapi, uvicorn（Web）
 - click, rich, numpy, psutil, schedule, pybloom-live
+- pyyaml（Prompt 模板）
+
+---
+
+## v5.0 新增功能
+
+### 全局模式管理 ✅
+
+| 功能 | 状态 | 说明 |
+|------|:----:|------|
+| **RECALL_MODE 环境变量** | ✅ | roleplay / general / knowledge_base 三模式，默认 roleplay |
+| **ModeConfig 数据类** | ✅ | 6 个子开关：foreshadowing / character / rp_consistency / rp_relation_types / rp_context_types |
+| **环境变量子开关覆盖** | ✅ | 如 FORESHADOWING_ENABLED=true 可在 general 模式下启用伏笔 |
+| **无效值安全回退** | ✅ | 未知 RECALL_MODE 值 → warning + 回退 roleplay |
+| **/v1/mode 端点** | ✅ | 返回当前模式和所有子开关状态 |
+| **条件化 foreshadowing 导入** | ✅ | 非 RP 模式不加载伏笔模块，减少内存占用 |
+
+### 批量写入与元数据索引 ✅
+
+| 功能 | 状态 | 说明 |
+|------|:----:|------|
+| **add_batch() API** | ✅ | 批量添加记忆，支持 source/tags/category/content_type 元数据 |
+| **MetadataIndex** | ✅ | 元数据索引，支持按 source/tags/category/content_type 过滤 |
+| **search() 元数据过滤** | ✅ | search(source="bilibili", tags=["热点"]) |
+| **POST /v1/memories/batch** | ✅ | REST API 批量添加端点 |
+
+### MCP Server ✅
+
+| 功能 | 状态 | 说明 |
+|------|:----:|------|
+| **11 个 MCP Tools** | ✅ | recall_add/search/delete/list/add_batch/stats 等 |
+| **3+2 个 MCP Resources** | ✅ | recall://memories, recall://entities, recall://stats + 动态资源 |
+| **stdio/SSE 双传输** | ✅ | 支持 Claude Desktop 和 Web 客户端 |
+| **recall-mcp 命令行入口** | ✅ | pyproject.toml console_scripts |
+
+### 多 LLM/Embedding 自适应 ✅
+
+| 功能 | 状态 | 说明 |
+|------|:----:|------|
+| **LLM 提供商自动检测** | ✅ | 按 api_base 域名检测 OpenAI/Anthropic/Google，零新增配置变量 |
+| **Embedding 提供商自动检测** | ✅ | 支持 Google/Voyage AI/Cohere 等，按域名自动路由 |
+| **MODEL_DIMENSIONS 自动查表** | ✅ | 未设 EMBEDDING_DIMENSION 时自动按模型名查表 |
+| **中转站场景兼容** | ✅ | 非官方域名一律走 OpenAI SDK，不受模型名影响 |
+
+### Prompt 模板化 ✅
+
+| 功能 | 状态 | 说明 |
+|------|:----:|------|
+| **PromptManager** | ✅ | YAML 模板 + str.format() 渲染，支持模式感知 |
+| **8 个内置模板** | ✅ | entity_extraction/relation_extraction/consistency 等 |
+| **用户自定义覆盖** | ✅ | recall_data/prompts/ 下同名 YAML 覆盖内置模板 |
+
+### 可插拔重排序器 ✅
+
+| 功能 | 状态 | 说明 |
+|------|:----:|------|
+| **RerankerFactory** | ✅ | builtin / cohere / cross-encoder 三种后端 |
+| **内置重排序器** | ✅ | 默认 builtin，与 v4.2 行为 100% 一致 |
+| **Cohere Rerank** | ✅ | 使用 Cohere Rerank API |
+| **Cross-Encoder** | ✅ | 使用本地 sentence-transformers Cross-Encoder 模型 |
+
+### 性能优化 ✅
+
+| 功能 | 状态 | 说明 |
+|------|:----:|------|
+| **temporal_index bisect 优化** | ✅ | query_at_time/query_range 从 O(n) 降至 O(log n + k) |
+| **inverted_index WAL** | ✅ | 追加写入 + 原子压缩，崩溃安全 |
+| **json_backend 延迟保存** | ✅ | 脏数据计数 + atexit flush，减少磁盘 IO |
+| **volume_manager O(1) 索引** | ✅ | memory_id 索引字典，O(1) 查找 |
 
 ---
 
@@ -665,6 +734,7 @@ pip install "recall-ai[enterprise-cpu]"
 
 | 版本 | 日期 | 主要变更 |
 |------|------|----------|
+| v5.0.0 | 2026-02-15 | 通用化升级：全局模式管理(RECALL_MODE)、批量写入+元数据索引、MCP Server、多LLM/Embedding自适应、可插拔重排序器、Prompt模板化 |
 | v4.2.0 | 2026-02-06 | 统一LLM分析器，Turn API批量保存，任务管理器，性能优化 |
 | v4.1.0 | 2026-01-28 | LLM 关系/实体抽取增强，Episode 概念，实体摘要 |
 | v4.0.0 | 2026-01-23 | 三时态模型，11层检索，矛盾检测系统 |
@@ -673,4 +743,4 @@ pip install "recall-ai[enterprise-cpu]"
 
 ---
 
-> 📝 **本文档更新于 2026-02-10，基于代码审计和计划文档综合整理**
+> 📝 **本文档更新于 2026-02-15，基于代码审计和计划文档综合整理**

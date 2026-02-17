@@ -67,7 +67,15 @@ class JSONGraphBackend(GraphBackend):
         self.outgoing: Dict[str, List[str]] = defaultdict(list)  # node_id -> edge_ids
         self.incoming: Dict[str, List[str]] = defaultdict(list)  # node_id -> edge_ids
         
+        # 延迟保存追踪
+        self._dirty = False
+        self._dirty_count = 0
+        self._save_interval = 100
+        
         self._load()
+        
+        import atexit
+        atexit.register(self.flush)
     
     def _load(self):
         """加载数据"""
@@ -143,8 +151,7 @@ class JSONGraphBackend(GraphBackend):
     def add_node(self, node: GraphNode) -> str:
         """添加节点"""
         self.nodes[node.id] = node
-        if self.auto_save:
-            self._save()
+        self._mark_dirty()
         return node.id
     
     def add_edge(self, edge: GraphEdge) -> str:
@@ -152,8 +159,7 @@ class JSONGraphBackend(GraphBackend):
         self.edges[edge.id] = edge
         self.outgoing[edge.source_id].append(edge.id)
         self.incoming[edge.target_id].append(edge.id)
-        if self.auto_save:
-            self._save()
+        self._mark_dirty()
         return edge.id
     
     def get_node(self, node_id: str) -> Optional[GraphNode]:
@@ -296,8 +302,7 @@ class JSONGraphBackend(GraphBackend):
         if node_id in self.incoming:
             del self.incoming[node_id]
         
-        if self.auto_save:
-            self._save()
+        self._mark_dirty()
         return True
     
     def delete_edge(self, edge_id: str) -> bool:
@@ -316,8 +321,7 @@ class JSONGraphBackend(GraphBackend):
         # 删除边
         del self.edges[edge_id]
         
-        if self.auto_save:
-            self._save()
+        self._mark_dirty()
         return True
     
     def update_node(self, node_id: str, properties: Dict[str, Any]) -> bool:
@@ -327,8 +331,7 @@ class JSONGraphBackend(GraphBackend):
         
         self.nodes[node_id].properties.update(properties)
         
-        if self.auto_save:
-            self._save()
+        self._mark_dirty()
         return True
     
     def update_edge(self, edge_id: str, properties: Dict[str, Any]) -> bool:
@@ -338,10 +341,23 @@ class JSONGraphBackend(GraphBackend):
         
         self.edges[edge_id].properties.update(properties)
         
-        if self.auto_save:
-            self._save()
+        self._mark_dirty()
         return True
     
+    def _mark_dirty(self):
+        self._dirty = True
+        self._dirty_count += 1
+        if self.auto_save and self._dirty_count >= self._save_interval:
+            self._save()
+            self._dirty_count = 0
+
+    def flush(self):
+        """显式刷盘"""
+        if self._dirty:
+            self._save()
+            self._dirty = False
+            self._dirty_count = 0
+
     def save(self):
         """手动保存（当 auto_save=False 时使用）"""
         self._save()
@@ -353,5 +369,4 @@ class JSONGraphBackend(GraphBackend):
         self.outgoing.clear()
         self.incoming.clear()
         
-        if self.auto_save:
-            self._save()
+        self._mark_dirty()

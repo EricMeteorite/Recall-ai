@@ -146,12 +146,15 @@ def auto_select_backend() -> EmbeddingConfig:
     api_key = os.environ.get('EMBEDDING_API_KEY', '')
     api_base = os.environ.get('EMBEDDING_API_BASE', '')
     api_model = os.environ.get('EMBEDDING_MODEL', 'text-embedding-3-small')
-    dimension_str = os.environ.get('EMBEDDING_DIMENSION', '1024')
+    dimension_str = os.environ.get('EMBEDDING_DIMENSION', '')
     
-    try:
-        dimension = int(dimension_str)
-    except ValueError:
-        dimension = 1024
+    if dimension_str.strip():
+        try:
+            dimension = int(dimension_str)
+        except ValueError:
+            dimension = None
+    else:
+        dimension = None
     
     # 根据模式选择后端
     if mode == 'none':

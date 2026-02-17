@@ -25,11 +25,31 @@ class VolumeManager:
         self.loaded_volumes: Dict[int, 'VolumeData'] = {}  # volume_id -> VolumeData
         self.file_locks: Dict[int, threading.Lock] = {}      # 并发控制
         self._init_storage()
+        self._memory_id_index: Dict[str, int] = {}
+        self._index_file = os.path.join(data_path, "memory_id_index.json")
+        self._load_memory_id_index()
     
     def _init_storage(self):
         """初始化存储目录"""
         os.makedirs(os.path.join(self.data_path, "L3_archive"), exist_ok=True)
         self.manifest = self._load_or_create_manifest()
+    
+    def _load_memory_id_index(self):
+        """加载 memory_id 索引"""
+        if os.path.exists(self._index_file):
+            try:
+                with open(self._index_file, 'r', encoding='utf-8') as f:
+                    self._memory_id_index = json.load(f)
+            except (json.JSONDecodeError, IOError):
+                self._memory_id_index = {}
+    
+    def _save_memory_id_index(self):
+        """保存 memory_id 索引"""
+        try:
+            with open(self._index_file, 'w', encoding='utf-8') as f:
+                json.dump(self._memory_id_index, f, ensure_ascii=False)
+        except IOError:
+            pass
     
     def get_turn(self, turn_number: int) -> Optional[dict]:
         """O(1) 定位任意轮次"""
@@ -105,6 +125,13 @@ class VolumeManager:
             self.manifest['latest_volume'] = volume_id
             self._save_manifest()
         
+        # 更新 memory_id 索引
+        memory_id = turn_data.get('memory_id')
+        if memory_id:
+            self._memory_id_index[memory_id] = turn_number
+            if turn_number % 100 == 0:
+                self._save_memory_id_index()
+        
         return turn_number
     
     def _get_lock(self, volume_id: int) -> threading.Lock:
@@ -143,11 +170,20 @@ class VolumeManager:
         """通过 memory_id 获取原始轮次数据（100%不遗忘保证）
         
         搜索顺序：
+        0. memory_id 索引快速查找 O(1)（v5.0 新增）
         1. 已加载到内存的卷（最快）
-        2. 未加载的磁盘卷文件（兜底，确保不遗忘）
+        2. 未加载的磁盘卷文件（兜底，确保不遗忍）
         
-        注意：这是 O(n) 操作，适用于兜底场景
+        注意：步骤 1-2 是 O(n) 操作，仅在索引未命中时执行
         """
+        # 0. 索引快速查找 O(1)
+        if memory_id in self._memory_id_index:
+            turn_number = self._memory_id_index[memory_id]
+            result = self.get_turn(turn_number)
+            if result is not None:
+                return result
+            # 索引指向的轮次不存在（可能数据被清理），继续兜底搜索
+        
         # 1. 先搜索已加载的卷（快）
         for volume in self.loaded_volumes.values():
             for turn_data in volume.cached_turns.values():
@@ -255,6 +291,7 @@ class VolumeManager:
         for volume in self.loaded_volumes.values():
             volume._persist()
         self._save_manifest()
+        self._save_memory_id_index()
 
     def clear(self) -> bool:
         """清空所有分卷数据
@@ -281,6 +318,10 @@ class VolumeManager:
                 'created_at': datetime.now().isoformat()
             }
             self._save_manifest()
+            
+            # 清空 memory_id 索引
+            self._memory_id_index.clear()
+            self._save_memory_id_index()
             
             return True
         except Exception as e:

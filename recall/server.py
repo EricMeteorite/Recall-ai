@@ -8,13 +8,14 @@ from typing import List, Dict, Any, Optional
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query, Body
+from fastapi import FastAPI, HTTPException, Query, Body, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from .version import __version__
 from .engine import RecallEngine
 from .utils.task_manager import get_task_manager, TaskType
+from .mode import get_mode_config
 
 # Windows GBK 编码兼容的安全打印函数
 def _safe_print(msg: str) -> None:
@@ -248,7 +249,7 @@ SUPPORTED_CONFIG_KEYS = {
     # Episode 追溯配置
     'EPISODE_TRACKING_ENABLED',       # 是否启用 Episode 追溯
     
-    # ====== v4.1.1 LLM Max Tokens 配置（防止输出截断）======
+    # ====== v4.1 LLM Max Tokens 配置（防止输出截断）======
     'LLM_DEFAULT_MAX_TOKENS',         # LLM 默认最大输出 tokens（通用）
     'LLM_RELATION_MAX_TOKENS',        # 关系提取最大 tokens
     'FORESHADOWING_MAX_TOKENS',       # 伏笔分析最大 tokens
@@ -265,6 +266,17 @@ SUPPORTED_CONFIG_KEYS = {
     'UNIFIED_ANALYZER_ENABLED',       # 是否启用统一分析器（矛盾+关系合并，节省15-25s）
     'UNIFIED_ANALYSIS_MAX_TOKENS',    # 统一分析器 LLM 最大输出 tokens
     'TURN_API_ENABLED',               # 是否启用 Turn API（/v1/memories/turn）
+    
+    # ====== v5.0 全局模式与重排序配置 ======
+    'RECALL_MODE',                    # 全局模式: roleplay/general/knowledge_base
+    'FORESHADOWING_ENABLED',          # 伏笔系统开关
+    'CHARACTER_DIMENSION_ENABLED',    # 角色维度隔离开关
+    'RP_CONSISTENCY_ENABLED',         # RP 一致性检查开关
+    'RP_RELATION_TYPES',              # RP 关系类型开关
+    'RP_CONTEXT_TYPES',               # RP 上下文类型开关
+    'RERANKER_BACKEND',               # 重排序后端: builtin/cohere/cross-encoder
+    'COHERE_API_KEY',                 # Cohere API 密钥
+    'RERANKER_MODEL',                 # 自定义重排序模型名
 }
 
 
@@ -439,6 +451,8 @@ DEDUP_LOW_THRESHOLD=0.70
 
 # ----------------------------------------------------------------------------
 # 时态知识图谱配置
+# Temporal Knowledge Graph Configuration
+# ----------------------------------------------------------------------------
 # ----------------------------------------------------------------------------
 # 统一知识图谱配置 (v4.0 统一架构)
 # Unified Knowledge Graph Configuration (v4.0 Unified Architecture)
@@ -825,20 +839,15 @@ ENTITY_SUMMARY_MIN_FACTS=5
 EPISODE_TRACKING_ENABLED=true
 
 # ----------------------------------------------------------------------------
-# LLM Max Tokens 配置 (防止输出截断)
-# LLM Max Tokens Configuration (Prevent output truncation)
+# LLM Max Tokens 配置
+# LLM Max Tokens Configuration
 # ----------------------------------------------------------------------------
-# 说明：这些配置控制各个 LLM 调用场景的最大输出 token 数
-# 如果发现某个功能输出被截断，请增加对应的值
-# Note: These control max output tokens for each LLM call scenario
-# Increase the value if you find output being truncated
-
-# LLM 默认最大输出 tokens（通用场景）
-# Default max tokens for LLM calls
+# LLM 默认最大输出 tokens（通用默认值）
+# Default max tokens for LLM output
 LLM_DEFAULT_MAX_TOKENS=2000
 
-# 关系提取最大 tokens（实体多时需要更多）
-# Max tokens for relation extraction
+# 关系提取最大 tokens（实体多时需要大值）
+# Max tokens for relation extraction (need larger value for many entities)
 LLM_RELATION_MAX_TOKENS=4000
 
 # 伏笔分析最大 tokens
@@ -854,7 +863,7 @@ CONTEXT_EXTRACTION_MAX_TOKENS=2000
 ENTITY_SUMMARY_MAX_TOKENS=2000
 
 # 智能抽取最大 tokens
-# Max tokens for smart extraction
+# Max tokens for smart extractor
 SMART_EXTRACTOR_MAX_TOKENS=2000
 
 # 矛盾检测最大 tokens
@@ -865,12 +874,12 @@ CONTRADICTION_MAX_TOKENS=1000
 # Max tokens for context building
 BUILD_CONTEXT_MAX_TOKENS=4000
 
-# 检索 LLM 过滤最大 tokens（通常较小）
-# Max tokens for retrieval LLM filtering
+# 检索 LLM 过滤最大 tokens（只需 yes/no，较小即可）
+# Max tokens for retrieval LLM filter (only yes/no, keep small)
 RETRIEVAL_LLM_MAX_TOKENS=200
 
-# 去重 LLM 确认最大 tokens（通常较小）
-# Max tokens for dedup LLM confirmation
+# 去重 LLM 确认最大 tokens（只需 yes/no，较小即可）
+# Max tokens for dedup LLM confirmation (only yes/no, keep small)
 DEDUP_LLM_MAX_TOKENS=100
 
 # ============================================================================
@@ -893,6 +902,43 @@ UNIFIED_ANALYSIS_MAX_TOKENS=4000
 # Turn API 开关（/v1/memories/turn 端点）
 # Enable Turn API endpoint (/v1/memories/turn)
 TURN_API_ENABLED=true
+
+# ============================================================================
+# v5.0 全局模式配置 - RECALL 5.0 MODE CONFIGURATION
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# 全局模式开关 / Global Mode Switch
+# ----------------------------------------------------------------------------
+# 模式: roleplay（角色扮演，默认）/ general（通用）/ knowledge_base（知识库）
+# Mode: roleplay (default) / general / knowledge_base
+RECALL_MODE=roleplay
+
+# ----------------------------------------------------------------------------
+# 模式子开关（自动由 RECALL_MODE 推导，也可手动覆盖）
+# Mode Sub-switches (auto-derived from RECALL_MODE, can be overridden)
+# ----------------------------------------------------------------------------
+# 伏笔系统开关 / Foreshadowing system (roleplay=true, others=false)
+FORESHADOWING_ENABLED=true
+# 角色维度隔离 / Character dimension isolation (roleplay=true, others=false)
+CHARACTER_DIMENSION_ENABLED=true
+# RP 一致性检查 / RP consistency check (roleplay=true, others=false)
+RP_CONSISTENCY_ENABLED=true
+# RP 关系类型 / RP relation types (roleplay=true, others=false)
+RP_RELATION_TYPES=true
+# RP 上下文类型 / RP context types (roleplay=true, others=false)
+RP_CONTEXT_TYPES=true
+
+# ============================================================================
+# v5.0 重排序器配置 - RECALL 5.0 RERANKER CONFIGURATION
+# ============================================================================
+# 重排序后端: builtin（内置）/ cohere / cross-encoder
+# Reranker backend: builtin (default) / cohere / cross-encoder
+RERANKER_BACKEND=builtin
+# Cohere API 密钥（仅 cohere 后端需要）/ Cohere API key (cohere backend only)
+COHERE_API_KEY=
+# 自定义重排序模型名 / Custom reranker model name
+RERANKER_MODEL=
 '''
 
 
@@ -1016,7 +1062,12 @@ class AddMemoryRequest(BaseModel):
     """添加记忆请求"""
     content: str = Field(..., description="记忆内容")
     user_id: str = Field(default="default", description="用户ID")
-    metadata: Optional[Dict[str, Any]] = Field(default=None, description="元数据")
+    character_id: Optional[str] = Field(default=None, description="角色ID（通用模式可忽略）")
+    source: Optional[str] = Field(default=None, description="来源平台（如 bilibili/twitter/github）")
+    tags: Optional[List[str]] = Field(default=None, description="标签列表")
+    category: Optional[str] = Field(default=None, description="分类（如 tech/finance/entertainment）")
+    content_type: Optional[str] = Field(default=None, description="内容类型（如 news_article/video_transcript/text）")
+    metadata: Optional[Dict[str, Any]] = Field(default=None, description="元数据（自由格式，source/tags等也可放在这里）")
 
 
 class AddMemoryResponse(BaseModel):
@@ -1071,6 +1122,11 @@ class SearchRequest(BaseModel):
     temporal_filter: Optional[TemporalFilterRequest] = Field(default=None, description="时态过滤（Phase 3）")
     graph_expand: Optional[GraphExpandRequest] = Field(default=None, description="图遍历扩展（Phase 3）")
     config_preset: Optional[str] = Field(default=None, description="配置预设: default|fast|accurate（Phase 3）")
+    # v5.0 元数据过滤参数
+    source: Optional[str] = Field(default=None, description="按来源过滤（v5.0）")
+    tags: Optional[List[str]] = Field(default=None, description="按标签过滤（v5.0）")
+    category: Optional[str] = Field(default=None, description="按类别过滤（v5.0）")
+    content_type: Optional[str] = Field(default=None, description="按内容类型过滤（v5.0）")
 
 
 class SearchResultItem(BaseModel):
@@ -1589,8 +1645,22 @@ async def add_memory(request: AddMemoryRequest):
     
     # 提取 user_id 和 character_id
     user_id = request.user_id
-    character_id = request.metadata.get('character_id', 'default') if request.metadata else 'default'
-    role = request.metadata.get('role', 'unknown') if request.metadata else 'unknown'
+    
+    # v5.0: 合并顶层字段到 metadata（顶层字段优先）
+    merged_metadata = dict(request.metadata) if request.metadata else {}
+    if request.character_id is not None:
+        merged_metadata['character_id'] = request.character_id
+    if request.source is not None:
+        merged_metadata['source'] = request.source
+    if request.tags is not None:
+        merged_metadata['tags'] = request.tags
+    if request.category is not None:
+        merged_metadata['category'] = request.category
+    if request.content_type is not None:
+        merged_metadata['content_type'] = request.content_type
+    
+    character_id = merged_metadata.get('character_id', 'default')
+    role = merged_metadata.get('role', 'unknown')
     
     # 计算消息签名用于追踪
     msg_hash = f"{hash(request.content[:100]) % 10000:04d}"
@@ -1603,7 +1673,7 @@ async def add_memory(request: AddMemoryRequest):
     result = engine.add(
         content=request.content,
         user_id=request.user_id,
-        metadata=request.metadata
+        metadata=merged_metadata
     )
     
     total_time_ms = (time.time() - request_start_time) * 1000
@@ -1631,6 +1701,25 @@ async def add_memory(request: AddMemoryRequest):
         message=result.message,
         consistency_warnings=result.consistency_warnings
     )
+
+
+@app.post("/v1/memories/batch", tags=["Memories"])
+async def add_memories_batch(request: Request):
+    """批量添加记忆（高吞吐模式）"""
+    body = await request.json()
+    items = body.get('items', [])
+    user_id = body.get('user_id', 'default')
+    skip_dedup = body.get('skip_dedup', False)
+    skip_llm = body.get('skip_llm', True)
+    
+    engine = get_engine()
+    memory_ids = engine.add_batch(
+        items=items,
+        user_id=user_id,
+        skip_dedup=skip_dedup,
+        skip_llm=skip_llm,
+    )
+    return {"memory_ids": memory_ids, "count": len(memory_ids)}
 
 
 @app.post("/v1/memories/turn", response_model=AddTurnResponse, tags=["Memories"])
@@ -1751,6 +1840,10 @@ async def search_memories(request: SearchRequest):
         filters['config_preset'] = request.config_preset
         _safe_print(f"[Recall][Memory]    配置预设: {request.config_preset}")
     
+    # v5.0: 元数据过滤日志
+    if any([request.source, request.tags, request.category, request.content_type]):
+        _safe_print(f"[Recall][Memory]    元数据过滤: source={request.source}, tags={request.tags}, category={request.category}, content_type={request.content_type}")
+    
     try:
         engine = get_engine()
         results = engine.search(
@@ -1759,7 +1852,11 @@ async def search_memories(request: SearchRequest):
             top_k=request.top_k,
             filters=filters,
             temporal_context=temporal_context,
-            config_preset=config_preset
+            config_preset=config_preset,
+            source=request.source,
+            tags=request.tags,
+            category=request.category,
+            content_type=request.content_type,
         )
     except Exception as e:
         import traceback
@@ -2371,11 +2468,37 @@ async def update_persistent_context(
     }
 
 
+# ==================== 模式 API ====================
+
+def _foreshadowing_disabled_response():
+    """检查伏笔系统是否在当前模式下禁用，返回禁用响应或 None"""
+    cfg = get_mode_config()
+    if not cfg.foreshadowing_enabled:
+        return {"message": "Foreshadowing disabled in current mode", "mode": cfg.mode.value}
+    return None
+
+
+@app.get("/v1/mode", tags=["Admin"])
+async def get_current_mode():
+    """获取当前全局模式配置"""
+    cfg = get_mode_config()
+    return {
+        "mode": cfg.mode.value,
+        "foreshadowing_enabled": cfg.foreshadowing_enabled,
+        "character_dimension_enabled": cfg.character_dimension_enabled,
+        "rp_consistency_enabled": cfg.rp_consistency_enabled,
+        "rp_relation_types": cfg.rp_relation_types,
+        "rp_context_types": cfg.rp_context_types,
+    }
+
+
 # ==================== 伏笔 API ====================
 
 @app.post("/v1/foreshadowing", response_model=ForeshadowingItem, tags=["Foreshadowing"])
 async def plant_foreshadowing(request: ForeshadowingRequest):
     """埋下伏笔"""
+    if (guard := _foreshadowing_disabled_response()):
+        return guard
     engine = get_engine()
     fsh = engine.plant_foreshadowing(
         content=request.content,
@@ -2400,6 +2523,8 @@ async def list_foreshadowing(
     character_id: str = Query(default="default", description="角色ID")
 ):
     """获取活跃伏笔"""
+    if (guard := _foreshadowing_disabled_response()):
+        return guard
     engine = get_engine()
     active = engine.get_active_foreshadowings(user_id, character_id)
     _safe_print(f"[Recall][Foreshadow] 📋 获取伏笔列表: user={user_id}, char={character_id}")
@@ -2434,6 +2559,8 @@ async def resolve_foreshadowing(
     character_id: str = Query(default="default", description="角色ID")
 ):
     """解决伏笔"""
+    if (guard := _foreshadowing_disabled_response()):
+        return guard
     engine = get_engine()
     success = engine.resolve_foreshadowing(foreshadowing_id, resolution, user_id, character_id)
     
@@ -2454,6 +2581,8 @@ async def add_foreshadowing_hint(
     
     为伏笔添加进展提示，会将状态从 PLANTED 更新为 DEVELOPING
     """
+    if (guard := _foreshadowing_disabled_response()):
+        return guard
     engine = get_engine()
     success = engine.add_foreshadowing_hint(foreshadowing_id, hint, user_id, character_id)
     
@@ -2473,6 +2602,8 @@ async def abandon_foreshadowing(
     
     将伏笔标记为已放弃状态（不会物理删除，保留历史记录）
     """
+    if (guard := _foreshadowing_disabled_response()):
+        return guard
     engine = get_engine()
     success = engine.abandon_foreshadowing(foreshadowing_id, user_id, character_id)
     
@@ -2488,6 +2619,8 @@ async def clear_all_foreshadowings(
     character_id: str = Query(default="default", description="角色ID")
 ):
     """清空当前角色的所有伏笔"""
+    if (guard := _foreshadowing_disabled_response()):
+        return guard
     engine = get_engine()
     
     # 获取所有活跃伏笔（正确方法名）
@@ -2512,6 +2645,8 @@ async def list_archived_foreshadowings(
     status: Optional[str] = Query(default=None, description="状态筛选（resolved/abandoned）")
 ):
     """获取归档的伏笔列表（分页、搜索、筛选）"""
+    if (guard := _foreshadowing_disabled_response()):
+        return guard
     engine = get_engine()
     result = engine.foreshadowing_tracker.get_archived_foreshadowings(
         user_id=user_id,
@@ -2531,6 +2666,8 @@ async def restore_foreshadowing_from_archive(
     character_id: str = Query(default="default", description="角色ID")
 ):
     """从归档恢复伏笔到活跃列表"""
+    if (guard := _foreshadowing_disabled_response()):
+        return guard
     engine = get_engine()
     fsh = engine.foreshadowing_tracker.restore_from_archive(foreshadowing_id, user_id, character_id)
     
@@ -2556,6 +2693,8 @@ async def delete_archived_foreshadowing(
     character_id: str = Query(default="default", description="角色ID")
 ):
     """彻底删除归档中的伏笔"""
+    if (guard := _foreshadowing_disabled_response()):
+        return guard
     engine = get_engine()
     success = engine.foreshadowing_tracker.delete_archived(foreshadowing_id, user_id, character_id)
     
@@ -2571,6 +2710,8 @@ async def clear_all_archived_foreshadowings(
     character_id: str = Query(default="default", description="角色ID")
 ):
     """清空所有归档的伏笔"""
+    if (guard := _foreshadowing_disabled_response()):
+        return guard
     engine = get_engine()
     count = engine.foreshadowing_tracker.clear_archived(user_id, character_id)
     return {"success": True, "message": f"已清空 {count} 个归档伏笔", "count": count}
@@ -2583,6 +2724,8 @@ async def archive_foreshadowing_manually(
     character_id: str = Query(default="default", description="角色ID")
 ):
     """手动将活跃伏笔归档"""
+    if (guard := _foreshadowing_disabled_response()):
+        return guard
     engine = get_engine()
     success = engine.foreshadowing_tracker.archive_foreshadowing(foreshadowing_id, user_id, character_id)
     
@@ -2604,6 +2747,8 @@ async def update_foreshadowing(
     character_id: str = Query(default="default", description="角色ID")
 ):
     """编辑伏笔的字段"""
+    if (guard := _foreshadowing_disabled_response()):
+        return guard
     engine = get_engine()
     fsh = engine.foreshadowing_tracker.update_foreshadowing(
         foreshadowing_id=foreshadowing_id,
@@ -2769,6 +2914,8 @@ async def analyze_foreshadowing_turn(request: ForeshadowingAnalysisRequest):
     - 手动模式：不做任何操作，返回空结果
     - LLM模式：累积对话，达到触发条件时在后台自动分析
     """
+    if (guard := _foreshadowing_disabled_response()):
+        return guard
     engine = get_engine()
     
     # 创建后台任务执行分析（不等待结果）
@@ -2804,6 +2951,8 @@ async def trigger_foreshadowing_analysis(
     
     强制触发 LLM 分析（如果已配置）。可以在任何时候调用。
     """
+    if (guard := _foreshadowing_disabled_response()):
+        return guard
     engine = get_engine()
     result = engine.trigger_foreshadowing_analysis(user_id, character_id)
     return ForeshadowingAnalysisResult(
@@ -2825,6 +2974,8 @@ async def get_foreshadowing_analyzer_config():
     - auto_resolve: 自动解决伏笔
     - llm_configured: LLM API 是否已配置（只读）
     """
+    if (guard := _foreshadowing_disabled_response()):
+        return guard
     engine = get_engine()
     analyzer_config = engine.get_foreshadowing_analyzer_config()
     
@@ -2860,6 +3011,8 @@ async def update_foreshadowing_analyzer_config(config: ForeshadowingConfigUpdate
     
     无需重启服务，配置立即生效。
     """
+    if (guard := _foreshadowing_disabled_response()):
+        return guard
     engine = get_engine()
     
     # 准备要更新到配置文件的内容

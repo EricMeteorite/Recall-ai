@@ -51,12 +51,12 @@ function Write-Dim { param([string]$Text) Write-Host "  $Text" -ForegroundColor 
 function Show-Banner {
     Clear-Host
     Write-Host ""
-    Write-Host "  +============================================================+" -ForegroundColor Cyan
-    Write-Host "  |                                                            |" -ForegroundColor Cyan
-    Write-Host "  |              Recall-ai Manager  v$VERSION                     |" -ForegroundColor Cyan
-    Write-Host "  |                                                            |" -ForegroundColor Cyan
-    Write-Host "  |         Memory Management System for AI Characters         |" -ForegroundColor Cyan
-    Write-Host "  +============================================================+" -ForegroundColor Cyan
+    Write-Host "  ╔════════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
+    Write-Host "  ║                                                            ║" -ForegroundColor Cyan
+    Write-Host "  ║              Recall-ai 管理工具  v$VERSION                     ║" -ForegroundColor Cyan
+    Write-Host "  ║                                                            ║" -ForegroundColor Cyan
+    Write-Host "  ║         智能记忆管理系统 - 让 AI 拥有持久记忆              ║" -ForegroundColor Cyan
+    Write-Host "  ╚════════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
     Write-Host ""
 }
 
@@ -120,22 +120,22 @@ function Show-MainMenu {
     
     Write-Host ""
     Write-Host "  +-----------------------------------------------------------+" -ForegroundColor DarkGray
-    Write-Host "  |  Current Status                                           |" -ForegroundColor DarkGray
+    Write-Host "  |  当前状态                                               |" -ForegroundColor DarkGray
     Write-Host "  +-----------------------------------------------------------+" -ForegroundColor DarkGray
     
     # Recall-ai status
     $recallStatus = if ($installed) { 
-        if ($running) { "[OK] Installed, Running" } else { "[OK] Installed, Not Running" }
-    } else { "[X] Not Installed" }
+        if ($running) { "✓ 已安装，运行中" } else { "✓ 已安装，未运行" }
+    } else { "✗ 未安装" }
     $recallColor = if ($installed -and $running) { "Green" } elseif ($installed) { "Yellow" } else { "Red" }
     Write-Host "  |  Recall-ai:        " -NoNewline -ForegroundColor DarkGray
     Write-Host $recallStatus.PadRight(38) -NoNewline -ForegroundColor $recallColor
     Write-Host "|" -ForegroundColor DarkGray
     
     # SillyTavern plugin status
-    $stStatus = if ($stInstalled) { "[OK] Installed" } else { "[X] Not Installed" }
+    $stStatus = if ($stInstalled) { "✓ 已安装" } else { "✗ 未安装" }
     $stColor = if ($stInstalled) { "Green" } else { "DarkGray" }
-    Write-Host "  |  SillyTavern Plugin:" -NoNewline -ForegroundColor DarkGray
+    Write-Host "  |  SillyTavern 插件:" -NoNewline -ForegroundColor DarkGray
     Write-Host $stStatus.PadRight(38) -NoNewline -ForegroundColor $stColor
     Write-Host "|" -ForegroundColor DarkGray
     
@@ -143,21 +143,21 @@ function Show-MainMenu {
     
     Write-Host ""
     Write-Host "  +-----------------------------------------------------------+" -ForegroundColor White
-    Write-Host "  |                       Main Menu                           |" -ForegroundColor White
+    Write-Host "  |                       主菜单                              |" -ForegroundColor White
     Write-Host "  +-----------------------------------------------------------+" -ForegroundColor White
     Write-Host "  |                                                           |" -ForegroundColor White
-    Write-Host "  |    [1] Install Recall-ai                                  |" -ForegroundColor White
-    Write-Host "  |    [2] Start Service                                      |" -ForegroundColor White
-    Write-Host "  |    [3] Stop Service                                       |" -ForegroundColor White
-    Write-Host "  |    [4] Restart Service                                    |" -ForegroundColor White
-    Write-Host "  |    [5] View Status                                        |" -ForegroundColor White
+    Write-Host "  |    [1] 🔧 安装 Recall-ai                                  |" -ForegroundColor White
+    Write-Host "  |    [2] 🚀 启动服务                                      |" -ForegroundColor White
+    Write-Host "  |    [3] 🛑 停止服务                                       |" -ForegroundColor White
+    Write-Host "  |    [4] 🔄 重启服务                                      |" -ForegroundColor White
+    Write-Host "  |    [5] 📊 查看状态                                      |" -ForegroundColor White
     Write-Host "  |                                                           |" -ForegroundColor White
-    Write-Host "  |    [6] SillyTavern Plugin Management  ->                  |" -ForegroundColor White
-    Write-Host "  |    [7] Configuration Management       ->                  |" -ForegroundColor White
+    Write-Host "  |    [6] 📦 SillyTavern 插件管理  →                       |" -ForegroundColor White
+    Write-Host "  |    [7] ⚙️  配置管理              →                       |" -ForegroundColor White
     Write-Host "  |                                                           |" -ForegroundColor White
-    Write-Host "  |    [8] Clear User Data (Keep Config)                      |" -ForegroundColor Red
+    Write-Host "  |    [8] 🗑️  清空用户数据（保留配置）                     |" -ForegroundColor Red
     Write-Host "  |                                                           |" -ForegroundColor White
-    Write-Host "  |    [0] Exit                                               |" -ForegroundColor White
+    Write-Host "  |    [0] 退出                                               |" -ForegroundColor White
     Write-Host "  |                                                           |" -ForegroundColor White
     Write-Host "  +-----------------------------------------------------------+" -ForegroundColor White
     Write-Host ""
@@ -170,31 +170,31 @@ function Show-STMenu {
     
     Write-Host ""
     Write-Host "  +-----------------------------------------------------------+" -ForegroundColor Magenta
-    Write-Host "  |              SillyTavern Plugin Management                |" -ForegroundColor Magenta
+    Write-Host "  |              SillyTavern 插件管理                        |" -ForegroundColor Magenta
     Write-Host "  +-----------------------------------------------------------+" -ForegroundColor Magenta
     
     if ($config.st_path) {
-        Write-Host "  |  ST Path: " -NoNewline -ForegroundColor Magenta
+        Write-Host "  |  ST 路径: " -NoNewline -ForegroundColor Magenta
         $displayPath = if ($config.st_path.Length -gt 45) { $config.st_path.Substring(0, 42) + "..." } else { $config.st_path }
         Write-Host $displayPath.PadRight(47) -NoNewline -ForegroundColor DarkGray
         Write-Host "|" -ForegroundColor Magenta
     }
     
-    $statusText = if ($stInstalled) { "[OK] Installed" } else { "[X] Not Installed" }
+    $statusText = if ($stInstalled) { "✓ 已安装" } else { "✗ 未安装" }
     $statusColor = if ($stInstalled) { "Green" } else { "Yellow" }
-    Write-Host "  |  Plugin Status: " -NoNewline -ForegroundColor Magenta
+    Write-Host "  |  插件状态: " -NoNewline -ForegroundColor Magenta
     Write-Host $statusText.PadRight(41) -NoNewline -ForegroundColor $statusColor
     Write-Host "|" -ForegroundColor Magenta
     
     Write-Host "  +-----------------------------------------------------------+" -ForegroundColor Magenta
     Write-Host "  |                                                           |" -ForegroundColor Magenta
-    Write-Host "  |    [1] Install Plugin to SillyTavern                      |" -ForegroundColor Magenta
-    Write-Host "  |    [2] Uninstall Plugin                                   |" -ForegroundColor Magenta
-    Write-Host "  |    [3] Update Plugin                                      |" -ForegroundColor Magenta
-    Write-Host "  |    [4] Set SillyTavern Path                               |" -ForegroundColor Magenta
-    Write-Host "  |    [5] Check Plugin Status                                |" -ForegroundColor Magenta
+    Write-Host "  |    [1] 📥 安装插件到 SillyTavern                        |" -ForegroundColor Magenta
+    Write-Host "  |    [2] 📤 卸载插件                                      |" -ForegroundColor Magenta
+    Write-Host "  |    [3] 🔄 更新插件                                      |" -ForegroundColor Magenta
+    Write-Host "  |    [4] 📂 设置 SillyTavern 路径                         |" -ForegroundColor Magenta
+    Write-Host "  |    [5] 🔍 检查插件状态                                  |" -ForegroundColor Magenta
     Write-Host "  |                                                           |" -ForegroundColor Magenta
-    Write-Host "  |    [0] <- Back to Main Menu                               |" -ForegroundColor Magenta
+    Write-Host "  |    [0] ← 返回主菜单                                    |" -ForegroundColor Magenta
     Write-Host "  |                                                           |" -ForegroundColor Magenta
     Write-Host "  +-----------------------------------------------------------+" -ForegroundColor Magenta
     Write-Host ""
@@ -204,17 +204,17 @@ function Show-STMenu {
 function Show-ConfigMenu {
     Write-Host ""
     Write-Host "  +-----------------------------------------------------------+" -ForegroundColor Yellow
-    Write-Host "  |                  Configuration Management                 |" -ForegroundColor Yellow
+    Write-Host "  |                    配置管理                               |" -ForegroundColor Yellow
     Write-Host "  +-----------------------------------------------------------+" -ForegroundColor Yellow
     Write-Host "  |                                                           |" -ForegroundColor Yellow
-    Write-Host "  |    [1] Edit API Config File                               |" -ForegroundColor Yellow
-    Write-Host "  |    [2] Hot Reload Config (No Restart)                     |" -ForegroundColor Yellow
-    Write-Host "  |    [3] Test Embedding API Connection                      |" -ForegroundColor Yellow
-    Write-Host "  |    [4] Test LLM API Connection                            |" -ForegroundColor Yellow
-    Write-Host "  |    [5] View Current Config                                |" -ForegroundColor Yellow
-    Write-Host "  |    [6] Reset Config to Default                            |" -ForegroundColor Yellow
+    Write-Host "  |    [1] 📝 编辑 API 配置文件                             |" -ForegroundColor Yellow
+    Write-Host "  |    [2] 🔄 热更新配置（无需重启）                        |" -ForegroundColor Yellow
+    Write-Host "  |    [3] 🧪 测试 Embedding API 连接                       |" -ForegroundColor Yellow
+    Write-Host "  |    [4] 🤖 测试 LLM API 连接                             |" -ForegroundColor Yellow
+    Write-Host "  |    [5] 📋 查看当前配置                                  |" -ForegroundColor Yellow
+    Write-Host "  |    [6] 🗑️  重置配置为默认值                             |" -ForegroundColor Yellow
     Write-Host "  |                                                           |" -ForegroundColor Yellow
-    Write-Host "  |    [0] <- Back to Main Menu                               |" -ForegroundColor Yellow
+    Write-Host "  |    [0] ← 返回主菜单                                    |" -ForegroundColor Yellow
     Write-Host "  |                                                           |" -ForegroundColor Yellow
     Write-Host "  +-----------------------------------------------------------+" -ForegroundColor Yellow
     Write-Host ""
@@ -223,11 +223,11 @@ function Show-ConfigMenu {
 # ==================== Operation Functions ====================
 
 function Do-Install {
-    Write-Title "Install Recall-ai"
+    Write-Title "安装 Recall-ai"
     
     if (Test-Installed) {
-        Write-Info "Recall-ai is already installed"
-        $choice = Read-Host "  Reinstall? (y/N)"
+        Write-Info "Recall-ai 已安装"
+        $choice = Read-Host "  是否重新安装？(y/N)"
         if ($choice -ne "y" -and $choice -ne "Y") {
             return
         }
@@ -235,23 +235,23 @@ function Do-Install {
     
     $installScript = Join-Path $SCRIPT_DIR "install.ps1"
     if (Test-Path $installScript) {
-        Write-Info "Running install script..."
+        Write-Info "正在执行安装脚本..."
         & $installScript
     } else {
-        Write-Error2 "Install script not found: $installScript"
+        Write-Error2 "找不到安装脚本: $installScript"
     }
 }
 
 function Do-Start {
-    Write-Title "Start Service"
+    Write-Title "启动服务"
     
     if (-not (Test-Installed)) {
-        Write-Error2 "Recall-ai not installed, please install first"
+        Write-Error2 "Recall-ai 未安装，请先安装"
         return
     }
     
     if (Test-ServiceRunning) {
-        Write-Info "Service is already running"
+        Write-Info "服务已在运行中"
         return
     }
     
@@ -451,6 +451,10 @@ DEDUP_LOW_THRESHOLD=0.70
 # v4.0 Phase 1/2 New Configurations
 # ============================================================================
 
+# ----------------------------------------------------------------------------
+# 时态知识图谱配置
+# Temporal Knowledge Graph Configuration
+# ----------------------------------------------------------------------------
 # ----------------------------------------------------------------------------
 # 统一知识图谱配置 (v4.0 统一架构)
 # Unified Knowledge Graph Configuration (v4.0 Unified Architecture)
@@ -900,18 +904,55 @@ UNIFIED_ANALYSIS_MAX_TOKENS=4000
 # Turn API 开关（/v1/memories/turn 端点）
 # Enable Turn API endpoint (/v1/memories/turn)
 TURN_API_ENABLED=true
+
+# ============================================================================
+# v5.0 全局模式配置 - RECALL 5.0 MODE CONFIGURATION
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# 全局模式开关 / Global Mode Switch
+# ----------------------------------------------------------------------------
+# 模式: roleplay（角色扮演，默认）/ general（通用）/ knowledge_base（知识库）
+# Mode: roleplay (default) / general / knowledge_base
+RECALL_MODE=roleplay
+
+# ----------------------------------------------------------------------------
+# 模式子开关（自动由 RECALL_MODE 推导，也可手动覆盖）
+# Mode Sub-switches (auto-derived from RECALL_MODE, can be overridden)
+# ----------------------------------------------------------------------------
+# 伏笔系统开关 / Foreshadowing system (roleplay=true, others=false)
+FORESHADOWING_ENABLED=true
+# 角色维度隔离 / Character dimension isolation (roleplay=true, others=false)
+CHARACTER_DIMENSION_ENABLED=true
+# RP 一致性检查 / RP consistency check (roleplay=true, others=false)
+RP_CONSISTENCY_ENABLED=true
+# RP 关系类型 / RP relation types (roleplay=true, others=false)
+RP_RELATION_TYPES=true
+# RP 上下文类型 / RP context types (roleplay=true, others=false)
+RP_CONTEXT_TYPES=true
+
+# ============================================================================
+# v5.0 重排序器配置 - RECALL 5.0 RERANKER CONFIGURATION
+# ============================================================================
+# 重排序后端: builtin（内置）/ cohere / cross-encoder
+# Reranker backend: builtin (default) / cohere / cross-encoder
+RERANKER_BACKEND=builtin
+# Cohere API 密钥（仅 cohere 后端需要）/ Cohere API key (cohere backend only)
+COHERE_API_KEY=
+# 自定义重排序模型名 / Custom reranker model name
+RERANKER_MODEL=
 '@
                 Set-Content -Path $configFile -Value $defaultConfig -Encoding UTF8
-                Write-Info "Created config file: $configFile"
+            Write-Info "已创建配置文件: $configFile"
             }
             
             Write-Host ""
-            Write-Warning2 "Cloud mode requires Embedding API configuration"
+            Write-Warning2 "Cloud 模式需要配置 Embedding API"
             Write-Host ""
-            Write-Info "Please edit config file:"
+            Write-Info "请编辑配置文件:"
             Write-Dim "  $configFile"
             Write-Host ""
-            Write-Info "After configuration, start service again"
+            Write-Info "配置完成后，再次启动服务"
             return
         }
     }
@@ -920,7 +961,7 @@ TURN_API_ENABLED=true
     $startLog = Join-Path $SCRIPT_DIR "recall_data\logs\start.log"
     
     if (Test-Path $startScript) {
-        Write-Info "Starting service..."
+        Write-Info "正在启动服务..."
         
         # Ensure log directory exists
         $logDir = Split-Path $startLog -Parent
@@ -933,7 +974,7 @@ TURN_API_ENABLED=true
         Start-Process powershell -ArgumentList "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $startScript -WorkingDirectory $SCRIPT_DIR -RedirectStandardOutput $startLog -RedirectStandardError $errorLog -WindowStyle Hidden
         
         # Wait for service to start (up to 60 seconds, model loading can be slow)
-        Write-Host "  Waiting for service to start" -NoNewline
+        Write-Host "  等待服务启动" -NoNewline
         $maxWait = 60
         $waited = 0
         while ($waited -lt $maxWait) {
@@ -942,8 +983,8 @@ TURN_API_ENABLED=true
             Write-Host "." -NoNewline
             if (Test-ServiceRunning) {
                 Write-Host ""
-                Write-Success "Service started! (${waited}s)"
-                Write-Dim "API Address: http://127.0.0.1:$DEFAULT_PORT"
+                Write-Success "服务已启动！(${waited}秒)"
+                Write-Dim "API 地址: http://127.0.0.1:$DEFAULT_PORT"
                 return
             }
             # Check if process is still running
@@ -956,29 +997,29 @@ TURN_API_ENABLED=true
         
         # Check if start failed
         if (-not (Test-ServiceRunning)) {
-            Write-Error2 "Service start timeout or failed"
+            Write-Error2 "服务启动超时或失败"
             Write-Host ""
-            Write-Info "Start log:"
+            Write-Info "启动日志:"
             if (Test-Path $startLog) {
                 Get-Content $startLog -Tail 20 | ForEach-Object { Write-Dim "  $_" }
             }
             Write-Host ""
-            Write-Dim "Full log: $startLog"
+            Write-Dim "完整日志: $startLog"
         }
     } else {
-        Write-Error2 "Start script not found: $startScript"
+        Write-Error2 "找不到启动脚本: $startScript"
     }
 }
 
 function Do-Stop {
-    Write-Title "Stop Service"
+    Write-Title "停止服务"
     
     if (-not (Test-ServiceRunning)) {
-        Write-Info "Service is not running"
+        Write-Info "服务未运行"
         return
     }
     
-    Write-Info "Stopping service..."
+    Write-Info "正在停止服务..."
     
     # Find and terminate uvicorn process
     $processes = Get-Process -Name "python" -ErrorAction SilentlyContinue | Where-Object {
@@ -987,7 +1028,7 @@ function Do-Stop {
     
     if ($processes) {
         $processes | Stop-Process -Force
-        Write-Success "Service stopped"
+        Write-Success "服务已停止"
     } else {
         # Try to find by port
         $netstat = netstat -ano | Select-String ":$DEFAULT_PORT.*LISTENING"
@@ -995,98 +1036,98 @@ function Do-Stop {
             $processId = ($netstat -split '\s+')[-1]
             if ($processId -and $processId -ne "0") {
                 Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
-                Write-Success "Service stopped"
+                Write-Success "服务已停止"
                 return
             }
         }
-        Write-Info "No running service process found"
+        Write-Info "未找到运行中的服务进程"
     }
 }
 
 function Do-Restart {
-    Write-Title "Restart Service"
+    Write-Title "重启服务"
     Do-Stop
     Start-Sleep -Seconds 2
     Do-Start
 }
 
 function Do-Status {
-    Write-Title "Service Status"
+    Write-Title "服务状态"
     
     $installed = Test-Installed
     $running = Test-ServiceRunning
     
     Write-Host ""
     if ($installed) {
-        Write-Success "Recall-ai is installed"
+        Write-Success "Recall-ai 已安装"
         
         # Get version info
         try {
             $venvPython = Join-Path $SCRIPT_DIR "recall-env\Scripts\python.exe"
             $version = & $venvPython -c "from recall.version import __version__; print(__version__)" 2>$null
             if ($version) {
-                Write-Dim "Version: v$version"
+                Write-Dim "版本: v$version"
             }
         } catch {}
     } else {
-        Write-Error2 "Recall-ai not installed"
+        Write-Error2 "Recall-ai 未安装"
     }
     
     Write-Host ""
     if ($running) {
-        Write-Success "Service is running"
-        Write-Dim "API Address: http://127.0.0.1:$DEFAULT_PORT"
+        Write-Success "服务运行中"
+        Write-Dim "API 地址: http://127.0.0.1:$DEFAULT_PORT"
         
         # Get statistics
         try {
             $stats = Invoke-RestMethod -Uri "http://127.0.0.1:$DEFAULT_PORT/v1/stats" -TimeoutSec 5
-            Write-Dim "Total Memories: $($stats.total_memories)"
+            Write-Dim "记忆总数: $($stats.total_memories)"
             $mode = if ($stats.lite -or $stats.lightweight) { "Lite 模式" } else { "Local 模式" }
-            Write-Dim "Embedding Mode: $mode"
+            Write-Dim "Embedding 模式: $mode"
         } catch {}
     } else {
-        Write-Error2 "Service is not running"
+        Write-Error2 "服务未运行"
     }
     
     Write-Host ""
     $stInstalled = Test-STPluginInstalled
     if ($stInstalled) {
-        Write-Success "SillyTavern plugin is installed"
+        Write-Success "SillyTavern 插件已安装"
         $pluginPath = Get-STPluginPath
-        Write-Dim "Path: $pluginPath"
+        Write-Dim "路径: $pluginPath"
     } else {
-        Write-Info "SillyTavern plugin not installed"
+        Write-Info "SillyTavern 插件未安装"
     }
     
     Write-Host ""
-    Read-Host "  Press Enter to continue"
+    Read-Host "  按回车继续"
 }
 
 # ==================== Clear User Data ====================
 
 function Do-ClearData {
-    Write-Title "Clear User Data"
+    Write-Title "清空用户数据"
     
     $dataPath = Join-Path $SCRIPT_DIR "recall_data"
     
     if (-not (Test-Path $dataPath)) {
-        Write-Info "No data directory found, nothing to clear"
+        Write-Info "没有数据目录，无需清理"
         return
     }
     
     # Check if service is running
     if (Test-ServiceRunning) {
-        Write-Error2 "Service is running. Please stop it first."
+        Write-Error2 "服务正在运行中，请先停止服务"
         Write-Host ""
-        Write-Host "  Run: " -NoNewline
+        Write-Host "  运行: " -NoNewline
         Write-Host ".\manage.ps1 stop" -ForegroundColor Cyan
-        Write-Host "  Or select option [3] Stop Service from menu" -ForegroundColor DarkGray
+        Write-Host "  或在菜单中选择 [3] 停止服务" -ForegroundColor DarkGray
         return
     }
     
     # Show what will be deleted
     Write-Host ""
-    Write-Host "  This will DELETE the following data:" -ForegroundColor Yellow
+    Write-Host "  以下数据将被删除:" -ForegroundColor Yellow
     Write-Host ""
     
     # Check each directory/file
@@ -1105,28 +1146,28 @@ function Do-ClearData {
     if (Test-Path $dataDir) {
         $size = (Get-ChildItem $dataDir -Recurse -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
         $sizeStr = if ($size) { "{0:N2} MB" -f ($size / 1MB) } else { "0 MB" }
-        Write-Host "    [x] data/           - All user memories ($sizeStr)" -ForegroundColor Red
+        Write-Host "    [x] data/           - 所有用户记忆 ($sizeStr)" -ForegroundColor Red
         $toDelete += $dataDir
     }
     
     if (Test-Path $indexDir) {
         $size = (Get-ChildItem $indexDir -Recurse -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
         $sizeStr = if ($size) { "{0:N2} MB" -f ($size / 1MB) } else { "0 MB" }
-        Write-Host "    [x] index/          - N-gram and fulltext indexes ($sizeStr)" -ForegroundColor Red
+        Write-Host "    [x] index/          - N-gram 和全文索引 ($sizeStr)" -ForegroundColor Red
         $toDelete += $indexDir
     }
     
     if (Test-Path $indexesDir) {
         $size = (Get-ChildItem $indexesDir -Recurse -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
         $sizeStr = if ($size) { "{0:N2} MB" -f ($size / 1MB) } else { "0 MB" }
-        Write-Host "    [x] indexes/        - Entity and vector indexes ($sizeStr)" -ForegroundColor Red
+        Write-Host "    [x] indexes/        - 实体和向量索引 ($sizeStr)" -ForegroundColor Red
         $toDelete += $indexesDir
     }
     
     if (Test-Path $l1Dir) {
         $size = (Get-ChildItem $l1Dir -Recurse -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
         $sizeStr = if ($size) { "{0:N2} MB" -f ($size / 1MB) } else { "0 MB" }
-        Write-Host "    [x] L1_consolidated/ - Long-term memory ($sizeStr)" -ForegroundColor Red
+        Write-Host "    [x] L1_consolidated/ - 长期记忆 ($sizeStr)" -ForegroundColor Red
         $toDelete += $l1Dir
     }
     
@@ -1134,71 +1175,71 @@ function Do-ClearData {
     if (Test-Path $kgFile) {
         $size = (Get-Item $kgFile -ErrorAction SilentlyContinue).Length
         $sizeStr = if ($size) { "{0:N2} KB" -f ($size / 1KB) } else { "0 KB" }
-        Write-Host "    [x] knowledge_graph.json - Knowledge graph ($sizeStr)" -ForegroundColor Red
+        Write-Host "    [x] knowledge_graph.json - 知识图谱 ($sizeStr)" -ForegroundColor Red
         $toDelete += $kgFile
     }
     if ((Test-Path $kgFileInData) -and (-not ($toDelete -contains $dataDir))) {
         # Only show if data/ won't be deleted (which would include this file)
         $size = (Get-Item $kgFileInData -ErrorAction SilentlyContinue).Length
         $sizeStr = if ($size) { "{0:N2} KB" -f ($size / 1KB) } else { "0 KB" }
-        Write-Host "    [x] data/knowledge_graph.json - Knowledge graph ($sizeStr)" -ForegroundColor Red
+        Write-Host "    [x] data/knowledge_graph.json - 知识图谱 ($sizeStr)" -ForegroundColor Red
         $toDelete += $kgFileInData
     }
     
     if (Test-Path $cacheDir) {
         $size = (Get-ChildItem $cacheDir -Recurse -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
         $sizeStr = if ($size) { "{0:N2} MB" -f ($size / 1MB) } else { "0 MB" }
-        Write-Host "    [x] cache/          - Embedding cache ($sizeStr)" -ForegroundColor Red
+        Write-Host "    [x] cache/          - Embedding 缓存 ($sizeStr)" -ForegroundColor Red
         $toDelete += $cacheDir
     }
     
     if (Test-Path $logsDir) {
         $size = (Get-ChildItem $logsDir -Recurse -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
         $sizeStr = if ($size) { "{0:N2} MB" -f ($size / 1MB) } else { "0 MB" }
-        Write-Host "    [x] logs/           - Log files ($sizeStr)" -ForegroundColor Red
+        Write-Host "    [x] logs/           - 日志文件 ($sizeStr)" -ForegroundColor Red
         $toDelete += $logsDir
     }
     
     if (Test-Path $tempDir) {
         $size = (Get-ChildItem $tempDir -Recurse -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
         $sizeStr = if ($size) { "{0:N2} MB" -f ($size / 1MB) } else { "0 MB" }
-        Write-Host "    [x] temp/           - Temporary files ($sizeStr)" -ForegroundColor Red
+        Write-Host "    [x] temp/           - 临时文件 ($sizeStr)" -ForegroundColor Red
         $toDelete += $tempDir
     }
     
     Write-Host ""
-    Write-Host "  The following will be KEPT:" -ForegroundColor Green
-    Write-Host "    [OK] config/    - API keys, install mode, settings" -ForegroundColor Green
-    Write-Host "    [OK] models/    - Downloaded models (if any)" -ForegroundColor Green
+    Write-Host "  以下将被保留:" -ForegroundColor Green
+    Write-Host "    [✓] config/    - API 密钥、安装模式、配置" -ForegroundColor Green
+    Write-Host "    [✓] models/    - 已下载的模型" -ForegroundColor Green
     
     if ($toDelete.Count -eq 0) {
         Write-Host ""
-        Write-Info "No data to clear"
+        Write-Info "没有数据需要清理"
         return
     }
     
     Write-Host ""
-    Write-Host "  [!] WARNING: This action cannot be undone!" -ForegroundColor Yellow
+    Write-Host "  [!] 警告：此操作不可撤销！" -ForegroundColor Yellow
     Write-Host ""
     
-    $confirm = Read-Host "  Type 'yes' to confirm deletion"
+    $confirm = Read-Host "  输入 'yes' 确认删除"
     
     if ($confirm -ne "yes") {
         Write-Host ""
-        Write-Info "Operation cancelled"
+        Write-Info "操作已取消"
         return
     }
     
     Write-Host ""
-    Write-Info "Clearing user data..."
+    Write-Info "正在清空用户数据..."
     
     foreach ($dir in $toDelete) {
         try {
             Remove-Item -Path $dir -Recurse -Force -ErrorAction Stop
             $dirName = Split-Path $dir -Leaf
-            Write-Success "Deleted: $dirName/"
+            Write-Success "已删除: $dirName/"
         } catch {
-            Write-Error2 "Failed to delete: $dir"
+            Write-Error2 "删除失败: $dir"
         }
     }
     
@@ -1208,38 +1249,38 @@ function Do-ClearData {
     }
     
     Write-Host ""
-    Write-Success "User data cleared successfully!"
+    Write-Success "用户数据已清空！"
     Write-Host ""
-    Write-Host "  Your config files are preserved in: " -NoNewline
+    Write-Host "  配置文件已保留在: " -NoNewline
     Write-Host "recall_data\config\" -ForegroundColor Cyan
 }
 
 # ==================== SillyTavern Plugin Operations ====================
 
 function Set-STPath {
-    Write-Title "Set SillyTavern Path"
+    Write-Title "设置 SillyTavern 路径"
     
     $config = Get-ManagerConfig
     
     if ($config.st_path) {
-        Write-Dim "Current path: $($config.st_path)"
+        Write-Dim "当前路径: $($config.st_path)"
     }
     
     Write-Host ""
-    Write-Info "Please enter the SillyTavern installation path"
-    Write-Dim "Example: C:\SillyTavern or D:\Apps\SillyTavern"
+    Write-Info "请输入 SillyTavern 安装路径"
+    Write-Dim "示例: C:\SillyTavern 或 D:\Apps\SillyTavern"
     Write-Host ""
     
-    $newPath = Read-Host "  Path"
+    $newPath = Read-Host "  路径"
     
     if (-not $newPath) {
-        Write-Info "Cancelled"
+        Write-Info "已取消"
         return
     }
     
     # Validate path
     if (-not (Test-Path $newPath)) {
-        Write-Error2 "Path does not exist: $newPath"
+        Write-Error2 "路径不存在: $newPath"
         return
     }
     
@@ -1248,29 +1289,29 @@ function Set-STPath {
     $publicDir = Join-Path $newPath "public"
     
     if (-not ((Test-Path $serverJs) -and (Test-Path $publicDir))) {
-        Write-Error2 "This is not a valid SillyTavern directory"
-        Write-Dim "Should contain server.js and public folder"
+        Write-Error2 "这不是有效的 SillyTavern 目录"
+        Write-Dim "应包含 server.js 和 public 文件夹"
         return
     }
     
     $config.st_path = $newPath
     Save-ManagerConfig $config
-    Write-Success "Path saved: $newPath"
+    Write-Success "路径已保存: $newPath"
 }
 
 function Install-STPlugin {
-    Write-Title "Install SillyTavern Plugin"
+    Write-Title "安装 SillyTavern 插件"
     
     $config = Get-ManagerConfig
     
     if (-not $config.st_path) {
-        Write-Error2 "SillyTavern path not set"
-        Write-Info "Please set the path first (menu option 4)"
+        Write-Error2 "SillyTavern 路径未设置"
+        Write-Info "请先设置路径（菜单选项 4）"
         return
     }
     
     if (-not (Test-Path $config.st_path)) {
-        Write-Error2 "SillyTavern path does not exist: $($config.st_path)"
+        Write-Error2 "SillyTavern 路径不存在: $($config.st_path)"
         return
     }
     
@@ -1278,74 +1319,74 @@ function Install-STPlugin {
     $targetDir = Join-Path $config.st_path "public\scripts\extensions\third-party\recall-memory"
     
     if (-not (Test-Path $sourceDir)) {
-        Write-Error2 "Plugin source not found: $sourceDir"
+        Write-Error2 "插件源文件未找到: $sourceDir"
         return
     }
     
     # Create target directory
     if (Test-Path $targetDir) {
-        Write-Info "Plugin directory exists, updating..."
+        Write-Info "插件目录已存在，正在更新..."
         Remove-Item -Path $targetDir -Recurse -Force
     }
     
-    Write-Info "Copying plugin files..."
+    Write-Info "正在复制插件文件..."
     Copy-Item -Path $sourceDir -Destination $targetDir -Recurse -Force
     
     if (Test-Path $targetDir) {
-        Write-Success "Plugin installed successfully!"
+        Write-Success "插件安装成功！"
         Write-Host ""
-        Write-Info "Next steps:"
-        Write-Dim "1. Start Recall-ai service (main menu option 2)"
-        Write-Dim "2. Start/restart SillyTavern"
-        Write-Dim "3. Find 'Recall Memory System' in ST extensions panel"
+        Write-Info "下一步:"
+        Write-Dim "1. 启动 Recall-ai 服务（主菜单选项 2）"
+        Write-Dim "2. 启动/重启 SillyTavern"
+        Write-Dim "3. 在 ST 扩展面板中找到 'Recall Memory System'"
     } else {
-        Write-Error2 "Plugin installation failed"
+        Write-Error2 "插件安装失败"
     }
 }
 
 function Uninstall-STPlugin {
-    Write-Title "Uninstall SillyTavern Plugin"
+    Write-Title "卸载 SillyTavern 插件"
     
     if (-not (Test-STPluginInstalled)) {
-        Write-Info "Plugin is not installed"
+        Write-Info "插件未安装"
         return
     }
     
     $pluginPath = Get-STPluginPath
     
     Write-Host ""
-    Write-Info "Will delete: $pluginPath"
-    $confirm = Read-Host "  Confirm uninstall? (y/N)"
+    Write-Info "将删除: $pluginPath"
+    $confirm = Read-Host "  确认卸载？(y/N)"
     
     if ($confirm -ne "y" -and $confirm -ne "Y") {
-        Write-Info "Cancelled"
+        Write-Info "已取消"
         return
     }
     
     try {
         Remove-Item -Path $pluginPath -Recurse -Force
-        Write-Success "Plugin uninstalled"
-        Write-Dim "Restart SillyTavern to take effect"
+        Write-Success "插件已卸载"
+        Write-Dim "重启 SillyTavern 生效"
     } catch {
-        Write-Error2 "Uninstall failed: $_"
+        Write-Error2 "卸载失败: $_"
     }
 }
 
 function Update-STPlugin {
-    Write-Title "Update SillyTavern Plugin"
+    Write-Title "更新 SillyTavern 插件"
     
     if (-not (Test-STPluginInstalled)) {
-        Write-Info "Plugin not installed, will install..."
+        Write-Info "插件未安装，将直接安装..."
         Install-STPlugin
         return
     }
     
-    Write-Info "Updating plugin..."
+    Write-Info "正在更新插件..."
     Install-STPlugin
 }
 
 function Check-STPluginStatus {
-    Write-Title "Plugin Status Check"
+    Write-Title "插件状态检查"
     
     $config = Get-ManagerConfig
     
@@ -1353,25 +1394,25 @@ function Check-STPluginStatus {
     
     # ST path
     if ($config.st_path) {
-        Write-Success "SillyTavern path configured"
-        Write-Dim "Path: $($config.st_path)"
+        Write-Success "SillyTavern 路径已配置"
+        Write-Dim "路径: $($config.st_path)"
         
         if (Test-Path $config.st_path) {
-            Write-Success "Path exists"
+            Write-Success "路径存在"
         } else {
-            Write-Error2 "Path does not exist!"
+            Write-Error2 "路径不存在！"
         }
     } else {
-        Write-Error2 "SillyTavern path not configured"
+        Write-Error2 "SillyTavern 路径未配置"
     }
     
     Write-Host ""
     
     # Plugin status
     if (Test-STPluginInstalled) {
-        Write-Success "Plugin is installed"
+        Write-Success "插件已安装"
         $pluginPath = Get-STPluginPath
-        Write-Dim "Location: $pluginPath"
+        Write-Dim "位置: $pluginPath"
         
         # Check file integrity
         $requiredFiles = @("index.js", "style.css", "manifest.json")
@@ -1384,37 +1425,37 @@ function Check-STPluginStatus {
         }
         
         if ($missing.Count -eq 0) {
-            Write-Success "All files present"
+            Write-Success "所有文件完整"
         } else {
-            Write-Error2 "Missing files: $($missing -join ', ')"
+            Write-Error2 "缺少文件: $($missing -join ', ')"
         }
     } else {
-        Write-Error2 "Plugin not installed"
+        Write-Error2 "插件未安装"
     }
     
     Write-Host ""
     
     # Recall service status
     if (Test-ServiceRunning) {
-        Write-Success "Recall service is running"
+        Write-Success "Recall 服务运行中"
     } else {
-        Write-Error2 "Recall service is not running"
-        Write-Dim "Plugin requires Recall service to work"
+        Write-Error2 "Recall 服务未运行"
+        Write-Dim "插件需要 Recall 服务运行"
     }
     
     Write-Host ""
-    Read-Host "  Press Enter to continue"
+    Read-Host "  按回车继续"
 }
 
 # ==================== Config Operations ====================
 
 function Edit-Config {
-    Write-Title "Edit Config File"
+    Write-Title "编辑配置文件"
     
     $configFile = Join-Path $SCRIPT_DIR "recall_data\config\api_keys.env"
     
     if (-not (Test-Path $configFile)) {
-        Write-Info "Config file does not exist, creating..."
+        Write-Info "配置文件不存在，正在创建..."
         $venvPython = Join-Path $SCRIPT_DIR "recall-env\Scripts\python.exe"
         if (Test-Path $venvPython) {
             & $venvPython -c "from recall.server import load_api_keys_from_file; load_api_keys_from_file()" 2>$null
@@ -1422,106 +1463,106 @@ function Edit-Config {
     }
     
     if (Test-Path $configFile) {
-        Write-Info "Opening config file..."
-        Write-Dim "File: $configFile"
+        Write-Info "正在打开配置文件..."
+        Write-Dim "文件: $configFile"
         Start-Process notepad.exe -ArgumentList $configFile
     } else {
-        Write-Error2 "Cannot create config file"
+        Write-Error2 "无法创建配置文件"
     }
 }
 
 function Reload-Config {
-    Write-Title "Hot Reload Config"
+    Write-Title "热更新配置"
     
     if (-not (Test-ServiceRunning)) {
-        Write-Error2 "Service not running, cannot hot reload"
-        Write-Info "Please start the service first"
+        Write-Error2 "服务未运行，无法热更新"
+        Write-Info "请先启动服务"
         return
     }
     
-    Write-Info "Reloading config..."
+    Write-Info "正在重新加载配置..."
     
     try {
         $null = Invoke-RestMethod -Uri "http://127.0.0.1:$DEFAULT_PORT/v1/config/reload" -Method POST -TimeoutSec 10
-        Write-Success "Config reloaded!"
+        Write-Success "配置已重新加载！"
         
         # Show current mode
         $configInfo = Invoke-RestMethod -Uri "http://127.0.0.1:$DEFAULT_PORT/v1/config" -TimeoutSec 5
-        Write-Dim "Current Embedding Mode: $($configInfo.embedding.mode)"
+        Write-Dim "当前 Embedding 模式: $($configInfo.embedding.mode)"
     } catch {
-        Write-Error2 "Hot reload failed: $_"
+        Write-Error2 "热更新失败: $_"
     }
 }
 
 function Test-EmbeddingAPI {
-    Write-Title "Test Embedding API"
+    Write-Title "测试 Embedding API"
     
     if (-not (Test-ServiceRunning)) {
-        Write-Error2 "Service not running"
+        Write-Error2 "服务未运行"
         return
     }
     
-    Write-Info "Testing Embedding API connection..."
+    Write-Info "正在测试 Embedding API 连接..."
     
     try {
         $result = Invoke-RestMethod -Uri "http://127.0.0.1:$DEFAULT_PORT/v1/config/test" -TimeoutSec 30
         
         Write-Host ""
         if ($result.success) {
-            Write-Success "Embedding API connection successful!"
-            Write-Dim "Backend: $($result.backend)"
-            Write-Dim "Model: $($result.model)"
-            Write-Dim "Dimension: $($result.dimension)"
-            Write-Dim "Latency: $($result.latency_ms)ms"
+            Write-Success "Embedding API 连接成功！"
+            Write-Dim "后端: $($result.backend)"
+            Write-Dim "模型: $($result.model)"
+            Write-Dim "维度: $($result.dimension)"
+            Write-Dim "延迟: $($result.latency_ms)ms"
         } else {
-            Write-Error2 "Embedding API connection failed"
+            Write-Error2 "Embedding API 连接失败"
             Write-Dim $result.message
         }
     } catch {
-        Write-Error2 "Test failed: $_"
+        Write-Error2 "测试失败: $_"
     }
     
     Write-Host ""
-    Read-Host "  Press Enter to continue"
+    Read-Host "  按回车继续"
 }
 
 function Test-LlmAPI {
-    Write-Title "Test LLM API"
+    Write-Title "测试 LLM API"
     
     if (-not (Test-ServiceRunning)) {
-        Write-Error2 "Service not running"
+        Write-Error2 "服务未运行"
         return
     }
     
-    Write-Info "Testing LLM API connection..."
+    Write-Info "正在测试 LLM API 连接..."
     
     try {
         $result = Invoke-RestMethod -Uri "http://127.0.0.1:$DEFAULT_PORT/v1/config/test/llm" -TimeoutSec 30
         
         Write-Host ""
         if ($result.success) {
-            Write-Success "LLM API connection successful!"
-            Write-Dim "Model: $($result.model)"
-            Write-Dim "API Base: $($result.api_base)"
-            Write-Dim "Response: $($result.response)"
-            Write-Dim "Latency: $($result.latency_ms)ms"
+            Write-Success "LLM API 连接成功！"
+            Write-Dim "模型: $($result.model)"
+            Write-Dim "API 地址: $($result.api_base)"
+            Write-Dim "响应: $($result.response)"
+            Write-Dim "延迟: $($result.latency_ms)ms"
         } else {
-            Write-Error2 "LLM API connection failed"
+            Write-Error2 "LLM API 连接失败"
             Write-Dim $result.message
         }
     } catch {
-        Write-Error2 "Test failed: $_"
+        Write-Error2 "测试失败: $_"
     }
     
     Write-Host ""
-    Read-Host "  Press Enter to continue"
+    Read-Host "  按回车继续"
 }
 
 function Show-CurrentConfig {
-    Write-Title "Current Config"
+    Write-Title "当前配置"
     
     if (-not (Test-ServiceRunning)) {
-        Write-Error2 "Service not running, cannot get config"
+        Write-Error2 "服务未运行，无法获取配置"
         return
     }
     
@@ -1529,58 +1570,58 @@ function Show-CurrentConfig {
         $config = Invoke-RestMethod -Uri "http://127.0.0.1:$DEFAULT_PORT/v1/config" -TimeoutSec 5
         
         Write-Host ""
-        Write-Info "Embedding Mode: $($config.embedding.mode)"
+        Write-Info "Embedding 模式: $($config.embedding.mode)"
         Write-Host ""
         
-        Write-Dim "Config File: $($config.config_file)"
-        Write-Dim "File Exists: $($config.config_file_exists)"
+        Write-Dim "配置文件: $($config.config_file)"
+        Write-Dim "文件存在: $($config.config_file_exists)"
         
         Write-Host ""
-        Write-Info "Embedding Config:"
+        Write-Info "Embedding 配置:"
         $embStatus = $config.embedding.status
         $statusColor = if ($embStatus -eq "Configured") { "Green" } else { "DarkGray" }
-        Write-Host "  Status: " -NoNewline
+        Write-Host "  状态: " -NoNewline
         Write-Host $embStatus -ForegroundColor $statusColor
-        Write-Dim "  API Base: $($config.embedding.api_base)"
-        Write-Dim "  Model: $($config.embedding.model)"
-        Write-Dim "  Dimension: $($config.embedding.dimension)"
+        Write-Dim "  API 地址: $($config.embedding.api_base)"
+        Write-Dim "  模型: $($config.embedding.model)"
+        Write-Dim "  维度: $($config.embedding.dimension)"
         
         Write-Host ""
-        Write-Info "LLM Config:"
+        Write-Info "LLM 配置:"
         $llmStatus = $config.llm.status
         $statusColor = if ($llmStatus -eq "Configured") { "Green" } else { "DarkGray" }
-        Write-Host "  Status: " -NoNewline
+        Write-Host "  状态: " -NoNewline
         Write-Host $llmStatus -ForegroundColor $statusColor
-        Write-Dim "  API Base: $($config.llm.api_base)"
-        Write-Dim "  Model: $($config.llm.model)"
+        Write-Dim "  API 地址: $($config.llm.api_base)"
+        Write-Dim "  模型: $($config.llm.model)"
     } catch {
-        Write-Error2 "Failed to get config: $_"
+        Write-Error2 "获取配置失败: $_"
     }
     
     Write-Host ""
-    Read-Host "  Press Enter to continue"
+    Read-Host "  按回车继续"
 }
 
 function Reset-Config {
-    Write-Title "Reset Config"
+    Write-Title "重置配置"
     
     $configFile = Join-Path $SCRIPT_DIR "recall_data\config\api_keys.env"
     
     Write-Host ""
-    Write-Info "This will delete current config and regenerate default"
-    $confirm = Read-Host "  Confirm reset? (y/N)"
+    Write-Info "这将删除当前配置并重新生成默认配置"
+    $confirm = Read-Host "  确认重置？(y/N)"
     
     if ($confirm -ne "y" -and $confirm -ne "Y") {
-        Write-Info "Cancelled"
+        Write-Info "已取消"
         return
     }
     
     if (Test-Path $configFile) {
         Remove-Item $configFile -Force
-        Write-Success "Config reset"
-        Write-Info "Default config will be generated on next service start"
+        Write-Success "配置已重置"
+        Write-Info "下次启动服务时将生成默认配置"
     } else {
-        Write-Info "Config file does not exist"
+        Write-Info "配置文件不存在"
     }
 }
 
@@ -1591,16 +1632,16 @@ function Run-STMenu {
         Show-Banner
         Show-STMenu
         
-        $choice = Read-Host "  Select"
+        $choice = Read-Host "  请选择"
         
         switch ($choice) {
-            "1" { Install-STPlugin; Read-Host "  Press Enter to continue" }
-            "2" { Uninstall-STPlugin; Read-Host "  Press Enter to continue" }
-            "3" { Update-STPlugin; Read-Host "  Press Enter to continue" }
-            "4" { Set-STPath; Read-Host "  Press Enter to continue" }
+            "1" { Install-STPlugin; Read-Host "  按回车继续" }
+            "2" { Uninstall-STPlugin; Read-Host "  按回车继续" }
+            "3" { Update-STPlugin; Read-Host "  按回车继续" }
+            "4" { Set-STPath; Read-Host "  按回车继续" }
             "5" { Check-STPluginStatus }
             "0" { return }
-            default { Write-Error2 "Invalid selection" }
+            default { Write-Error2 "无效选择" }
         }
     }
 }
@@ -1610,17 +1651,17 @@ function Run-ConfigMenu {
         Show-Banner
         Show-ConfigMenu
         
-        $choice = Read-Host "  Select"
+        $choice = Read-Host "  请选择"
         
         switch ($choice) {
-            "1" { Edit-Config; Read-Host "  Press Enter to continue" }
-            "2" { Reload-Config; Read-Host "  Press Enter to continue" }
+            "1" { Edit-Config; Read-Host "  按回车继续" }
+            "2" { Reload-Config; Read-Host "  按回车继续" }
             "3" { Test-EmbeddingAPI }
             "4" { Test-LlmAPI }
             "5" { Show-CurrentConfig }
-            "6" { Reset-Config; Read-Host "  Press Enter to continue" }
+            "6" { Reset-Config; Read-Host "  按回车继续" }
             "0" { return }
-            default { Write-Error2 "Invalid selection" }
+            default { Write-Error2 "无效选择" }
         }
     }
 }
@@ -1630,24 +1671,24 @@ function Run-MainMenu {
         Show-Banner
         Show-MainMenu
         
-        $choice = Read-Host "  Select"
+        $choice = Read-Host "  请选择"
         
         switch ($choice) {
-            "1" { Do-Install; Read-Host "  Press Enter to continue" }
-            "2" { Do-Start; Read-Host "  Press Enter to continue" }
-            "3" { Do-Stop; Read-Host "  Press Enter to continue" }
-            "4" { Do-Restart; Read-Host "  Press Enter to continue" }
+            "1" { Do-Install; Read-Host "  按回车继续" }
+            "2" { Do-Start; Read-Host "  按回车继续" }
+            "3" { Do-Stop; Read-Host "  按回车继续" }
+            "4" { Do-Restart; Read-Host "  按回车继续" }
             "5" { Do-Status }
             "6" { Run-STMenu }
             "7" { Run-ConfigMenu }
-            "8" { Do-ClearData; Read-Host "  Press Enter to continue" }
+            "8" { Do-ClearData; Read-Host "  按回车继续" }
             "0" { 
                 Write-Host ""
-                Write-Color "  Goodbye!" "Cyan"
+                Write-Color "  再见！" "Cyan"
                 Write-Host ""
                 exit 0
             }
-            default { Write-Error2 "Invalid selection" }
+            default { Write-Error2 "无效选择" }
         }
     }
 }
@@ -1669,22 +1710,22 @@ function Run-CommandLine {
         "clear-data" { Do-ClearData }
         default {
             Write-Host ""
-            Write-Host "Recall-ai Manager" -ForegroundColor Cyan
+            Write-Host "Recall-ai 管理工具" -ForegroundColor Cyan
             Write-Host ""
-            Write-Host "Usage: .\manage.ps1 [command]" -ForegroundColor White
+            Write-Host "用法: .\manage.ps1 [命令]" -ForegroundColor White
             Write-Host ""
-            Write-Host "Commands:" -ForegroundColor Yellow
-            Write-Host "  install      Install Recall-ai"
-            Write-Host "  start        Start service"
-            Write-Host "  stop         Stop service"
-            Write-Host "  restart      Restart service"
-            Write-Host "  status       View status"
-            Write-Host "  st-install   Install SillyTavern plugin"
-            Write-Host "  st-uninstall Uninstall SillyTavern plugin"
-            Write-Host "  st-update    Update SillyTavern plugin"
-            Write-Host "  clear-data   Clear all user data (keep config)"
+            Write-Host "命令:" -ForegroundColor Yellow
+            Write-Host "  install      安装 Recall-ai"
+            Write-Host "  start        启动服务"
+            Write-Host "  stop         停止服务"
+            Write-Host "  restart      重启服务"
+            Write-Host "  status       查看状态"
+            Write-Host "  st-install   安装 SillyTavern 插件"
+            Write-Host "  st-uninstall 卸载 SillyTavern 插件"
+            Write-Host "  st-update    更新 SillyTavern 插件"
+            Write-Host "  clear-data   清空用户数据（保留配置）"
             Write-Host ""
-            Write-Host "Run without arguments for interactive menu" -ForegroundColor DarkGray
+            Write-Host "无参数运行进入交互式菜单" -ForegroundColor DarkGray
             Write-Host ""
         }
     }

@@ -143,6 +143,8 @@ class TemporalIndex:
         self._sorted_by_fact_start: List[Tuple[float, str]] = []
         self._sorted_by_known_at: List[Tuple[float, str]] = []
         self._sorted_by_system_start: List[Tuple[float, str]] = []
+        self._sorted_by_fact_end: List[Tuple[float, str]] = []    # (fact_end_ts, doc_id)
+        self._sorted_by_system_end: List[Tuple[float, str]] = []  # (system_end_ts, doc_id)
         
         # 辅助索引
         self._by_subject: Dict[str, Set[str]] = defaultdict(set)    # subject -> doc_ids
@@ -203,6 +205,11 @@ class TemporalIndex:
             ts = entry.system_range.start.timestamp()
             bisect.insort(self._sorted_by_system_start, (ts, entry.doc_id))
         
+        if entry.fact_range.end:
+            bisect.insort(self._sorted_by_fact_end, (entry.fact_range.end.timestamp(), entry.doc_id))
+        if entry.system_range and entry.system_range.end:
+            bisect.insort(self._sorted_by_system_end, (entry.system_range.end.timestamp(), entry.doc_id))
+        
         # 辅助索引
         if entry.subject:
             self._by_subject[entry.subject].add(entry.doc_id)
@@ -230,6 +237,19 @@ class TemporalIndex:
             ts = entry.system_range.start.timestamp()
             try:
                 self._sorted_by_system_start.remove((ts, entry.doc_id))
+            except ValueError:
+                pass
+        
+        if entry.fact_range.end:
+            end_ts = entry.fact_range.end.timestamp()
+            try:
+                self._sorted_by_fact_end.remove((end_ts, entry.doc_id))
+            except ValueError:
+                pass
+        if entry.system_range and entry.system_range.end:
+            end_ts = entry.system_range.end.timestamp()
+            try:
+                self._sorted_by_system_end.remove((end_ts, entry.doc_id))
             except ValueError:
                 pass
         
@@ -278,7 +298,7 @@ class TemporalIndex:
         point: datetime,
         time_type: str = 'fact'  # fact | known | system
     ) -> List[str]:
-        """查询在某时间点有效的所有条目
+        """使用二分查找 — O(log n) + O(k) 而非 O(n)
         
         Args:
             point: 查询时间点
@@ -290,20 +310,30 @@ class TemporalIndex:
         Returns:
             有效的 doc_id 列表
         """
-        results = []
+        ts = point.timestamp()
         
-        for doc_id, entry in self.entries.items():
-            if time_type == 'fact':
-                if entry.fact_range.contains(point):
+        if time_type == 'fact':
+            idx = bisect.bisect_right(self._sorted_by_fact_start, (ts, '\xff'))
+            results = []
+            for i in range(idx):
+                _, doc_id = self._sorted_by_fact_start[i]
+                entry = self.entries.get(doc_id)
+                if entry and entry.fact_range.contains(point):
                     results.append(doc_id)
-            elif time_type == 'known':
-                if entry.known_at and entry.known_at <= point:
+            return results
+        elif time_type == 'known':
+            idx = bisect.bisect_right(self._sorted_by_known_at, (ts, '\xff'))
+            return [doc_id for _, doc_id in self._sorted_by_known_at[:idx]]
+        elif time_type == 'system':
+            idx = bisect.bisect_right(self._sorted_by_system_start, (ts, '\xff'))
+            results = []
+            for i in range(idx):
+                _, doc_id = self._sorted_by_system_start[i]
+                entry = self.entries.get(doc_id)
+                if entry and entry.system_range.contains(point):
                     results.append(doc_id)
-            elif time_type == 'system':
-                if entry.system_range.contains(point):
-                    results.append(doc_id)
-        
-        return results
+            return results
+        return []
     
     def query_range(
         self,
@@ -311,7 +341,7 @@ class TemporalIndex:
         end: Optional[datetime],
         time_type: str = 'fact'
     ) -> List[str]:
-        """查询与时间范围重叠的条目
+        """使用二分查找范围 — O(log n + k)
         
         Args:
             start: 范围起始（None 表示无限早）
@@ -321,17 +351,29 @@ class TemporalIndex:
         Returns:
             重叠的 doc_id 列表
         """
-        query_range = TimeRange(start=start, end=end)
+        if time_type == 'fact':
+            sorted_list = self._sorted_by_fact_start
+        elif time_type == 'system':
+            sorted_list = self._sorted_by_system_start
+        else:
+            return []
+        
+        query_tr = TimeRange(start=start, end=end)
+        
+        if end:
+            end_ts = end.timestamp()
+            right = bisect.bisect_right(sorted_list, (end_ts, '\xff'))
+        else:
+            right = len(sorted_list)
+        
         results = []
-        
-        for doc_id, entry in self.entries.items():
-            if time_type == 'fact':
-                if entry.fact_range.overlaps(query_range):
+        for i in range(right):
+            _, doc_id = sorted_list[i]
+            entry = self.entries.get(doc_id)
+            if entry:
+                target_range = entry.fact_range if time_type == 'fact' else entry.system_range
+                if target_range.overlaps(query_tr):
                     results.append(doc_id)
-            elif time_type == 'system':
-                if entry.system_range.overlaps(query_range):
-                    results.append(doc_id)
-        
         return results
     
     def query_by_subject(
@@ -429,7 +471,7 @@ class TemporalIndex:
         limit: int = 100,
         time_type: str = 'fact'
     ) -> List[str]:
-        """查询某时间点之前结束的条目
+        """查询某时间点之前结束的条目 — bisect 优化
         
         Args:
             point: 时间点
@@ -439,17 +481,21 @@ class TemporalIndex:
         Returns:
             doc_id 列表（按结束时间倒序）
         """
+        if time_type == 'fact':
+            sorted_list = self._sorted_by_fact_end
+        elif time_type == 'system':
+            sorted_list = self._sorted_by_system_end
+        else:
+            raise ValueError(f"time_type 必须为 'fact' 或 'system'，收到: '{time_type}'")
+        
+        point_ts = point.timestamp()
+        right = bisect.bisect_right(sorted_list, (point_ts, '\xff'))
+        
         results = []
-        
-        for doc_id, entry in self.entries.items():
-            if time_type == 'fact':
-                if entry.fact_range.end and entry.fact_range.end < point:
-                    results.append((entry.fact_range.end, doc_id))
-        
-        # 按时间倒序
-        results.sort(key=lambda x: x[0], reverse=True)
-        
-        return [doc_id for _, doc_id in results[:limit]]
+        for i in range(right - 1, max(right - 1 - limit, -1), -1):
+            _, doc_id = sorted_list[i]
+            results.append(doc_id)
+        return results
     
     def query_after(
         self,
@@ -457,7 +503,7 @@ class TemporalIndex:
         limit: int = 100,
         time_type: str = 'fact'
     ) -> List[str]:
-        """查询某时间点之后开始的条目
+        """查询某时间点之后开始的条目 — bisect 优化
         
         Args:
             point: 时间点
@@ -467,17 +513,21 @@ class TemporalIndex:
         Returns:
             doc_id 列表（按开始时间正序）
         """
+        if time_type == 'fact':
+            sorted_list = self._sorted_by_fact_start
+        elif time_type == 'system':
+            sorted_list = self._sorted_by_system_start
+        else:
+            raise ValueError(f"time_type 必须为 'fact' 或 'system'，收到: '{time_type}'")
+        
+        point_ts = point.timestamp()
+        left = bisect.bisect_left(sorted_list, (point_ts,))
+        
         results = []
-        
-        for doc_id, entry in self.entries.items():
-            if time_type == 'fact':
-                if entry.fact_range.start and entry.fact_range.start > point:
-                    results.append((entry.fact_range.start, doc_id))
-        
-        # 按时间正序
-        results.sort(key=lambda x: x[0])
-        
-        return [doc_id for _, doc_id in results[:limit]]
+        for i in range(left, min(left + limit, len(sorted_list))):
+            _, doc_id = sorted_list[i]
+            results.append(doc_id)
+        return results
     
     # =========================================================================
     # 统计与工具
@@ -501,6 +551,8 @@ class TemporalIndex:
         self._sorted_by_fact_start.clear()
         self._sorted_by_known_at.clear()
         self._sorted_by_system_start.clear()
+        self._sorted_by_fact_end.clear()
+        self._sorted_by_system_end.clear()
         self._by_subject.clear()
         self._by_predicate.clear()
         self._dirty = True

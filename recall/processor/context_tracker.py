@@ -73,6 +73,17 @@ class ContextType(Enum):
     CUSTOM = "custom"                    # 自定义
 
 
+# v5.0: RP 特有的上下文类型（通用模式下可过滤）
+RP_CONTEXT_TYPES = {
+    ContextType.CHARACTER_TRAIT,
+    ContextType.WORLD_SETTING,
+    ContextType.RELATIONSHIP,
+    ContextType.EMOTIONAL_STATE,
+    ContextType.SKILL_ABILITY,
+    ContextType.ITEM_PROP,
+}
+
+
 @dataclass
 class PersistentContext:
     """持久性上下文/条件"""
@@ -1548,6 +1559,11 @@ class ContextTracker:
             result = self._extract_with_rules(text, user_id, character_id)
         
         if result:
+            # v5.0: 模式感知过滤 — 非 RP 模式下过滤掉 RP 特有上下文类型
+            from recall.mode import get_mode_config
+            if not get_mode_config().rp_context_types:
+                result = [ctx for ctx in result if ctx.context_type not in RP_CONTEXT_TYPES]
+            
             _safe_print(f"[ContextTracker] ✅ 提取完成: 新增 {len(result)} 条条件")
             for ctx in result:
                 _safe_print(f"[ContextTracker]    🌱 [{ctx.context_type.value}] {ctx.content[:50]}{'...' if len(ctx.content) > 50 else ''}")

@@ -114,6 +114,13 @@ class APIEmbeddingBackend(EmbeddingBackend):
         # Google (通过兼容接口)
         "text-embedding-004": 768,
         "embedding-001": 768,
+        # v5.0 新增
+        "voyage-3": 1024,
+        "voyage-3-lite": 512,
+        "voyage-code-3": 1024,
+        "embed-multilingual-v3.0": 1024,
+        "embed-english-v3.0": 1024,
+        "embed-multilingual-light-v3.0": 384,
     }
     
     # 默认 API 基地址
@@ -147,6 +154,8 @@ class APIEmbeddingBackend(EmbeddingBackend):
         rate_limit = int(os.environ.get('EMBEDDING_RATE_LIMIT', '10'))  # 默认每分钟10次
         rate_window = int(os.environ.get('EMBEDDING_RATE_WINDOW', '60'))  # 默认60秒窗口
         self._rate_limiter = RateLimiter(max_requests=rate_limit, window_seconds=rate_window)
+        # v5.0: 自动检测 Embedding 提供商
+        self._embedding_provider = self._detect_embedding_provider()
     
     def _get_api_key_from_env(self) -> Optional[str]:
         """从环境变量获取 API key
@@ -164,9 +173,31 @@ class APIEmbeddingBackend(EmbeddingBackend):
         """检查是否有 API key"""
         return bool(self.api_key)
     
+    def _detect_embedding_provider(self) -> str:
+        """根据 api_base 域名和模型名称自动检测 Embedding 提供商"""
+        if self.api_base:
+            from urllib.parse import urlparse
+            hostname = urlparse(self.api_base.lower()).hostname or ''
+            if hostname.endswith('.googleapis.com') or 'generativelanguage' in hostname:
+                return 'google'
+            if hostname.endswith('.voyageai.com') or 'voyage' in hostname:
+                return 'voyage'
+            if hostname.endswith('.cohere.com') or 'cohere' in hostname:
+                return 'cohere'
+            return 'openai'
+        if self.config.api_model:
+            model_lower = self.config.api_model.lower()
+            if model_lower.startswith('voyage'):
+                return 'voyage'
+            if model_lower.startswith('embed-') and ('multilingual' in model_lower or 'english' in model_lower):
+                return 'cohere'
+            if model_lower.startswith('text-embedding-004') or model_lower.startswith('embedding-001'):
+                return 'google'
+        return 'openai'
+    
     @property
     def client(self):
-        """获取 OpenAI 客户端（兼容硅基流动等 OpenAI 兼容 API）"""
+        """获取 Embedding 客户端（v5.0: 自动选择后端）"""
         if self._client is None:
             if not self.is_available:
                 raise ValueError(
@@ -175,16 +206,59 @@ class APIEmbeddingBackend(EmbeddingBackend):
                     f"  EMBEDDING_API_KEY=your-api-key\n"
                     f"  EMBEDDING_API_BASE=https://api.openai.com/v1"
                 )
-            
-            from openai import OpenAI
-            self._client = OpenAI(
-                api_key=self.api_key,
-                base_url=self.api_base
-            )
+            if self._embedding_provider == 'google':
+                self._client = self._create_google_embedding_client()
+            elif self._embedding_provider == 'voyage':
+                self._client = self._create_voyage_client()
+            elif self._embedding_provider == 'cohere':
+                self._client = self._create_cohere_client()
+            else:
+                self._client = self._create_openai_embedding_client()
         return self._client
     
+    def _create_openai_embedding_client(self):
+        """创建 OpenAI Embedding 客户端"""
+        from openai import OpenAI
+        return OpenAI(api_key=self.api_key, base_url=self.api_base)
+    
+    def _create_google_embedding_client(self):
+        """创建 Google Embedding 客户端"""
+        try:
+            import google.generativeai as genai
+            genai.configure(api_key=self.api_key)
+            return genai
+        except ImportError:
+            raise ImportError("使用 Google Embedding 需要安装 google-generativeai: pip install google-generativeai")
+    
+    def _create_voyage_client(self):
+        """创建 Voyage AI 客户端"""
+        try:
+            import voyageai
+            return voyageai.Client(api_key=self.api_key)
+        except ImportError:
+            raise ImportError("使用 Voyage Embedding 需要安装 voyageai: pip install voyageai")
+    
+    def _create_cohere_client(self):
+        """创建 Cohere 客户端"""
+        try:
+            import cohere
+            return cohere.Client(api_key=self.api_key)
+        except ImportError:
+            raise ImportError("使用 Cohere Embedding 需要安装 cohere: pip install cohere")
+    
     def encode(self, text: str) -> np.ndarray:
-        """编码单个文本（带速率限制和重试）"""
+        """编码单个文本（v5.0: 自动路由到对应提供商）"""
+        if self._embedding_provider == 'google':
+            return self._encode_google(text)
+        elif self._embedding_provider == 'voyage':
+            return self._encode_voyage(text)
+        elif self._embedding_provider == 'cohere':
+            return self._encode_cohere(text)
+        else:
+            return self._encode_openai(text)
+    
+    def _encode_openai(self, text: str) -> np.ndarray:
+        """OpenAI Embedding 编码（带速率限制和重试）"""
         max_retries = 3
         
         for attempt in range(max_retries):
@@ -220,8 +294,56 @@ class APIEmbeddingBackend(EmbeddingBackend):
         
         raise RuntimeError(f"Embedding API 调用失败，已重试 {max_retries} 次")
     
+    def _encode_google(self, text: str) -> np.ndarray:
+        """Google Embedding 编码"""
+        if not self._rate_limiter.acquire():
+            raise RuntimeError("Embedding API 速率限制超时")
+        result = self.client.embed_content(
+            model=f"models/{self.config.api_model}",
+            content=text
+        )
+        embedding = np.array(result['embedding'], dtype='float32')
+        if self.config.normalize:
+            embedding = embedding / np.linalg.norm(embedding)
+        return embedding
+    
+    def _encode_voyage(self, text: str) -> np.ndarray:
+        """Voyage AI Embedding 编码"""
+        if not self._rate_limiter.acquire():
+            raise RuntimeError("Embedding API 速率限制超时")
+        result = self.client.embed([text], model=self.config.api_model)
+        embedding = np.array(result.embeddings[0], dtype='float32')
+        if self.config.normalize:
+            embedding = embedding / np.linalg.norm(embedding)
+        return embedding
+    
+    def _encode_cohere(self, text: str) -> np.ndarray:
+        """Cohere Embedding 编码"""
+        if not self._rate_limiter.acquire():
+            raise RuntimeError("Embedding API 速率限制超时")
+        result = self.client.embed(
+            texts=[text],
+            model=self.config.api_model,
+            input_type="search_document"
+        )
+        embedding = np.array(result.embeddings[0], dtype='float32')
+        if self.config.normalize:
+            embedding = embedding / np.linalg.norm(embedding)
+        return embedding
+    
     def encode_batch(self, texts: List[str]) -> np.ndarray:
-        """批量编码（带速率限制和重试）"""
+        """批量编码（v5.0: 自动路由到对应提供商）"""
+        if self._embedding_provider == 'google':
+            return self._encode_batch_google(texts)
+        elif self._embedding_provider == 'voyage':
+            return self._encode_batch_voyage(texts)
+        elif self._embedding_provider == 'cohere':
+            return self._encode_batch_cohere(texts)
+        else:
+            return self._encode_batch_openai(texts)
+    
+    def _encode_batch_openai(self, texts: List[str]) -> np.ndarray:
+        """OpenAI 批量编码（带速率限制和重试）"""
         # API 通常有批量限制，分批处理
         all_embeddings = []
         batch_size = min(self.config.batch_size, 100)  # OpenAI 限制
@@ -262,4 +384,56 @@ class APIEmbeddingBackend(EmbeddingBackend):
                     
                     raise
         
+        return np.array(all_embeddings)
+    
+    def _encode_batch_google(self, texts: List[str]) -> np.ndarray:
+        """Google Embedding 批量编码"""
+        all_embeddings = []
+        for text in texts:
+            if not self._rate_limiter.acquire():
+                raise RuntimeError("Embedding API 速率限制超时")
+            result = self.client.embed_content(
+                model=f"models/{self.config.api_model}",
+                content=text
+            )
+            embedding = np.array(result['embedding'], dtype='float32')
+            if self.config.normalize:
+                embedding = embedding / np.linalg.norm(embedding)
+            all_embeddings.append(embedding)
+        return np.array(all_embeddings)
+    
+    def _encode_batch_voyage(self, texts: List[str]) -> np.ndarray:
+        """Voyage AI Embedding 批量编码"""
+        all_embeddings = []
+        batch_size = min(self.config.batch_size, 128)
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i:i + batch_size]
+            if not self._rate_limiter.acquire():
+                raise RuntimeError("Embedding API 速率限制超时")
+            result = self.client.embed(batch, model=self.config.api_model)
+            for emb in result.embeddings:
+                embedding = np.array(emb, dtype='float32')
+                if self.config.normalize:
+                    embedding = embedding / np.linalg.norm(embedding)
+                all_embeddings.append(embedding)
+        return np.array(all_embeddings)
+    
+    def _encode_batch_cohere(self, texts: List[str]) -> np.ndarray:
+        """Cohere Embedding 批量编码"""
+        all_embeddings = []
+        batch_size = min(self.config.batch_size, 96)
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i:i + batch_size]
+            if not self._rate_limiter.acquire():
+                raise RuntimeError("Embedding API 速率限制超时")
+            result = self.client.embed(
+                texts=batch,
+                model=self.config.api_model,
+                input_type="search_document"
+            )
+            for emb in result.embeddings:
+                embedding = np.array(emb, dtype='float32')
+                if self.config.normalize:
+                    embedding = embedding / np.linalg.norm(embedding)
+                all_embeddings.append(embedding)
         return np.array(all_embeddings)

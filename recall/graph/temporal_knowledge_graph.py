@@ -283,6 +283,25 @@ class TemporalKnowledgeGraph:
                 props = json.loads(props_json) if props_json else {}
                 
                 # 从 properties 中恢复完整的 UnifiedNode
+                # 注意：Kuzu 返回的时间字段可能是字符串
+                created_at_val = created_at
+                if isinstance(created_at_val, str):
+                    try:
+                        created_at_val = datetime.fromisoformat(created_at_val)
+                    except ValueError:
+                        created_at_val = datetime.now()
+                
+                updated_at_raw = props.get('updated_at')
+                if isinstance(updated_at_raw, str):
+                    try:
+                        updated_at_val = datetime.fromisoformat(updated_at_raw)
+                    except ValueError:
+                        updated_at_val = datetime.now()
+                elif isinstance(updated_at_raw, datetime):
+                    updated_at_val = updated_at_raw
+                else:
+                    updated_at_val = datetime.now()
+                
                 node = UnifiedNode(
                     uuid=node_id,
                     name=name,
@@ -293,8 +312,8 @@ class TemporalKnowledgeGraph:
                     aliases=props.get('aliases', []),
                     group_id=props.get('group_id', 'default'),
                     user_id=props.get('user_id', 'default'),
-                    created_at=created_at or datetime.now(),
-                    updated_at=props.get('updated_at', datetime.now()) if isinstance(props.get('updated_at'), datetime) else datetime.now(),
+                    created_at=created_at_val or datetime.now(),
+                    updated_at=updated_at_val,
                     verification_count=props.get('verification_count', 0)
                 )
                 self.nodes[node.uuid] = node
@@ -310,19 +329,39 @@ class TemporalKnowledgeGraph:
                 props = json.loads(props_json) if props_json else {}
                 
                 # 从 properties 中恢复完整的 TemporalFact
+                # 注意：props 中的时间字段是字符串，需要转换
+                valid_from_val = props.get('valid_from')
+                if valid_from_val and isinstance(valid_from_val, str):
+                    try:
+                        valid_from_val = datetime.fromisoformat(valid_from_val)
+                    except ValueError:
+                        valid_from_val = None
+                valid_until_val = props.get('valid_until')
+                if valid_until_val and isinstance(valid_until_val, str):
+                    try:
+                        valid_until_val = datetime.fromisoformat(valid_until_val)
+                    except ValueError:
+                        valid_until_val = None
+                created_at_val = created_at
+                if isinstance(created_at_val, str):
+                    try:
+                        created_at_val = datetime.fromisoformat(created_at_val)
+                    except ValueError:
+                        created_at_val = datetime.now()
+                
                 edge = TemporalFact(
                     uuid=edge_id,
                     subject=source_id,
                     object=target_id,
                     predicate=edge_type or '',
                     fact=props.get('fact', ''),
-                    valid_from=props.get('valid_from'),
-                    valid_until=props.get('valid_until'),
+                    valid_from=valid_from_val,
+                    valid_until=valid_until_val,
                     source_text=props.get('source_text', ''),
                     confidence=weight if weight else props.get('confidence', 0.5),
                     group_id=props.get('group_id', 'default'),
                     user_id=props.get('user_id', 'default'),
-                    created_at=created_at or datetime.now()
+                    created_at=created_at_val or datetime.now()
                 )
                 self.edges[edge.uuid] = edge
                 self._index_edge(edge)
@@ -1605,35 +1644,9 @@ class TemporalKnowledgeGraph:
     # 使得可以无缝替换使用，实现统一的图存储后端。
     # =========================================================================
     
-    # 预定义的关系类型（从 KnowledgeGraph 继承，针对 RP 场景优化）
-    RELATION_TYPES = {
-        # 人物关系
-        'IS_FRIEND_OF': '是朋友',
-        'IS_ENEMY_OF': '是敌人',
-        'IS_FAMILY_OF': '是家人',
-        'LOVES': '爱慕',
-        'HATES': '憎恨',
-        'KNOWS': '认识',
-        'WORKS_FOR': '为...工作',
-        'MENTORS': '指导',
-        
-        # 空间关系
-        'LOCATED_IN': '位于',
-        'TRAVELS_TO': '前往',
-        'OWNS': '拥有',
-        'LIVES_IN': '居住于',
-        
-        # 事件关系
-        'PARTICIPATED_IN': '参与了',
-        'CAUSED': '导致了',
-        'WITNESSED': '目击了',
-        
-        # 物品关系
-        'CARRIES': '携带',
-        'USES': '使用',
-        'GAVE_TO': '给予',
-        'RECEIVED_FROM': '收到来自',
-    }
+    # 预定义的关系类型（v5.0 支持模式感知，从 KnowledgeGraph 统一获取）
+    from .knowledge_graph import get_relation_types as _get_relation_types
+    RELATION_TYPES = _get_relation_types()
     
     @property
     def outgoing(self) -> Dict[str, List[Any]]:

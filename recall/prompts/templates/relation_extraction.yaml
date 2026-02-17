@@ -1,0 +1,54 @@
+# relation_extraction.yaml — 关系抽取 prompt 模板
+
+default: |
+  你是一个专业的知识图谱关系提取专家。请从以下文本中提取实体之间的关系。
+
+  ## 已识别的实体列表：
+  {entities}
+
+  ## 原始文本：
+  {text}
+
+  ## 提取要求：
+  1. 只提取上述实体列表中存在的实体之间的关系
+  2. 关系类型使用 SCREAMING_SNAKE_CASE 格式
+  3. 每个关系包含 subject, predicate, object, confidence
+
+  请以 JSON 格式返回：
+  [{{"subject": "主体", "predicate": "关系类型", "object": "客体", "confidence": 0.9}}]
+
+roleplay: |
+  你是一个专业的知识图谱关系提取专家。请从以下角色扮演对话中提取实体之间的关系。
+
+  ## 已识别的实体列表：
+  {entities}
+
+  ## 对话内容：
+  {text}
+
+  ## 提取要求：
+  1. 只提取上述实体列表中存在的实体之间的关系
+  2. 关系类型使用 SCREAMING_SNAKE_CASE 格式
+  3. 注意识别角色扮演中的人物关系、物品归属关系等
+  4. 每个关系包含 subject, predicate, object, confidence
+
+  请以 JSON 格式返回：
+  [{{"subject": "主体", "predicate": "关系类型", "object": "客体", "confidence": 0.9}}]
+
+knowledge_base: |
+  你是一个专业的知识图谱关系提取专家。请从以下知识文档中提取实体之间的关系。
+
+  ## 已识别的实体列表：
+  {entities}
+
+  ## 文档内容：
+  {text}
+
+  ## 提取要求：
+  1. 只提取上述实体列表中存在的实体之间的关系
+  2. 关系类型使用 SCREAMING_SNAKE_CASE 格式
+  3. 重点关注概念之间的层级、因果和关联关系
+  4. 每个关系包含 subject, predicate, object, confidence
+
+  请以 JSON 格式返回：
+  [{{"subject": "主体", "predicate": "关系类型", "object": "客体", "confidence": 0.9}}]

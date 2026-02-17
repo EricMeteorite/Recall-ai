@@ -148,11 +148,21 @@ class ScenarioDetector:
             total_score = sum(scores.values())
             confidence = max_score / total_score if total_score > 0 else 0.5
         
+        # v5.0: 模式感知策略覆盖 — 通用模式下 RP 场景使用平衡策略
+        strategy = self.retrieval_strategies[detected_type]
+        try:
+            from recall.mode import get_mode_config, RecallMode
+            mode_cfg = get_mode_config()
+            if mode_cfg.mode != RecallMode.ROLEPLAY and detected_type == ScenarioType.ROLEPLAY:
+                strategy = 'balanced'
+        except Exception:
+            pass
+        
         return ScenarioInfo(
             type=detected_type,
             confidence=min(confidence, 1.0),
             features=features,
-            suggested_retrieval_strategy=self.retrieval_strategies[detected_type]
+            suggested_retrieval_strategy=strategy
         )
     
     def detect_batch(self, texts: List[str]) -> List[ScenarioInfo]:
@@ -212,6 +222,13 @@ class ScenarioDetector:
                 'semantic_weight': 0.4,
                 'keyword_weight': 0.25,
                 'time_weight': 0.1,
+                'max_results': 12
+            },
+            'balanced': {
+                'use_entity_index': True,
+                'entity_weight': 0.3,
+                'semantic_weight': 0.4,
+                'keyword_weight': 0.3,
                 'max_results': 12
             }
         }

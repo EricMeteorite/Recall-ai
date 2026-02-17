@@ -7,6 +7,20 @@ from typing import Dict, List, Optional, Tuple
 from collections import defaultdict
 
 
+def get_relation_types() -> dict:
+    """根据当前模式返回合并后的关系类型字典
+    
+    RP 模式: RP_RELATION_TYPES + GENERAL_RELATION_TYPES
+    通用/知识库模式: 仅 GENERAL_RELATION_TYPES
+    """
+    from recall.mode import get_mode_config, RecallMode
+    cfg = get_mode_config()
+    base = dict(KnowledgeGraph.GENERAL_RELATION_TYPES)
+    if cfg.rp_relation_types:
+        base.update(KnowledgeGraph.RP_RELATION_TYPES)
+    return base
+
+
 @dataclass
 class Relation:
     """实体间的关系"""
@@ -26,8 +40,8 @@ class Relation:
 class KnowledgeGraph:
     """轻量级知识图谱 - 无需 Neo4j"""
     
-    # 预定义的关系类型（针对 RP 场景优化）
-    RELATION_TYPES = {
+    # 预定义的 RP 关系类型
+    RP_RELATION_TYPES = {
         # 人物关系
         'IS_FRIEND_OF': '是朋友',
         'IS_ENEMY_OF': '是敌人',
@@ -55,6 +69,28 @@ class KnowledgeGraph:
         'GAVE_TO': '给予',
         'RECEIVED_FROM': '收到来自',
     }
+    
+    # v5.0 通用关系类型
+    GENERAL_RELATION_TYPES = {
+        'RELATED_TO': '相关于',
+        'BELONGS_TO': '属于',
+        'CONTAINS': '包含',
+        'DEPENDS_ON': '依赖于',
+        'DESCRIBES': '描述',
+        'DERIVED_FROM': '源自',
+        'CONTRADICTS': '矛盾于',
+        'SUPPORTS': '支持',
+        'PRECEDES': '先于',
+        'FOLLOWS': '后于',
+        'SIMILAR_TO': '类似于',
+        'OPPOSITE_OF': '对立于',
+        'PART_OF': '是...的一部分',
+        'INSTANCE_OF': '是...的实例',
+        'HAS_PROPERTY': '具有属性',
+    }
+    
+    # 向后兼容：合并后的关系类型
+    RELATION_TYPES = {**RP_RELATION_TYPES, **GENERAL_RELATION_TYPES}
     
     def __init__(self, data_path: str):
         self.data_path = data_path
@@ -268,3 +304,7 @@ class KnowledgeGraph:
         self.incoming.clear()
         self.relation_index.clear()
         self._save()
+
+
+# 模块级向后兼容变量（根据当前模式返回合并后的关系类型）
+RELATION_TYPES = get_relation_types()

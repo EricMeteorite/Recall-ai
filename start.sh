@@ -233,7 +233,7 @@ load_api_keys() {
     # 包括 v4.0 Phase 3.6 三路并行召回配置项（100%不遗忘保证）
     # 包括 v4.1 增强功能配置项
     # 包括 v4.2 性能优化配置项
-    local supported_keys="EMBEDDING_API_KEY EMBEDDING_API_BASE EMBEDDING_MODEL EMBEDDING_DIMENSION EMBEDDING_RATE_LIMIT EMBEDDING_RATE_WINDOW RECALL_EMBEDDING_MODE LLM_API_KEY LLM_API_BASE LLM_MODEL LLM_TIMEOUT FORESHADOWING_LLM_ENABLED FORESHADOWING_TRIGGER_INTERVAL FORESHADOWING_AUTO_PLANT FORESHADOWING_AUTO_RESOLVE FORESHADOWING_MAX_RETURN FORESHADOWING_MAX_ACTIVE CONTEXT_TRIGGER_INTERVAL CONTEXT_MAX_CONTEXT_TURNS CONTEXT_MAX_PER_TYPE CONTEXT_MAX_TOTAL CONTEXT_DECAY_DAYS CONTEXT_DECAY_RATE CONTEXT_MIN_CONFIDENCE BUILD_CONTEXT_INCLUDE_RECENT PROACTIVE_REMINDER_ENABLED PROACTIVE_REMINDER_TURNS DEDUP_EMBEDDING_ENABLED DEDUP_HIGH_THRESHOLD DEDUP_LOW_THRESHOLD TEMPORAL_GRAPH_ENABLED TEMPORAL_GRAPH_BACKEND KUZU_BUFFER_POOL_SIZE TEMPORAL_DECAY_RATE TEMPORAL_MAX_HISTORY CONTRADICTION_DETECTION_ENABLED CONTRADICTION_AUTO_RESOLVE CONTRADICTION_DETECTION_STRATEGY CONTRADICTION_SIMILARITY_THRESHOLD FULLTEXT_ENABLED FULLTEXT_K1 FULLTEXT_B FULLTEXT_WEIGHT SMART_EXTRACTOR_MODE SMART_EXTRACTOR_COMPLEXITY_THRESHOLD SMART_EXTRACTOR_ENABLE_TEMPORAL BUDGET_DAILY_LIMIT BUDGET_HOURLY_LIMIT BUDGET_RESERVE BUDGET_ALERT_THRESHOLD DEDUP_JACCARD_THRESHOLD DEDUP_SEMANTIC_THRESHOLD DEDUP_SEMANTIC_LOW_THRESHOLD DEDUP_LLM_ENABLED ELEVEN_LAYER_RETRIEVER_ENABLED RETRIEVAL_L1_BLOOM_ENABLED RETRIEVAL_L2_TEMPORAL_ENABLED RETRIEVAL_L3_INVERTED_ENABLED RETRIEVAL_L4_ENTITY_ENABLED RETRIEVAL_L5_GRAPH_ENABLED RETRIEVAL_L6_NGRAM_ENABLED RETRIEVAL_L7_VECTOR_COARSE_ENABLED RETRIEVAL_L8_VECTOR_FINE_ENABLED RETRIEVAL_L9_RERANK_ENABLED RETRIEVAL_L10_CROSS_ENCODER_ENABLED RETRIEVAL_L11_LLM_ENABLED RETRIEVAL_L2_TEMPORAL_TOP_K RETRIEVAL_L3_INVERTED_TOP_K RETRIEVAL_L4_ENTITY_TOP_K RETRIEVAL_L5_GRAPH_TOP_K RETRIEVAL_L6_NGRAM_TOP_K RETRIEVAL_L7_VECTOR_TOP_K RETRIEVAL_L10_CROSS_ENCODER_TOP_K RETRIEVAL_L11_LLM_TOP_K RETRIEVAL_FINE_RANK_THRESHOLD RETRIEVAL_FINAL_TOP_K RETRIEVAL_L5_GRAPH_MAX_DEPTH RETRIEVAL_L5_GRAPH_MAX_ENTITIES RETRIEVAL_L5_GRAPH_DIRECTION RETRIEVAL_L10_CROSS_ENCODER_MODEL RETRIEVAL_L11_LLM_TIMEOUT RETRIEVAL_WEIGHT_INVERTED RETRIEVAL_WEIGHT_ENTITY RETRIEVAL_WEIGHT_GRAPH RETRIEVAL_WEIGHT_NGRAM RETRIEVAL_WEIGHT_VECTOR RETRIEVAL_WEIGHT_TEMPORAL QUERY_PLANNER_ENABLED QUERY_PLANNER_CACHE_SIZE QUERY_PLANNER_CACHE_TTL COMMUNITY_DETECTION_ENABLED COMMUNITY_DETECTION_ALGORITHM COMMUNITY_MIN_SIZE TRIPLE_RECALL_ENABLED TRIPLE_RECALL_RRF_K TRIPLE_RECALL_VECTOR_WEIGHT TRIPLE_RECALL_KEYWORD_WEIGHT TRIPLE_RECALL_ENTITY_WEIGHT VECTOR_IVF_HNSW_M VECTOR_IVF_HNSW_EF_CONSTRUCTION VECTOR_IVF_HNSW_EF_SEARCH FALLBACK_ENABLED FALLBACK_PARALLEL FALLBACK_WORKERS FALLBACK_MAX_RESULTS LLM_RELATION_MODE LLM_RELATION_COMPLEXITY_THRESHOLD LLM_RELATION_ENABLE_TEMPORAL LLM_RELATION_ENABLE_FACT_DESCRIPTION ENTITY_SUMMARY_ENABLED ENTITY_SUMMARY_MIN_FACTS EPISODE_TRACKING_ENABLED LLM_DEFAULT_MAX_TOKENS LLM_RELATION_MAX_TOKENS FORESHADOWING_MAX_TOKENS CONTEXT_EXTRACTION_MAX_TOKENS ENTITY_SUMMARY_MAX_TOKENS SMART_EXTRACTOR_MAX_TOKENS CONTRADICTION_MAX_TOKENS BUILD_CONTEXT_MAX_TOKENS RETRIEVAL_LLM_MAX_TOKENS DEDUP_LLM_MAX_TOKENS EMBEDDING_REUSE_ENABLED UNIFIED_ANALYZER_ENABLED UNIFIED_ANALYSIS_MAX_TOKENS TURN_API_ENABLED"
+    local supported_keys="EMBEDDING_API_KEY EMBEDDING_API_BASE EMBEDDING_MODEL EMBEDDING_DIMENSION EMBEDDING_RATE_LIMIT EMBEDDING_RATE_WINDOW RECALL_EMBEDDING_MODE LLM_API_KEY LLM_API_BASE LLM_MODEL LLM_TIMEOUT FORESHADOWING_LLM_ENABLED FORESHADOWING_TRIGGER_INTERVAL FORESHADOWING_AUTO_PLANT FORESHADOWING_AUTO_RESOLVE FORESHADOWING_MAX_RETURN FORESHADOWING_MAX_ACTIVE CONTEXT_TRIGGER_INTERVAL CONTEXT_MAX_CONTEXT_TURNS CONTEXT_MAX_PER_TYPE CONTEXT_MAX_TOTAL CONTEXT_DECAY_DAYS CONTEXT_DECAY_RATE CONTEXT_MIN_CONFIDENCE BUILD_CONTEXT_INCLUDE_RECENT PROACTIVE_REMINDER_ENABLED PROACTIVE_REMINDER_TURNS DEDUP_EMBEDDING_ENABLED DEDUP_HIGH_THRESHOLD DEDUP_LOW_THRESHOLD TEMPORAL_GRAPH_ENABLED TEMPORAL_GRAPH_BACKEND KUZU_BUFFER_POOL_SIZE TEMPORAL_DECAY_RATE TEMPORAL_MAX_HISTORY CONTRADICTION_DETECTION_ENABLED CONTRADICTION_AUTO_RESOLVE CONTRADICTION_DETECTION_STRATEGY CONTRADICTION_SIMILARITY_THRESHOLD FULLTEXT_ENABLED FULLTEXT_K1 FULLTEXT_B FULLTEXT_WEIGHT SMART_EXTRACTOR_MODE SMART_EXTRACTOR_COMPLEXITY_THRESHOLD SMART_EXTRACTOR_ENABLE_TEMPORAL BUDGET_DAILY_LIMIT BUDGET_HOURLY_LIMIT BUDGET_RESERVE BUDGET_ALERT_THRESHOLD DEDUP_JACCARD_THRESHOLD DEDUP_SEMANTIC_THRESHOLD DEDUP_SEMANTIC_LOW_THRESHOLD DEDUP_LLM_ENABLED ELEVEN_LAYER_RETRIEVER_ENABLED RETRIEVAL_L1_BLOOM_ENABLED RETRIEVAL_L2_TEMPORAL_ENABLED RETRIEVAL_L3_INVERTED_ENABLED RETRIEVAL_L4_ENTITY_ENABLED RETRIEVAL_L5_GRAPH_ENABLED RETRIEVAL_L6_NGRAM_ENABLED RETRIEVAL_L7_VECTOR_COARSE_ENABLED RETRIEVAL_L8_VECTOR_FINE_ENABLED RETRIEVAL_L9_RERANK_ENABLED RETRIEVAL_L10_CROSS_ENCODER_ENABLED RETRIEVAL_L11_LLM_ENABLED RETRIEVAL_L2_TEMPORAL_TOP_K RETRIEVAL_L3_INVERTED_TOP_K RETRIEVAL_L4_ENTITY_TOP_K RETRIEVAL_L5_GRAPH_TOP_K RETRIEVAL_L6_NGRAM_TOP_K RETRIEVAL_L7_VECTOR_TOP_K RETRIEVAL_L10_CROSS_ENCODER_TOP_K RETRIEVAL_L11_LLM_TOP_K RETRIEVAL_FINE_RANK_THRESHOLD RETRIEVAL_FINAL_TOP_K RETRIEVAL_L5_GRAPH_MAX_DEPTH RETRIEVAL_L5_GRAPH_MAX_ENTITIES RETRIEVAL_L5_GRAPH_DIRECTION RETRIEVAL_L10_CROSS_ENCODER_MODEL RETRIEVAL_L11_LLM_TIMEOUT RETRIEVAL_WEIGHT_INVERTED RETRIEVAL_WEIGHT_ENTITY RETRIEVAL_WEIGHT_GRAPH RETRIEVAL_WEIGHT_NGRAM RETRIEVAL_WEIGHT_VECTOR RETRIEVAL_WEIGHT_TEMPORAL QUERY_PLANNER_ENABLED QUERY_PLANNER_CACHE_SIZE QUERY_PLANNER_CACHE_TTL COMMUNITY_DETECTION_ENABLED COMMUNITY_DETECTION_ALGORITHM COMMUNITY_MIN_SIZE TRIPLE_RECALL_ENABLED TRIPLE_RECALL_RRF_K TRIPLE_RECALL_VECTOR_WEIGHT TRIPLE_RECALL_KEYWORD_WEIGHT TRIPLE_RECALL_ENTITY_WEIGHT VECTOR_IVF_HNSW_M VECTOR_IVF_HNSW_EF_CONSTRUCTION VECTOR_IVF_HNSW_EF_SEARCH FALLBACK_ENABLED FALLBACK_PARALLEL FALLBACK_WORKERS FALLBACK_MAX_RESULTS LLM_RELATION_MODE LLM_RELATION_COMPLEXITY_THRESHOLD LLM_RELATION_ENABLE_TEMPORAL LLM_RELATION_ENABLE_FACT_DESCRIPTION ENTITY_SUMMARY_ENABLED ENTITY_SUMMARY_MIN_FACTS EPISODE_TRACKING_ENABLED LLM_DEFAULT_MAX_TOKENS LLM_RELATION_MAX_TOKENS FORESHADOWING_MAX_TOKENS CONTEXT_EXTRACTION_MAX_TOKENS ENTITY_SUMMARY_MAX_TOKENS SMART_EXTRACTOR_MAX_TOKENS CONTRADICTION_MAX_TOKENS BUILD_CONTEXT_MAX_TOKENS RETRIEVAL_LLM_MAX_TOKENS DEDUP_LLM_MAX_TOKENS EMBEDDING_REUSE_ENABLED UNIFIED_ANALYZER_ENABLED UNIFIED_ANALYSIS_MAX_TOKENS TURN_API_ENABLED RECALL_MODE FORESHADOWING_ENABLED CHARACTER_DIMENSION_ENABLED RP_CONSISTENCY_ENABLED RP_RELATION_TYPES RP_CONTEXT_TYPES RERANKER_BACKEND COHERE_API_KEY RERANKER_MODEL"
     
     if [ -f "$config_file" ]; then
         print_info "加载配置文件: $config_file"
@@ -426,6 +426,9 @@ DEDUP_LOW_THRESHOLD=0.70
 # v4.0 Phase 1/2 New Configurations
 # ============================================================================
 
+# ----------------------------------------------------------------------------
+# 时态知识图谱配置
+# Temporal Knowledge Graph Configuration
 # ----------------------------------------------------------------------------
 # ----------------------------------------------------------------------------
 # 统一知识图谱配置 (v4.0 统一架构)
@@ -700,53 +703,57 @@ COMMUNITY_DETECTION_ALGORITHM=louvain
 COMMUNITY_MIN_SIZE=2
 
 # ============================================================================
-# v4.0 Phase 3.6 三路并行召回配置（100%不遗忘保证）
-# v4.0 Phase 3.6 Triple Parallel Recall (100% Memory Guarantee)
+# v4.0 Phase 3.6 三路并行召回配置 (100% 不遗忘保证)
+# v4.0 Phase 3.6 Triple Recall Configuration (100% Memory Guarantee)
 # ============================================================================
 
 # ----------------------------------------------------------------------------
-# Triple Recall 主开关与 RRF 融合配置
-# Triple Recall Switch and RRF Fusion Configuration
+# 主开关
+# Master Switch
 # ----------------------------------------------------------------------------
-# 是否启用三路并行召回（语义+关键词+实体）
-# Enable triple parallel recall (semantic + keyword + entity)
+# 是否启用三路并行召回（IVF-HNSW + 倒排 + 实体，RRF融合）
+# Enable triple parallel recall (IVF-HNSW + Inverted + Entity, RRF fusion)
 TRIPLE_RECALL_ENABLED=true
 
-# RRF 常数 k（推荐 60，越大排名越平滑）
-# RRF constant k (recommend 60, larger = smoother ranking)
+# ----------------------------------------------------------------------------
+# RRF 融合配置
+# RRF (Reciprocal Rank Fusion) Configuration
+# ----------------------------------------------------------------------------
+# RRF 常数 k（推荐 60，越大排名差异越平滑）
+# RRF constant k (recommend 60, higher = smoother rank differences)
 TRIPLE_RECALL_RRF_K=60
 
-# 语义召回权重（路径1）
-# Semantic recall weight (path 1)
+# 语义召回权重（路径1: IVF-HNSW）
+# Semantic recall weight (Path 1: IVF-HNSW)
 TRIPLE_RECALL_VECTOR_WEIGHT=1.0
 
-# 关键词召回权重（路径2）
-# Keyword recall weight (path 2)
+# 关键词召回权重（路径2: 倒排索引，100%召回）
+# Keyword recall weight (Path 2: Inverted index, 100% recall)
 TRIPLE_RECALL_KEYWORD_WEIGHT=1.2
 
-# 实体召回权重（路径3）
-# Entity recall weight (path 3)
+# 实体召回权重（路径3: 实体索引，100%召回）
+# Entity recall weight (Path 3: Entity index, 100% recall)
 TRIPLE_RECALL_ENTITY_WEIGHT=1.0
 
 # ----------------------------------------------------------------------------
-# IVF-HNSW 向量索引参数
-# IVF-HNSW Vector Index Parameters
+# IVF-HNSW 参数 (提升召回率至 95-99%)
+# IVF-HNSW Parameters (Improve recall to 95-99%)
 # ----------------------------------------------------------------------------
-# HNSW 图连接数 M（推荐 32，越大精度越高但构建越慢）
-# HNSW graph connections M (recommend 32)
+# HNSW 图连接数（越大召回越高，内存越大，推荐 32）
+# HNSW M parameter (higher = better recall, more memory, recommend 32)
 VECTOR_IVF_HNSW_M=32
 
-# 构建精度 ef_construction（推荐 200）
-# Build precision ef_construction (recommend 200)
+# HNSW 构建精度（越大索引质量越高，构建越慢，推荐 200）
+# HNSW efConstruction (higher = better index quality, slower build, recommend 200)
 VECTOR_IVF_HNSW_EF_CONSTRUCTION=200
 
-# 搜索精度 ef_search（推荐 64，越大精度越高但搜索越慢）
-# Search precision ef_search (recommend 64)
+# HNSW 搜索精度（越大召回越高，搜索越慢，推荐 64）
+# HNSW efSearch (higher = better recall, slower search, recommend 64)
 VECTOR_IVF_HNSW_EF_SEARCH=64
 
 # ----------------------------------------------------------------------------
-# 原文兜底配置
-# Raw Text Fallback Configuration
+# 原文兜底配置 (100% 保证)
+# Raw Text Fallback Configuration (100% Guarantee)
 # ----------------------------------------------------------------------------
 # 是否启用原文兜底（仅在融合结果为空时触发）
 # Enable raw text fallback (only when fusion results are empty)
@@ -764,9 +771,9 @@ FALLBACK_WORKERS=4
 # Max fallback results
 FALLBACK_MAX_RESULTS=50
 
-# ============================================================================
-# v4.1 增强功能配置 - RECALL 4.1 ENHANCED FEATURES
-# ============================================================================
+# ╔══════════════════════════════════════════════════════════════════════════╗
+# ║  v4.1 增强功能配置 - RECALL 4.1 ENHANCED FEATURES                        ║
+# ╚══════════════════════════════════════════════════════════════════════════╝
 
 # ----------------------------------------------------------------------------
 # LLM 关系提取配置
@@ -872,6 +879,43 @@ UNIFIED_ANALYSIS_MAX_TOKENS=4000
 # Turn API 开关（/v1/memories/turn 端点）
 # Enable Turn API endpoint (/v1/memories/turn)
 TURN_API_ENABLED=true
+
+# ============================================================================
+# v5.0 全局模式配置 - RECALL 5.0 MODE CONFIGURATION
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# 全局模式开关 / Global Mode Switch
+# ----------------------------------------------------------------------------
+# 模式: roleplay（角色扮演，默认）/ general（通用）/ knowledge_base（知识库）
+# Mode: roleplay (default) / general / knowledge_base
+RECALL_MODE=roleplay
+
+# ----------------------------------------------------------------------------
+# 模式子开关（自动由 RECALL_MODE 推导，也可手动覆盖）
+# Mode Sub-switches (auto-derived from RECALL_MODE, can be overridden)
+# ----------------------------------------------------------------------------
+# 伏笔系统开关 / Foreshadowing system (roleplay=true, others=false)
+FORESHADOWING_ENABLED=true
+# 角色维度隔离 / Character dimension isolation (roleplay=true, others=false)
+CHARACTER_DIMENSION_ENABLED=true
+# RP 一致性检查 / RP consistency check (roleplay=true, others=false)
+RP_CONSISTENCY_ENABLED=true
+# RP 关系类型 / RP relation types (roleplay=true, others=false)
+RP_RELATION_TYPES=true
+# RP 上下文类型 / RP context types (roleplay=true, others=false)
+RP_CONTEXT_TYPES=true
+
+# ============================================================================
+# v5.0 重排序器配置 - RECALL 5.0 RERANKER CONFIGURATION
+# ============================================================================
+# 重排序后端: builtin（内置）/ cohere / cross-encoder
+# Reranker backend: builtin (default) / cohere / cross-encoder
+RERANKER_BACKEND=builtin
+# Cohere API 密钥（仅 cohere 后端需要）/ Cohere API key (cohere backend only)
+COHERE_API_KEY=
+# 自定义重排序模型名 / Custom reranker model name
+RERANKER_MODEL=
 EOF
         print_info "已创建配置文件: $config_file"
         echo ""

@@ -1,4 +1,5 @@
 """Recall 核心引擎 - 统一的记忆管理入口"""
+from __future__ import annotations
 
 import os
 import time
@@ -7,6 +8,7 @@ from typing import List, Dict, Any, Optional, Union
 from dataclasses import dataclass, field
 
 from .version import __version__
+from .mode import get_mode_config
 # 注意：RecallInit 和 LightweightConfig 保留用于未来扩展
 from .init import RecallInit  # noqa: F401 - 保留用于 CLI 等场景
 from .config import LightweightConfig, TripleRecallConfig  # noqa: F401 - 保留用于配置迁移
@@ -15,18 +17,18 @@ from .storage import (
     VolumeManager, ConsolidatedMemory, ConsolidatedEntity,
     MultiTenantStorage, MemoryScope, CoreSettings
 )
-from .index import EntityIndex, InvertedIndex, VectorIndex, OptimizedNgramIndex
+from .index import EntityIndex, InvertedIndex, VectorIndex, OptimizedNgramIndex, MetadataIndex
 from .graph import RelationExtractor, TemporalKnowledgeGraph
 from .processor import (
-    EntityExtractor, ForeshadowingTracker,
+    EntityExtractor,
     ConsistencyChecker, MemorySummarizer, ScenarioDetector,
-    ForeshadowingAnalyzer, ForeshadowingAnalyzerConfig, AnalysisResult,
     ContextTracker, ContextType
 )
 
 # v4.0 Phase 1/2 可选模块（延迟导入以保持向后兼容）
 # 这些模块仅在配置启用时才会加载
-from .processor.foreshadowing import Foreshadowing
+# v5.0: ForeshadowingTracker, ForeshadowingAnalyzer, ForeshadowingAnalyzerConfig,
+#        AnalysisResult, Foreshadowing 改为条件导入（仅 RP 模式加载）
 from .retrieval import EightLayerRetriever, ContextBuilder
 # Phase 3: 可选导入 ElevenLayerRetriever（仅在启用时使用）
 from .retrieval import (
@@ -267,6 +269,7 @@ class RecallEngine:
         self._inverted_index: Optional[InvertedIndex] = None
         self._vector_index: Optional[VectorIndex] = None
         self._ngram_index: Optional[OptimizedNgramIndex] = None
+        self._metadata_index: Optional[MetadataIndex] = None
         
         if not self.lightweight:
             self._init_indexes()
@@ -282,22 +285,36 @@ class RecallEngine:
         # 保存 embedding_backend 到实例属性（供检索器等使用）
         self.embedding_backend = embedding_backend_for_trackers
         
-        # 伏笔追踪器（支持语义去重）
-        # 使用新的 {user_id}/{character_id}/ 存储结构
-        self.foreshadowing_tracker = ForeshadowingTracker(
-            base_path=os.path.join(self.data_root, 'data'),
-            embedding_backend=embedding_backend_for_trackers
-        )
+        # v5.0 模式开关
+        self._mode = get_mode_config()
         
-        # 伏笔分析器（可选功能，默认手动模式）
-        # 传入 memory_provider 用于从已保存记忆获取对话，提高可靠性
-        # 传入 storage_dir 用于持久化分析状态，服务器重启不丢失
-        self.foreshadowing_analyzer = ForeshadowingAnalyzer(
-            tracker=self.foreshadowing_tracker,
-            config=self._foreshadowing_config,  # 可能是 None，会使用默认手动模式
-            storage_dir=os.path.join(self.data_root, 'data', 'foreshadowing_analyzer'),
-            memory_provider=self._get_recent_memories_for_analysis
-        )
+        # 伏笔追踪器（支持语义去重）— 仅 RP 模式启用
+        if self._mode.foreshadowing_enabled:
+            # 条件导入：仅在 RP 模式下加载伏笔模块
+            from .processor import (
+                ForeshadowingTracker,
+                ForeshadowingAnalyzer, ForeshadowingAnalyzerConfig, AnalysisResult
+            )
+            from .processor.foreshadowing import Foreshadowing
+            # 使用新的 {user_id}/{character_id}/ 存储结构
+            self.foreshadowing_tracker = ForeshadowingTracker(
+                base_path=os.path.join(self.data_root, 'data'),
+                embedding_backend=embedding_backend_for_trackers
+            )
+            
+            # 伏笔分析器（可选功能，默认手动模式）
+            # 传入 memory_provider 用于从已保存记忆获取对话，提高可靠性
+            # 传入 storage_dir 用于持久化分析状态，服务器重启不丢失
+            self.foreshadowing_analyzer = ForeshadowingAnalyzer(
+                tracker=self.foreshadowing_tracker,
+                config=self._foreshadowing_config,  # 可能是 None，会使用默认手动模式
+                storage_dir=os.path.join(self.data_root, 'data', 'foreshadowing_analyzer'),
+                memory_provider=self._get_recent_memories_for_analysis
+            )
+        else:
+            # 通用/知识库模式：foreshadowing_config 被忽略
+            self.foreshadowing_tracker = None
+            self.foreshadowing_analyzer = None
         
         # L0 核心设定（角色卡、世界观、规则等）
         # 提前加载，因为 ConsistencyChecker 需要 absolute_rules
@@ -411,9 +428,9 @@ class RecallEngine:
         self.fulltext_index = None
         
         # 读取配置（从环境变量）
-        temporal_enabled = os.environ.get('TEMPORAL_GRAPH_ENABLED', 'false').lower() == 'true'
-        contradiction_enabled = os.environ.get('CONTRADICTION_DETECTION_ENABLED', 'false').lower() == 'true'
-        fulltext_enabled = os.environ.get('FULLTEXT_ENABLED', 'false').lower() == 'true'
+        temporal_enabled = os.environ.get('TEMPORAL_GRAPH_ENABLED', 'true').lower() == 'true'
+        contradiction_enabled = os.environ.get('CONTRADICTION_DETECTION_ENABLED', 'true').lower() == 'true'
+        fulltext_enabled = os.environ.get('FULLTEXT_ENABLED', 'true').lower() == 'true'
         
         # 1. 时态增强配置（temporal_graph 已在核心初始化中创建）
         if temporal_enabled and self.temporal_graph:
@@ -1212,6 +1229,12 @@ class RecallEngine:
         # N-gram 索引（支持持久化）
         ngram_data_path = os.path.join(self.data_root, 'index', 'ngram')
         self._ngram_index = OptimizedNgramIndex(data_path=ngram_data_path)
+        
+        # v5.0: 元数据索引（source/tags/category 过滤）
+        from .index.metadata_index import MetadataIndex
+        self._metadata_index = MetadataIndex(
+            data_path=os.path.join(self.data_root, 'indexes')
+        )
     
     def _rebuild_content_cache(self):
         """重建内容缓存（从持久化存储恢复）"""
@@ -1301,6 +1324,9 @@ class RecallEngine:
         # 获取任务管理器
         task_manager = get_task_manager()
         character_id = metadata.get('character_id', 'default') if metadata else 'default'
+        # v5.0: 非 RP 模式下强制为 default（不按角色隔离）
+        if not self._mode.character_dimension_enabled:
+            character_id = "default"
         role = metadata.get('role', 'unknown') if metadata else 'unknown'
         
         # 生成消息签名用于追踪
@@ -1834,6 +1860,16 @@ class RecallEngine:
                         # 回退到原逻辑：VectorIndex.add_text 接受 (turn_id, text)
                         self._vector_index.add_text(memory_id, content)
                 
+                # v5.0: 更新元数据索引
+                if self._metadata_index:
+                    self._metadata_index.add(
+                        memory_id=memory_id,
+                        source=metadata.get('source', '') if metadata else '',
+                        tags=metadata.get('tags', []) if metadata else [],
+                        category=metadata.get('category', '') if metadata else '',
+                        content_type=metadata.get('content_type', '') if metadata else '',
+                    )
+                
                 task_manager.complete_task(index_task.id, "索引更新完成")
             except Exception as e:
                 # 打印更详细的错误信息
@@ -2074,6 +2110,238 @@ class RecallEngine:
                 message=f"添加失败: {str(e)}"
             )
     
+    def add_batch(
+        self,
+        items: List[Dict[str, Any]],
+        user_id: str = "default",
+        skip_dedup: bool = False,
+        skip_llm: bool = True,
+    ) -> List[str]:
+        """批量添加记忆（高吞吐）
+        
+        Args:
+            items: [{"content": "...", "source": "bilibili", "tags": [...], "metadata": {...}}, ...]
+            user_id: 用户ID
+            skip_dedup: 跳过去重检查
+            skip_llm: 跳过 LLM 调用（实体提取用规则模式）
+        
+        Returns:
+            List[str]: 成功添加的 memory_id 列表
+        """
+        import logging
+        memory_ids = []
+        
+        # v5.0: 非 RP 模式下强制 character_id 为 default（add_batch 不接受 character_id 参数，但确保安全）
+        
+        if not self.embedding_backend:
+            raise RuntimeError("Embedding backend 未初始化（需启用 VECTOR_INDEX），无法执行批量添加")
+        
+        # 1. 批量计算 embedding
+        contents = [item['content'] for item in items]
+        embeddings = self.embedding_backend.encode_batch(contents)
+        
+        # 2. 逐条处理但合并 IO
+        all_keywords = []
+        all_entities = []
+        all_ngram_data = []
+        all_relations = []
+        
+        errors = []
+        for i, (item, embedding) in enumerate(zip(items, embeddings)):
+            merged_metadata = {
+                **(item.get('metadata', {})),
+                'source': item.get('source', ''),
+                'tags': item.get('tags', []),
+                'category': item.get('category', ''),
+                'content_type': item.get('content_type', 'custom'),
+            }
+            try:
+                result = self._add_single_fast(
+                    content=item['content'],
+                    embedding=embedding,
+                    metadata=merged_metadata,
+                    user_id=user_id,
+                    skip_dedup=skip_dedup,
+                    skip_llm=skip_llm,
+                )
+                if result:
+                    memory_id, entities, keywords, relations = result
+                    memory_ids.append(memory_id)
+                    all_entities.extend([(e.name, memory_id) for e in entities])
+                    all_keywords.extend([(kw, memory_id) for kw in keywords])
+                    all_ngram_data.append((memory_id, item['content']))
+                    all_relations.extend(relations)
+            except Exception as e:
+                errors.append({"index": i, "error": str(e)})
+                logging.warning(f"add_batch item {i} failed: {e}")
+        
+        # 3. 批量更新索引
+        self._batch_update_indexes(all_keywords, all_entities, all_ngram_data, all_relations)
+        
+        if errors:
+            logging.warning(f"add_batch: {len(errors)}/{len(items)} 条失败")
+        return memory_ids
+
+    def _add_single_fast(self, content, embedding, metadata, user_id, skip_dedup, skip_llm):
+        """单条快速添加（add_batch 内部使用）"""
+        memory_id = f"mem_{uuid.uuid4().hex[:12]}"
+        
+        # 去重检查（可跳过）
+        if not skip_dedup:
+            scope = self.storage.get_scope(user_id)
+            existing_memories, _ = self.get_paginated(user_id=user_id, offset=0, limit=100)
+            for mem in existing_memories:
+                if content.strip() == mem.get('content', '').strip():
+                    return None
+        
+        # 实体提取
+        extraction_result = None
+        if self.smart_extractor:
+            if skip_llm:
+                from recall.processor.smart_extractor import ExtractionMode
+                extraction_result = self.smart_extractor.extract(content, force_mode=ExtractionMode.RULES)
+            else:
+                extraction_result = self.smart_extractor.extract(content)
+        entities = extraction_result.entities if extraction_result else []
+        keywords = extraction_result.keywords if extraction_result else []
+        
+        # 存储记忆
+        scope = self.storage.get_scope(user_id)
+        scope.add(content, metadata={
+            'id': memory_id,
+            'entities': [e.name for e in entities],
+            'keywords': keywords,
+            **(metadata or {})
+        })
+        
+        # 更新向量索引
+        if self._vector_index and self._vector_index.enabled:
+            self._vector_index.add(memory_id, embedding)
+        
+        # 更新元数据索引
+        if self._metadata_index:
+            self._metadata_index.add(
+                memory_id=memory_id,
+                source=metadata.get('source', '') if metadata else '',
+                tags=metadata.get('tags', []) if metadata else [],
+                category=metadata.get('category', '') if metadata else '',
+                content_type=metadata.get('content_type', '') if metadata else '',
+            )
+        
+        # 规则级关系提取（与 add() 步骤 6 一致，但只用规则模式，保持批量高吞吐）
+        relations = []
+        if self.relation_extractor and entities:
+            try:
+                relations = self.relation_extractor.extract(content, 0, entities=entities)
+            except Exception as e:
+                import logging
+                logging.warning(f"_add_single_fast relation extraction failed: {e}")
+        
+        return (memory_id, entities, keywords, relations)
+
+    def _batch_update_indexes(self, all_keywords, all_entities, all_ngram_data, all_relations=None):
+        """批量更新索引 — 合并 IO 操作
+        
+        Args:
+            all_keywords: [(keyword, memory_id), ...]
+            all_entities: [(entity_name, memory_id), ...]
+            all_ngram_data: [(memory_id, content), ...]
+            all_relations: [(源实体, 关系类型, 目标实体, 源文本), ...] 可选
+        """
+        from collections import defaultdict
+        
+        # 批量更新倒排索引
+        if self._inverted_index and all_keywords:
+            kw_by_mid = defaultdict(list)
+            for kw, mid in all_keywords:
+                kw_by_mid[mid].append(kw)
+            for mid, kws in kw_by_mid.items():
+                self._inverted_index.add_batch(kws, mid)
+        
+        # 批量更新实体索引
+        if self._entity_index and all_entities:
+            for entity_name, mid in all_entities:
+                self._entity_index.add_entity_occurrence(entity_name, mid)
+        
+        # 批量更新 N-gram 索引
+        if self._ngram_index and all_ngram_data:
+            for mid, content in all_ngram_data:
+                self._ngram_index.add(mid, content)
+            self._ngram_index.save()
+        
+        # 批量更新知识图谱（规则级关系）
+        if self.knowledge_graph and all_relations:
+            for rel in all_relations:
+                try:
+                    source_id, relation_type, target_id, source_text = rel
+                    self.knowledge_graph.add_relation(
+                        source_id=source_id,
+                        target_id=target_id,
+                        relation_type=relation_type,
+                        source_text=source_text,
+                    )
+                except Exception as e:
+                    import logging
+                    logging.warning(f"batch KG relation update failed: {e}")
+        
+        # 批量更新全文索引 BM25
+        if self.fulltext_index is not None and all_ngram_data:
+            for mid, content in all_ngram_data:
+                try:
+                    self.fulltext_index.add(mid, content)
+                except Exception as e:
+                    import logging
+                    logging.warning(f"batch fulltext index update failed: {e}")
+
+    def list_entities(self, user_id="default", entity_type=None, limit=100):
+        """列出实体"""
+        if not self._entity_index:
+            return []
+        entities = self._entity_index.all_entities()
+        if entity_type:
+            entities = [e for e in entities if getattr(e, 'entity_type', '') == entity_type]
+        return [{'name': e.name, 'type': getattr(e, 'entity_type', ''),
+                 'summary': getattr(e, 'summary', '')} for e in entities[:limit]]
+
+    def traverse_graph(self, start_entity, max_depth=2, relation_types=None, user_id="default"):
+        """图遍历"""
+        if not self.knowledge_graph:
+            return {"nodes": [], "edges": []}
+        from collections import deque
+        visited = set()
+        queue = deque([(start_entity, 0)])
+        nodes, edges = [], []
+        while queue:
+            entity, depth = queue.popleft()
+            if entity in visited or depth > max_depth:
+                continue
+            visited.add(entity)
+            nodes.append({"name": entity, "depth": depth})
+            for rel in self.knowledge_graph.get_relations_for_entity(entity):
+                if relation_types and rel.relation_type not in relation_types:
+                    continue
+                edges.append({"source": rel.source_id, "target": rel.target_id,
+                             "type": rel.relation_type})
+                next_entity = rel.target_id if rel.source_id == entity else rel.source_id
+                queue.append((next_entity, depth + 1))
+        return {"nodes": nodes, "edges": edges}
+
+    def list_memories(self, limit=100, user_id="default"):
+        """列出记忆"""
+        memories, total = self.get_paginated(user_id=user_id, offset=0, limit=limit)
+        return memories
+
+    def get_entity_detail(self, entity_name, user_id="default"):
+        """获取实体详情"""
+        if not self._entity_index:
+            return {"name": entity_name, "error": "entity index not initialized"}
+        entity = self._entity_index.get_entity(entity_name)
+        if entity:
+            return {"name": entity_name, "type": getattr(entity, 'entity_type', ''),
+                    "summary": getattr(entity, 'summary', ''),
+                    "facts": [str(f) for f in getattr(entity, 'facts', [])]}
+        return {"name": entity_name, "error": "entity not found"}
+
     def add_turn(
         self,
         user_message: str,
@@ -2112,6 +2380,10 @@ class RecallEngine:
         keywords = []
         entities = []
         relations = []
+        
+        # v5.0: 非 RP 模式下强制 character_id 为 default
+        if not self._mode.character_dimension_enabled:
+            character_id = "default"
         
         # 生成消息签名用于追踪
         msg_hash = f"{hash(user_message[:100]) % 10000:04d}_{hash(ai_response[:100]) % 10000:04d}"
@@ -2711,7 +2983,11 @@ class RecallEngine:
         top_k: int = 10,
         filters: Optional[Dict[str, Any]] = None,
         temporal_context: Optional[Any] = None,
-        config_preset: Optional[str] = None
+        config_preset: Optional[str] = None,
+        source: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        category: Optional[str] = None,
+        content_type: Optional[str] = None,
     ) -> List[SearchResult]:
         """搜索记忆
         
@@ -2722,10 +2998,22 @@ class RecallEngine:
             filters: 过滤条件
             temporal_context: 时态上下文（Phase 3 新增，用于 L2 时态检索层）
             config_preset: 配置预设（Phase 3 新增：default/fast/accurate）
+            source: v5.0 元数据过滤 - 来源
+            tags: v5.0 元数据过滤 - 标签
+            category: v5.0 元数据过滤 - 类别
+            content_type: v5.0 元数据过滤 - 内容类型
         
         Returns:
             List[SearchResult]: 搜索结果
         """
+        # v5.0: 元数据过滤
+        if any([source, tags, category, content_type]) and self._metadata_index:
+            allowed_ids = self._metadata_index.query(
+                source=source, tags=tags, category=category, content_type=content_type
+            )
+        else:
+            allowed_ids = None
+        
         # 1. 提取查询实体和关键词
         entities = [e.name for e in self.entity_extractor.extract(query)]
         keywords = self.entity_extractor.extract_keywords(query)
@@ -2798,6 +3086,10 @@ class RecallEngine:
                     entities=m.get('entities', [])
                 ))
                 seen_ids.add(mem_id)
+        
+        # v5.0: 元数据过滤（后过滤）
+        if allowed_ids is not None:
+            results = [r for r in results if r.id in allowed_ids]
         
         return results[:top_k]
     
@@ -2947,6 +3239,11 @@ class RecallEngine:
                     if removed_fulltext > 0:
                         _safe_print(f"[Recall] 清理了 {removed_fulltext} 个全文索引文档")
             
+            # 9.5 v5.0: 清理元数据索引中的对应条目
+            if memory_ids and self._metadata_index is not None:
+                self._metadata_index.remove_batch(set(memory_ids))
+                _safe_print(f"[Recall] 清理了元数据索引中 {len(memory_ids)} 条记忆的条目")
+            
             # 10. 清理伏笔追踪器中的用户数据（所有角色）
             if self.foreshadowing_tracker is not None:
                 if hasattr(self.foreshadowing_tracker, 'clear_user'):
@@ -3051,6 +3348,10 @@ class RecallEngine:
             if self.volume_manager is not None and hasattr(self.volume_manager, 'clear'):
                 self.volume_manager.clear()
             
+            # 14. v5.0: 清空元数据索引
+            if self._metadata_index is not None:
+                self._metadata_index.clear()
+            
             _safe_print("[Recall] ✅ 已清空所有数据")
             return True
         except Exception as e:
@@ -3149,7 +3450,14 @@ class RecallEngine:
             bool: 是否成功
         """
         scope = self.storage.get_scope(user_id)
-        return scope.delete(memory_id)
+        success = scope.delete(memory_id)
+        # v5.0: 同步清理元数据索引
+        if success and self._metadata_index:
+            try:
+                self._metadata_index.remove(memory_id)
+            except Exception as e:
+                _safe_print(f"[Recall] 元数据索引清理失败（不影响主流程）: {e}")
+        return success
     
     def update(
         self,
@@ -3214,6 +3522,10 @@ class RecallEngine:
             include_recent = int(_os.environ.get('BUILD_CONTEXT_INCLUDE_RECENT', '10'))
         proactive_enabled = _os.environ.get('PROACTIVE_REMINDER_ENABLED', 'true').lower() in ('true', '1', 'yes')
         proactive_turns = int(_os.environ.get('PROACTIVE_REMINDER_TURNS', '50'))
+        
+        # v5.0: 非 RP 模式下 character_id 强制为 default
+        if not self._mode.character_dimension_enabled:
+            character_id = "default"
         
         query_preview = query[:50].replace('\n', ' ') if len(query) > 50 else query.replace('\n', ' ')
         _safe_print(f"[Recall][Engine] 📦 构建上下文: user={user_id}, char={character_id}")
@@ -3295,15 +3607,17 @@ class RecallEngine:
                 parts.append(recent_section)
         
         # ========== 5. 伏笔层（所有活跃伏笔 + 主动提醒）==========
-        # 使用 tracker 的专用方法，包含主动提醒逻辑（重要伏笔长期未推进会提醒 AI）
-        foreshadowing_context = self.foreshadowing_tracker.get_context_for_prompt(
-            user_id=user_id,
-            character_id=character_id,
-            max_count=5,
-            current_turn=self.volume_manager.get_total_turns() if self.volume_manager else None
-        )
-        if foreshadowing_context:
-            parts.append(foreshadowing_context)
+        # v5.0: 仅 RP 模式启用伏笔层
+        if self._mode.foreshadowing_enabled and self.foreshadowing_tracker:
+            # 使用 tracker 的专用方法，包含主动提醒逻辑（重要伏笔长期未推进会提醒 AI）
+            foreshadowing_context = self.foreshadowing_tracker.get_context_for_prompt(
+                user_id=user_id,
+                character_id=character_id,
+                max_count=5,
+                current_turn=self.volume_manager.get_total_turns() if self.volume_manager else None
+            )
+            if foreshadowing_context:
+                parts.append(foreshadowing_context)
         
         # ========== 5.5 主动提醒层（100%不遗忘保证）==========
         # 对长期未提及的重要持久条件进行主动提醒
@@ -3686,6 +4000,11 @@ class RecallEngine:
     
     # ==================== 伏笔 API ====================
     
+    def _check_foreshadowing_enabled(self):
+        """检查伏笔系统是否可用（v5.0 模式守卫）"""
+        if not self._mode.foreshadowing_enabled or self.foreshadowing_tracker is None:
+            raise RuntimeError(f"伏笔系统在当前模式 ({self._mode.mode.value}) 下未启用")
+
     def plant_foreshadowing(
         self,
         content: str,
@@ -3698,6 +4017,7 @@ class RecallEngine:
         
         同时将伏笔索引到 VectorIndex 以支持语义检索（即使归档后也能搜索）
         """
+        self._check_foreshadowing_enabled()
         foreshadowing = self.foreshadowing_tracker.plant(
             content=content,
             user_id=user_id,
@@ -3722,6 +4042,7 @@ class RecallEngine:
         character_id: str = "default"
     ) -> bool:
         """解决伏笔"""
+        self._check_foreshadowing_enabled()
         return self.foreshadowing_tracker.resolve(foreshadowing_id, resolution, user_id, character_id)
     
     def add_foreshadowing_hint(
@@ -3744,6 +4065,7 @@ class RecallEngine:
         Returns:
             bool: 是否成功
         """
+        self._check_foreshadowing_enabled()
         return self.foreshadowing_tracker.add_hint(foreshadowing_id, hint, user_id, character_id)
     
     def abandon_foreshadowing(
@@ -3764,10 +4086,12 @@ class RecallEngine:
         Returns:
             bool: 是否成功
         """
+        self._check_foreshadowing_enabled()
         return self.foreshadowing_tracker.abandon(foreshadowing_id, user_id, character_id)
     
     def get_active_foreshadowings(self, user_id: str = "default", character_id: str = "default") -> List[Foreshadowing]:
         """获取活跃伏笔"""
+        self._check_foreshadowing_enabled()
         return self.foreshadowing_tracker.get_active(user_id, character_id)
     
     def get_foreshadowing_by_id(
@@ -3789,6 +4113,7 @@ class RecallEngine:
         Returns:
             Optional[Foreshadowing]: 伏笔对象，未找到返回 None
         """
+        self._check_foreshadowing_enabled()
         return self.foreshadowing_tracker.get_by_id(foreshadowing_id, user_id, character_id)
     
     def on_foreshadowing_turn(
@@ -3813,6 +4138,7 @@ class RecallEngine:
         Returns:
             AnalysisResult: 分析结果
         """
+        self._check_foreshadowing_enabled()
         return self.foreshadowing_analyzer.on_new_turn(
             content=content,
             role=role,
@@ -3832,10 +4158,12 @@ class RecallEngine:
         Returns:
             AnalysisResult: 分析结果
         """
+        self._check_foreshadowing_enabled()
         return self.foreshadowing_analyzer.trigger_analysis(user_id, character_id)
     
     def get_foreshadowing_analyzer_config(self) -> Dict[str, Any]:
         """获取伏笔分析器配置"""
+        self._check_foreshadowing_enabled()
         return self.foreshadowing_analyzer.config.to_dict()
     
     def update_foreshadowing_analyzer_config(
@@ -3845,6 +4173,7 @@ class RecallEngine:
         auto_resolve: Optional[bool] = None
     ):
         """更新伏笔分析器配置"""
+        self._check_foreshadowing_enabled()
         self.foreshadowing_analyzer.update_config(
             trigger_interval=trigger_interval,
             auto_plant=auto_plant,
@@ -3858,6 +4187,7 @@ class RecallEngine:
         base_url: Optional[str] = None
     ):
         """启用伏笔分析器的 LLM 模式（动态切换，无需重启）"""
+        self._check_foreshadowing_enabled()
         self.foreshadowing_analyzer.enable_llm_mode(
             api_key=api_key,
             model=model,
@@ -3866,6 +4196,7 @@ class RecallEngine:
     
     def disable_foreshadowing_llm_mode(self):
         """禁用伏笔分析器的 LLM 模式，切换回手动模式"""
+        self._check_foreshadowing_enabled()
         self.foreshadowing_analyzer.disable_llm_mode()
     
     # ==================== 持久条件 API ====================
@@ -4150,7 +4481,7 @@ class RecallEngine:
             'total_memories': total_memories,
             'total_scopes': len(self.storage._scopes),
             'consolidated_entities': len(self.consolidated_memory.entities) if hasattr(self, 'consolidated_memory') else 0,
-            'active_foreshadowings': len(self.foreshadowing_tracker.get_active()),
+            'active_foreshadowings': len(self.foreshadowing_tracker.get_active()) if self.foreshadowing_tracker else 0,
         }
         
         # 索引统计
@@ -4182,7 +4513,7 @@ class RecallEngine:
                 'unique_entities': len(entity_counts),
                 'top_entities': dict(top_entities),
                 'active_foreshadowings': len([f for f in self.foreshadowing_tracker.get_active() 
-                                              if hasattr(f, 'user_id') and f.user_id == user_id]),
+                                              if hasattr(f, 'user_id') and f.user_id == user_id]) if self.foreshadowing_tracker else 0,
                 'persistent_contexts': self.context_tracker.get_stats(user_id),
             }
         

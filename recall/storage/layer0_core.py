@@ -24,6 +24,11 @@ class CoreSettings:
     user_preferences: Dict[str, Any] = field(default_factory=dict)
     absolute_rules: List[str] = field(default_factory=list)  # 绝对不能违反的规则
     
+    # v5.0 通用模式扩展字段（不影响现有字段）
+    domain_context: str = ""         # 领域上下文说明
+    data_schema: str = ""            # 数据结构描述
+    custom_instructions: str = ""    # 自定义指令
+    
     # 内部使用：存储data_path以便save()时无需传参
     _data_path: Optional[str] = field(default=None, repr=False)
     
@@ -83,6 +88,9 @@ class CoreSettings:
             scene_text = '\n\n'.join(p for p in scene_parts if p)
             if scene_text:
                 parts.append(scene_text)
+        elif scenario == 'general':
+            # 通用模式：不注入场景特定内容，只依赖下方绝对规则注入
+            pass
         
         # 【重要】绝对规则在所有场景下都注入
         rules_text = self._get_universal_rules()

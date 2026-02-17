@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import os
 import time
 import json
 import asyncio
@@ -31,6 +32,7 @@ from .config import (
     RetrievalResultItem, TemporalContext, LayerWeights
 )
 from .rrf_fusion import reciprocal_rank_fusion
+from .reranker import RerankerFactory, BuiltinReranker
 
 logger = logging.getLogger(__name__)
 
@@ -132,6 +134,9 @@ class ElevenLayerRetriever:
         
         # 兼容旧配置格式（dict）
         self._legacy_config: Dict[str, Any] = {}
+        
+        # Phase 5.0: 可插拔重排序器
+        self.reranker = RerankerFactory.create(os.getenv('RERANKER_BACKEND', 'builtin'))
     
     def cache_content(self, doc_id: str, content: str):
         """缓存文档内容（在添加索引时调用）- 兼容 EightLayerRetriever"""
@@ -1041,26 +1046,52 @@ class ElevenLayerRetriever:
         candidates: Set[str],
         scores: Dict[str, float]
     ) -> None:
-        """L9: Rerank - TF-IDF 多因素重排序"""
+        """L9: Rerank - TF-IDF 多因素重排序（支持可插拔后端）"""
         start_time = time.perf_counter()
         
-        for doc_id in candidates:
-            bonus = 0.0
-            content = self._get_content(doc_id)
-            
-            # 关键词匹配加分
-            if keywords:
-                for kw in keywords:
-                    if kw.lower() in content.lower():
-                        bonus += 0.05
-            
-            # 实体匹配加分
-            if entities:
-                for entity in entities:
-                    if entity.lower() in content.lower():
-                        bonus += 0.1
-            
-            scores[doc_id] += bonus
+        if isinstance(self.reranker, BuiltinReranker):
+            # ---- 内置重排序：保持原有逻辑不变 ----
+            for doc_id in candidates:
+                bonus = 0.0
+                content = self._get_content(doc_id)
+                
+                # 关键词匹配加分
+                if keywords:
+                    for kw in keywords:
+                        if kw.lower() in content.lower():
+                            bonus += 0.05
+                
+                # 实体匹配加分
+                if entities:
+                    for entity in entities:
+                        if entity.lower() in content.lower():
+                            bonus += 0.1
+                
+                scores[doc_id] += bonus
+        else:
+            # ---- 外部重排序器（Cohere / CrossEncoder） ----
+            try:
+                doc_ids = list(candidates)
+                documents = [self._get_content(did) for did in doc_ids]
+                reranked = self.reranker.rerank(query, documents, top_k=len(doc_ids))
+                for idx, rel_score in reranked:
+                    # 将外部分数缩放到 0-0.5 后加到已有分数上
+                    scores[doc_ids[idx]] += rel_score * 0.5
+            except Exception as e:
+                logger.warning(f"L9 external reranker failed, falling back to builtin: {e}")
+                # 降级到内置逻辑
+                for doc_id in candidates:
+                    bonus = 0.0
+                    content = self._get_content(doc_id)
+                    if keywords:
+                        for kw in keywords:
+                            if kw.lower() in content.lower():
+                                bonus += 0.05
+                    if entities:
+                        for entity in entities:
+                            if entity.lower() in content.lower():
+                                bonus += 0.1
+                    scores[doc_id] += bonus
         
         self.stats.append(LayerStats(
             layer=RetrievalLayer.L9_RERANK.value,

@@ -12,6 +12,9 @@ from .fulltext_index import FullTextIndex, BM25Config
 # v4.0 Phase 3.5: FAISS IVF 磁盘索引（可选，大规模场景）
 from .vector_index_ivf import VectorIndexIVF
 
+# v5.0: 元数据索引（支持 source/tags/category 过滤）
+from .metadata_index import MetadataIndex
+
 __all__ = [
     # v3 原有导出（保持向后兼容）
     'EntityIndex',
@@ -29,4 +32,7 @@ __all__ = [
     
     # v4.0 Phase 3.5: 企业级向量索引
     'VectorIndexIVF',
+    
+    # v5.0: 元数据索引
+    'MetadataIndex',
 ]

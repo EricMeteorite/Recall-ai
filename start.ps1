@@ -214,7 +214,11 @@ function Import-ApiKeys {
         'DEDUP_LLM_MAX_TOKENS',
         # ====== v4.2 性能优化配置 ======
         'EMBEDDING_REUSE_ENABLED', 'UNIFIED_ANALYZER_ENABLED', 'UNIFIED_ANALYSIS_MAX_TOKENS',
-        'TURN_API_ENABLED'
+        'TURN_API_ENABLED',
+        # ====== v5.0 全局模式与重排序配置 ======
+        'RECALL_MODE', 'FORESHADOWING_ENABLED', 'CHARACTER_DIMENSION_ENABLED',
+        'RP_CONSISTENCY_ENABLED', 'RP_RELATION_TYPES', 'RP_CONTEXT_TYPES',
+        'RERANKER_BACKEND', 'COHERE_API_KEY', 'RERANKER_MODEL'
     )
     
     if (Test-Path $configFile) {
@@ -863,6 +867,43 @@ UNIFIED_ANALYSIS_MAX_TOKENS=4000
 # Turn API 开关（/v1/memories/turn 端点）
 # Enable Turn API endpoint (/v1/memories/turn)
 TURN_API_ENABLED=true
+
+# ============================================================================
+# v5.0 全局模式配置 - RECALL 5.0 MODE CONFIGURATION
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# 全局模式开关 / Global Mode Switch
+# ----------------------------------------------------------------------------
+# 模式: roleplay（角色扮演，默认）/ general（通用）/ knowledge_base（知识库）
+# Mode: roleplay (default) / general / knowledge_base
+RECALL_MODE=roleplay
+
+# ----------------------------------------------------------------------------
+# 模式子开关（自动由 RECALL_MODE 推导，也可手动覆盖）
+# Mode Sub-switches (auto-derived from RECALL_MODE, can be overridden)
+# ----------------------------------------------------------------------------
+# 伏笔系统开关 / Foreshadowing system (roleplay=true, others=false)
+FORESHADOWING_ENABLED=true
+# 角色维度隔离 / Character dimension isolation (roleplay=true, others=false)
+CHARACTER_DIMENSION_ENABLED=true
+# RP 一致性检查 / RP consistency check (roleplay=true, others=false)
+RP_CONSISTENCY_ENABLED=true
+# RP 关系类型 / RP relation types (roleplay=true, others=false)
+RP_RELATION_TYPES=true
+# RP 上下文类型 / RP context types (roleplay=true, others=false)
+RP_CONTEXT_TYPES=true
+
+# ============================================================================
+# v5.0 重排序器配置 - RECALL 5.0 RERANKER CONFIGURATION
+# ============================================================================
+# 重排序后端: builtin（内置）/ cohere / cross-encoder
+# Reranker backend: builtin (default) / cohere / cross-encoder
+RERANKER_BACKEND=builtin
+# Cohere API 密钥（仅 cohere 后端需要）/ Cohere API key (cohere backend only)
+COHERE_API_KEY=
+# 自定义重排序模型名 / Custom reranker model name
+RERANKER_MODEL=
 '@
         Set-Content -Path $configFile -Value $defaultConfig -Encoding UTF8
         Write-Host "  $([char]0x2192) 已创建配置文件: $configFile" -ForegroundColor Cyan

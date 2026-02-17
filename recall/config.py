@@ -5,6 +5,9 @@ import re
 from typing import List
 from dataclasses import dataclass
 
+# v5.0 便捷 re-export
+from .mode import RecallMode, get_mode_config  # noqa: F401
+
 
 # Windows GBK 编码兼容的安全打印函数
 def _safe_print(msg: str) -> None:
