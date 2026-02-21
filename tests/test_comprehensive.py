@@ -162,20 +162,20 @@ except Exception as e:
     print_fail(f'lightweight(): {e}')
 
 try:
-    c = EmbeddingConfig.hybrid_openai('sk-test', model='text-embedding-3-large')
+    c = EmbeddingConfig.cloud_openai('sk-test', model='text-embedding-3-large')
     assert c.dimension == 3072, f'expected 3072, got {c.dimension}'
-    print_ok(f'hybrid_openai(text-embedding-3-large) dimension={c.dimension}')
+    print_ok(f'cloud_openai(text-embedding-3-large) dimension={c.dimension}')
 except Exception as e:
-    ALL_ERRORS.append(f'hybrid_openai() 失败: {e}')
-    print_fail(f'hybrid_openai(): {e}')
+    ALL_ERRORS.append(f'cloud_openai() 失败: {e}')
+    print_fail(f'cloud_openai(): {e}')
 
 try:
-    c = EmbeddingConfig.hybrid_siliconflow('sf-test')
+    c = EmbeddingConfig.cloud_siliconflow('sf-test')
     assert c.dimension == 1024, f'expected 1024, got {c.dimension}'
-    print_ok(f'hybrid_siliconflow() dimension={c.dimension}')
+    print_ok(f'cloud_siliconflow() dimension={c.dimension}')
 except Exception as e:
-    ALL_ERRORS.append(f'hybrid_siliconflow() 失败: {e}')
-    print_fail(f'hybrid_siliconflow(): {e}')
+    ALL_ERRORS.append(f'cloud_siliconflow() 失败: {e}')
+    print_fail(f'cloud_siliconflow(): {e}')
 
 # 测试新名称别名
 print('\n  新名称别名测试:')

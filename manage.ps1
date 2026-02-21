@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Recall-ai Unified Management Script
 .DESCRIPTION
@@ -1137,7 +1137,7 @@ function Do-ClearData {
     $tempDir = Join-Path $dataPath "temp"
     $indexDir = Join-Path $dataPath "index"        # ngram, fulltext indexes
     $indexesDir = Join-Path $dataPath "indexes"     # legacy indexes
-    $l1Dir = Join-Path $dataPath "L1_consolidated"
+    $l1Dir = Join-Path $dataPath "L1_consolidated"  # 旧版兼容：v5.0 实际路径在 data/L1_consolidated/ 内，由 data/ 删除覆盖
     $kgFile = Join-Path $dataPath "knowledge_graph.json"
     $kgFileInData = Join-Path (Join-Path $dataPath "data") "knowledge_graph.json"
     
@@ -1160,7 +1160,7 @@ function Do-ClearData {
     if (Test-Path $indexesDir) {
         $size = (Get-ChildItem $indexesDir -Recurse -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
         $sizeStr = if ($size) { "{0:N2} MB" -f ($size / 1MB) } else { "0 MB" }
-        Write-Host "    [x] indexes/        - 实体和向量索引 ($sizeStr)" -ForegroundColor Red
+        Write-Host "    [x] indexes/        - 综合索引（元数据/向量/全文等） ($sizeStr)" -ForegroundColor Red
         $toDelete += $indexesDir
     }
     
@@ -1243,9 +1243,11 @@ function Do-ClearData {
         }
     }
     
-    # Recreate empty directories
+    # Recreate empty directories (skip files like knowledge_graph.json)
     foreach ($dir in $toDelete) {
-        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        if ($dir -notmatch '\.[a-zA-Z]+$') {
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        }
     }
     
     Write-Host ""

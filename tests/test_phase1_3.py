@@ -52,7 +52,7 @@ class TestMemoryRetention:
             'user_id': 'test_user',
             'character_id': 'luna',
             'query': 'moonlight crystal password vault',
-            'limit': 10
+            'top_k': 10
         })
         assert r.status_code == 200, f"Search failed: {r.text}"
         results = r.json()
@@ -82,7 +82,7 @@ class TestNgramRawSearch:
             'user_id': 'test_user',
             'character_id': 'luna',
             'query': 'silver arrows moonlight',
-            'limit': 5
+            'top_k': 5
         })
         assert r.status_code == 200, f"Search failed: {r.text}"
         results = r.json()
@@ -211,7 +211,7 @@ class TestCharacterIsolation:
             'user_id': 'test_user',
             'character_id': 'luna',
             'query': 'fire mage red hair',
-            'limit': 5
+            'top_k': 5
         })
         assert r.status_code == 200, f"Search failed: {r.text}"
         results = r.json()

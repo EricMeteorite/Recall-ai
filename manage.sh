@@ -1130,7 +1130,7 @@ do_clear_data() {
     local temp_dir="$data_path/temp"
     local index_dir="$data_path/index"        # ngram, fulltext indexes
     local indexes_dir="$data_path/indexes"     # legacy indexes
-    local l1_dir="$data_path/L1_consolidated"
+    local l1_dir="$data_path/L1_consolidated"  # 旧版兼容：v5.0 实际路径在 data/L1_consolidated/ 内，由 data/ 删除覆盖
     local kg_file="$data_path/knowledge_graph.json"
     local kg_file_in_data="$data_path/data/knowledge_graph.json"
     
@@ -1150,7 +1150,7 @@ do_clear_data() {
     
     if [[ -d "$indexes_dir" ]]; then
         local size=$(du -sh "$indexes_dir" 2>/dev/null | cut -f1 || echo "0")
-        echo -e "    ${RED}[x] indexes/        - 实体和向量索引 ($size)${NC}"
+        echo -e "    ${RED}[x] indexes/        - 综合索引（元数据/向量/全文等） ($size)${NC}"
         to_delete+=("$indexes_dir")
     fi
     
@@ -1168,9 +1168,16 @@ do_clear_data() {
     fi
     
     if [[ -f "$kg_file_in_data" ]]; then
-        local size=$(du -sh "$kg_file_in_data" 2>/dev/null | cut -f1 || echo "0")
-        echo -e "    ${RED}[x] data/knowledge_graph.json - 知识图谱 ($size)${NC}"
-        to_delete+=("$kg_file_in_data")
+        # Only show if data/ won't be deleted (which would include this file)
+        local data_already_listed=false
+        for d in "${to_delete[@]}"; do
+            [[ "$d" == "$data_dir" ]] && data_already_listed=true
+        done
+        if ! $data_already_listed; then
+            local size=$(du -sh "$kg_file_in_data" 2>/dev/null | cut -f1 || echo "0")
+            echo -e "    ${RED}[x] data/knowledge_graph.json - 知识图谱 ($size)${NC}"
+            to_delete+=("$kg_file_in_data")
+        fi
     fi
     
     if [[ -d "$cache_dir" ]]; then
@@ -1226,9 +1233,11 @@ do_clear_data() {
         fi
     done
     
-    # 重新创建空目录
+    # 重新创建空目录（跳过文件如 knowledge_graph.json）
     for dir in "${to_delete[@]}"; do
-        mkdir -p "$dir"
+        if [[ ! "$dir" =~ \.[a-zA-Z]+$ ]]; then
+            mkdir -p "$dir"
+        fi
     done
     
     echo ""
