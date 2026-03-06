@@ -210,12 +210,22 @@ class MemorySummarizer:
             # 合并组
             if len(similar_group) > 1:
                 merged_content = self._merge_contents(similar_group)
+                # v7.0.5: 修复 — MemoryPriority 是 Enum 不支持 max() 比较
+                _priority_order = {
+                    MemoryPriority.CRITICAL: 0, MemoryPriority.HIGH: 1,
+                    MemoryPriority.NORMAL: 2, MemoryPriority.LOW: 3,
+                    MemoryPriority.EPHEMERAL: 4
+                }
+                best_priority = min(
+                    (m.priority for m in similar_group),
+                    key=lambda p: _priority_order.get(p, 2)
+                )
                 merged_item = MemoryItem(
                     id=m1.id,
                     content=merged_content,
                     user_id=m1.user_id,
                     metadata=m1.metadata,
-                    priority=max(m.priority for m in similar_group),
+                    priority=best_priority,
                     entities=list(set(sum([m.entities for m in similar_group], []))),
                     keywords=list(set(sum([m.keywords for m in similar_group], [])))
                 )

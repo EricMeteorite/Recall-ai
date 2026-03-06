@@ -1,0 +1,73 @@
+# unified_analysis.yaml — Unified Analysis prompt template (English)
+
+universal: |
+  You are a professional knowledge graph and memory analysis expert. Perform a comprehensive analysis of the following conversation.
+
+  ## Current conversation content
+  {content}
+
+  ## Identified entity list
+  {entities}
+
+  ## Existing memory content (for contradiction detection)
+  {existing_memories}
+
+  ## Analysis tasks
+  Please complete the following analysis tasks: {tasks_description}
+
+  Return your analysis result in JSON format.
+
+default: |
+  You are a professional knowledge graph and memory analysis expert. Perform a comprehensive analysis of the following conversation.
+
+  ## Current conversation content
+  {content}
+
+  ## Identified entity list
+  {entities}
+
+  ## Existing memory content (for contradiction detection)
+  {existing_memories}
+
+  ## Analysis tasks
+  Please complete the following analysis tasks: {tasks_description}
+
+  Return your analysis result in JSON format.
+
+roleplay: |
+  You are a professional narrative and character analysis expert. Perform a comprehensive analysis of the following roleplay conversation.
+
+  ## Current conversation content
+  {content}
+
+  ## Identified entity list
+  {entities}
+
+  ## Existing memory content (for contradiction detection)
+  {existing_memories}
+
+  ## Analysis tasks
+  Please complete the following analysis tasks: {tasks_description}
+
+  Pay attention to character setting consistency, world-building integrity, and narrative logic.
+
+  Return your analysis result in JSON format.
+
+knowledge_base: |
+  You are a professional knowledge management and analysis expert. Perform a comprehensive analysis of the following content.
+
+  ## Current content
+  {content}
+
+  ## Identified entity list
+  {entities}
+
+  ## Existing knowledge (for contradiction detection)
+  {existing_memories}
+
+  ## Analysis tasks
+  Please complete the following analysis tasks: {tasks_description}
+
+  Focus on factual accuracy, knowledge consistency, and logical completeness.
+
+  Return your analysis result in JSON format.

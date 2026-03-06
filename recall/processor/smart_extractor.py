@@ -262,7 +262,8 @@ class SmartExtractor:
         local_extractor: Optional[EntityExtractor] = None,
         llm_client: Optional[LLMClient] = None,
         budget_manager: Optional[BudgetManager] = None,
-        entity_schema_registry: Optional['EntitySchemaRegistry'] = None  # Recall 4.1 新增
+        entity_schema_registry: Optional['EntitySchemaRegistry'] = None,  # Recall 4.1 新增
+        prompt_manager: Optional[Any] = None  # v7.0: PromptManager YAML 模板
     ):
         """初始化智能抽取器
         
@@ -272,12 +273,14 @@ class SmartExtractor:
             llm_client: LLM 客户端
             budget_manager: 预算管理器
             entity_schema_registry: 实体类型注册表（Recall 4.1）
+            prompt_manager: v7.0 PromptManager 实例（可选，用于 YAML 模板渲染）
         """
         self.config = config or SmartExtractorConfig()
         self.local_extractor = local_extractor or EntityExtractor()
         self.llm_client = llm_client
         self.budget_manager = budget_manager
         self.entity_schema_registry = entity_schema_registry  # Recall 4.1
+        self.prompt_manager = prompt_manager  # v7.0
         
         # 编译关系模式
         self._relation_patterns = [
@@ -295,6 +298,17 @@ class SmartExtractor:
 3. ORGANIZATION（组织）: 公司、机构、团体
 4. ITEM（物品）: 物品、道具
 5. CONCEPT（概念）: 抽象概念、术语"""
+        
+        # v7.0: 优先使用 PromptManager YAML 模板
+        if self.prompt_manager:
+            try:
+                return self.prompt_manager.render(
+                    'entity_extraction',
+                    entity_types=entity_types,
+                    text=text[:3000]
+                )
+            except Exception:
+                pass  # 回退到硬编码模板
         
         return self.EXTRACTION_PROMPT_V2.format(
             entity_types=entity_types,
@@ -565,7 +579,8 @@ class SmartExtractor:
             return None
         
         try:
-            prompt = self.EXTRACTION_PROMPT.format(text=text)
+            # v7.0.6: 使用 V2 prompt（包含 EntitySchemaRegistry 自定义类型），之前用的是 V1 基础版
+            prompt = self._build_extraction_prompt(text)
             
             # 从环境变量读取配置的最大 tokens
             import os

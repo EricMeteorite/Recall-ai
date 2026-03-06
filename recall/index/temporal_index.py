@@ -7,6 +7,7 @@
 """
 
 from __future__ import annotations
+import atexit
 
 import os
 import json
@@ -155,6 +156,17 @@ class TemporalIndex:
         
         # 加载
         self._load()
+        
+        # v7.0.9: atexit 安全网 — 确保进程退出时脏数据被持久化
+        atexit.register(self._atexit_flush)
+    
+    def _atexit_flush(self):
+        """atexit 回调：确保脏数据持久化"""
+        try:
+            if self._dirty:
+                self._save()
+        except Exception:
+            pass
     
     def _load(self):
         """加载索引"""
@@ -174,7 +186,7 @@ class TemporalIndex:
             _safe_print(f"[TemporalIndex] 加载索引失败: {e}")
     
     def _save(self):
-        """保存索引"""
+        """保存索引（原子写入）"""
         if not self._dirty:
             return
         
@@ -185,8 +197,13 @@ class TemporalIndex:
             'version': '4.0'
         }
         
-        with open(self.index_file, 'w', encoding='utf-8') as f:
+        # v7.0.9: 原子写入 — tmp + fsync + rename
+        tmp_file = self.index_file + '.tmp'
+        with open(tmp_file, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_file, self.index_file)
         
         self._dirty = False
     
@@ -298,41 +315,79 @@ class TemporalIndex:
         point: datetime,
         time_type: str = 'fact'  # fact | known | system
     ) -> List[str]:
-        """使用二分查找 — O(log n) + O(k) 而非 O(n)
-        
+        """双端 bisect 剪枝 — O(log n + min(k_start, k_end)) 而非 O(n)
+
+        利用 _sorted_by_fact_start 和 _sorted_by_fact_end 两个有序列表：
+        - 集合 A: start <= point  (通过 bisect_right on _sorted_by_fact_start)
+        - 集合 B: end >= point    (通过 bisect_left on _sorted_by_fact_end)
+        - 结果 = A ∩ B
+
+        选择较小的候选集遍历 + 交叉验证，避免全量扫描。
+
         Args:
             point: 查询时间点
             time_type: 时间类型
                 - 'fact': 事实时间（默认）
                 - 'known': 知识时间
                 - 'system': 系统时间
-        
+
         Returns:
             有效的 doc_id 列表
         """
         ts = point.timestamp()
-        
+
         if time_type == 'fact':
-            idx = bisect.bisect_right(self._sorted_by_fact_start, (ts, '\xff'))
-            results = []
-            for i in range(idx):
-                _, doc_id = self._sorted_by_fact_start[i]
-                entry = self.entries.get(doc_id)
-                if entry and entry.fact_range.contains(point):
-                    results.append(doc_id)
-            return results
+            # 集合 A 大小: start <= point
+            idx_start = bisect.bisect_right(self._sorted_by_fact_start, (ts, '\xff'))
+            # 集合 B 大小: end >= point
+            idx_end = bisect.bisect_left(self._sorted_by_fact_end, (ts,))
+            count_ended_after = len(self._sorted_by_fact_end) - idx_end
+
+            # 选择较小的候选集遍历，用 contains() 交叉验证
+            if idx_start <= count_ended_after:
+                results = []
+                for i in range(idx_start):
+                    _, doc_id = self._sorted_by_fact_start[i]
+                    entry = self.entries.get(doc_id)
+                    if entry and entry.fact_range.contains(point):
+                        results.append(doc_id)
+                return results
+            else:
+                results = []
+                for i in range(idx_end, len(self._sorted_by_fact_end)):
+                    _, doc_id = self._sorted_by_fact_end[i]
+                    entry = self.entries.get(doc_id)
+                    if entry and entry.fact_range.contains(point):
+                        results.append(doc_id)
+                return results
+
         elif time_type == 'known':
             idx = bisect.bisect_right(self._sorted_by_known_at, (ts, '\xff'))
             return [doc_id for _, doc_id in self._sorted_by_known_at[:idx]]
+
         elif time_type == 'system':
-            idx = bisect.bisect_right(self._sorted_by_system_start, (ts, '\xff'))
-            results = []
-            for i in range(idx):
-                _, doc_id = self._sorted_by_system_start[i]
-                entry = self.entries.get(doc_id)
-                if entry and entry.system_range.contains(point):
-                    results.append(doc_id)
-            return results
+            # 同样双端剪枝
+            idx_start = bisect.bisect_right(self._sorted_by_system_start, (ts, '\xff'))
+            idx_end = bisect.bisect_left(self._sorted_by_system_end, (ts,))
+            count_ended_after = len(self._sorted_by_system_end) - idx_end
+
+            if idx_start <= count_ended_after:
+                results = []
+                for i in range(idx_start):
+                    _, doc_id = self._sorted_by_system_start[i]
+                    entry = self.entries.get(doc_id)
+                    if entry and entry.system_range.contains(point):
+                        results.append(doc_id)
+                return results
+            else:
+                results = []
+                for i in range(idx_end, len(self._sorted_by_system_end)):
+                    _, doc_id = self._sorted_by_system_end[i]
+                    entry = self.entries.get(doc_id)
+                    if entry and entry.system_range.contains(point):
+                        results.append(doc_id)
+                return results
+
         return []
     
     def query_range(
@@ -341,40 +396,68 @@ class TemporalIndex:
         end: Optional[datetime],
         time_type: str = 'fact'
     ) -> List[str]:
-        """使用二分查找范围 — O(log n + k)
-        
+        """双端 bisect 范围查询 — O(log n + min(k_left, k_right))
+
+        区间重叠条件: entry.start <= query.end AND entry.end >= query.start
+        利用两个有序列表剪枝：
+        - 候选 A: entry.start <= query.end  (bisect on _sorted_by_*_start)
+        - 候选 B: entry.end >= query.start  (bisect on _sorted_by_*_end)
+        选择较小的候选集遍历。
+
         Args:
             start: 范围起始（None 表示无限早）
             end: 范围结束（None 表示无限晚）
             time_type: 时间类型
-        
+
         Returns:
             重叠的 doc_id 列表
         """
         if time_type == 'fact':
-            sorted_list = self._sorted_by_fact_start
+            start_list = self._sorted_by_fact_start
+            end_list = self._sorted_by_fact_end
         elif time_type == 'system':
-            sorted_list = self._sorted_by_system_start
+            start_list = self._sorted_by_system_start
+            end_list = self._sorted_by_system_end
         else:
             return []
-        
+
         query_tr = TimeRange(start=start, end=end)
-        
+
+        # 候选 A: entry.start <= query.end
         if end:
-            end_ts = end.timestamp()
-            right = bisect.bisect_right(sorted_list, (end_ts, '\xff'))
+            count_a = bisect.bisect_right(start_list, (end.timestamp(), '\xff'))
         else:
-            right = len(sorted_list)
-        
-        results = []
-        for i in range(right):
-            _, doc_id = sorted_list[i]
-            entry = self.entries.get(doc_id)
-            if entry:
-                target_range = entry.fact_range if time_type == 'fact' else entry.system_range
-                if target_range.overlaps(query_tr):
-                    results.append(doc_id)
-        return results
+            count_a = len(start_list)
+
+        # 候选 B: entry.end >= query.start
+        if start:
+            idx_b = bisect.bisect_left(end_list, (start.timestamp(),))
+            count_b = len(end_list) - idx_b
+        else:
+            idx_b = 0
+            count_b = len(end_list)
+
+        # 选择较小的候选集
+        if count_a <= count_b:
+            results = []
+            for i in range(count_a):
+                _, doc_id = start_list[i]
+                entry = self.entries.get(doc_id)
+                if entry:
+                    target_range = entry.fact_range if time_type == 'fact' else entry.system_range
+                    if target_range.overlaps(query_tr):
+                        results.append(doc_id)
+            return results
+        else:
+            results = []
+            for i in range(idx_b, len(end_list)):
+                _, doc_id = end_list[i]
+                entry = self.entries.get(doc_id)
+                if entry:
+                    target_range = entry.fact_range if time_type == 'fact' else entry.system_range
+                    if target_range.overlaps(query_tr):
+                        results.append(doc_id)
+            return results
     
     def query_by_subject(
         self,

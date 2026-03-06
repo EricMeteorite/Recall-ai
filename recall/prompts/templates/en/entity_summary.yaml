@@ -1,0 +1,86 @@
+# entity_summary.yaml — Entity Summary prompt template (English)
+
+universal: |
+  Generate a concise summary for the following entity.
+
+  ## Entity name: {entity_name}
+
+  ## Related facts:
+  {facts}
+
+  ## Related relations:
+  {relations}
+
+  ## Output requirements:
+  1. Generate a 2-3 sentence summary covering the entity's core information
+  2. List 3-5 key facts
+
+  Output format:
+  Summary: <summary content>
+  Key points:
+  - <point 1>
+  - <point 2>
+
+default: |
+  Generate a concise summary for the following entity.
+
+  ## Entity name: {entity_name}
+
+  ## Related facts:
+  {facts}
+
+  ## Related relations:
+  {relations}
+
+  ## Output requirements:
+  1. Generate a 2-3 sentence summary covering the entity's core information
+  2. List 3-5 key facts
+
+  Output format:
+  Summary: <summary content>
+  Key points:
+  - <point 1>
+  - <point 2>
+
+roleplay: |
+  Generate a concise summary for the following entity from a roleplay context.
+
+  ## Entity name: {entity_name}
+
+  ## Related facts:
+  {facts}
+
+  ## Related relations:
+  {relations}
+
+  ## Output requirements:
+  1. Generate a 2-3 sentence summary of the entity's role and importance in the story
+  2. List 3-5 key facts
+  3. If it's a character, describe their personality traits and relationships with other characters
+
+  Output format:
+  Summary: <summary content>
+  Key points:
+  - <point 1>
+  - <point 2>
+
+knowledge_base: |
+  Generate a concise summary for the following entity from a knowledge base.
+
+  ## Entity name: {entity_name}
+
+  ## Related facts:
+  {facts}
+
+  ## Related relations:
+  {relations}
+
+  ## Output requirements:
+  1. Generate a 2-3 sentence summary covering the entity's core definition and significance
+  2. List 3-5 key facts with technical accuracy
+
+  Output format:
+  Summary: <summary content>
+  Key points:
+  - <point 1>
+  - <point 2>

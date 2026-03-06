@@ -27,6 +27,9 @@ from .eleven_layer import (
 # Phase 3.6 新模块：RRF 融合
 from .rrf_fusion import reciprocal_rank_fusion, weighted_score_fusion
 
+# Phase 7.4 新模块：MMR 多样性重排序
+from .mmr import mmr_rerank, mmr_rerank_by_content, cosine_similarity
+
 __all__ = [
     # 原有导出（向后兼容）
     'EightLayerRetriever',
@@ -48,4 +51,8 @@ __all__ = [
     # Phase 3.6 新导出：RRF 融合
     'reciprocal_rank_fusion',
     'weighted_score_fusion',
+    # Phase 7.4 新导出：MMR 多样性重排序
+    'mmr_rerank',
+    'mmr_rerank_by_content',
+    'cosine_similarity',
 ]

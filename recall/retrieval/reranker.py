@@ -71,11 +71,28 @@ class CrossEncoderReranker(RerankerBase):
 
 class RerankerFactory:
     @staticmethod
-    def create(backend: str = "builtin") -> RerankerBase:
+    def create(
+        backend: str = "builtin",
+        api_key: str = "",
+        model: str = "",
+    ) -> RerankerBase:
+        """创建重排序器实例
+
+        Args:
+            backend: 后端类型 (builtin / cohere / cross-encoder)
+            api_key: Cohere API key（仅 cohere 后端需要）
+            model: 模型名称（可选，覆盖默认值）
+        """
         if backend == "cohere":
-            return CohereReranker()
+            effective_key = api_key or os.getenv('COHERE_API_KEY', '')
+            if not effective_key:
+                logger.warning("[Reranker] Cohere 后端需要 COHERE_API_KEY，降级到 builtin")
+                return BuiltinReranker()
+            effective_model = model or "rerank-multilingual-v3.0"
+            return CohereReranker(api_key=effective_key, model=effective_model)
         elif backend == "cross-encoder":
-            return CrossEncoderReranker()
+            effective_model = model or "cross-encoder/ms-marco-MiniLM-L-6-v2"
+            return CrossEncoderReranker(model_name=effective_model)
         else:
             if backend != "builtin":
                 logger.warning(f"未知的 RERANKER_BACKEND='{backend}'，降级到 builtin")

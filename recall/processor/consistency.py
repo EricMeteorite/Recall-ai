@@ -8,6 +8,7 @@
 """
 
 import re
+import os
 import time
 from typing import List, Dict, Any, Optional, Tuple, Set
 from dataclasses import dataclass, field
@@ -203,7 +204,7 @@ class ConsistencyChecker:
             absolute_rules: 绝对规则列表，用户定义的必须遵守的规则
             llm_client: LLM客户端，用于语义规则检测（可选，无则回退到关键词检测）
         """
-        # v5.0 模式感知
+        # v7.0 统一模式配置
         from recall.mode import get_mode_config
         self._mode = get_mode_config()
         
@@ -1111,7 +1112,8 @@ class ConsistencyChecker:
         # 找出已知死亡的角色
         dead_entities = set()
         for entity, states in existing_states.items():
-            vital_key = AttributeType.VITAL_STATUS.value
+            # v7.0.5: 修复 — existing_states 的 key 是 AttributeType 枚举，不是 .value 字符串
+            vital_key = AttributeType.VITAL_STATUS
             if vital_key in states:
                 for value, _ in states[vital_key]:
                     if value == 'dead':

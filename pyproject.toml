@@ -1,4 +1,4 @@
-# Recall v5.0 - AI永久记忆系统
+# Recall v7.0 - AI永久记忆系统
 # pyproject.toml
 
 [build-system]
@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "recall-ai"
-version = "5.0.0"
+version = "7.0.0"
 description = "AI永久记忆系统 - 让AI永远不会忘记你说过的每一句话"
 readme = "README.md"
 license = {text = "MIT"}
@@ -152,8 +152,11 @@ ignore = ["E501"]
 
 [tool.pytest.ini_options]
 # 过滤第三方库的警告
+# -W ignore::SyntaxWarning: jieba 在 Python 3.12 下的编译时正则转义警告（第三方库问题，无法通过 filterwarnings 过滤）
+addopts = "-W ignore::SyntaxWarning"
 filterwarnings = [
     "ignore::UserWarning:jieba.*",
+    "ignore::SyntaxWarning:jieba.*",
     "ignore::FutureWarning:transformers.*",
     "ignore::DeprecationWarning",
 ]

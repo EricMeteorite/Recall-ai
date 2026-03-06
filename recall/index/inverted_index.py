@@ -29,10 +29,16 @@ class InvertedIndex:
     def _load(self):
         """加载索引"""
         if os.path.exists(self.index_file):
-            with open(self.index_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                for keyword, turns in data.items():
-                    self.index[keyword] = set(turns)
+            try:
+                with open(self.index_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    for keyword, turns in data.items():
+                        self.index[keyword] = set(turns)
+            except (json.JSONDecodeError, ValueError, UnicodeDecodeError) as e:
+                # v7.0.12: 修复 — JSON 损坏时不崩溃，从 WAL 重建
+                import logging
+                logging.getLogger(__name__).warning(f"倒排索引主文件损坏，将从 WAL 重建: {e}")
+                self.index = defaultdict(set)
         
         # WAL 重放
         if os.path.exists(self._wal_file):
@@ -57,10 +63,10 @@ class InvertedIndex:
         pass
 
     def _save_full(self):
-        """全量保存（仅压缩时使用）"""
+        """全量保存（仅压缩时使用，v7.0.10: 原子写入）"""
         os.makedirs(self.index_dir, exist_ok=True)
-        with open(self.index_file, 'w', encoding='utf-8') as f:
-            json.dump({k: list(v) for k, v in self.index.items()}, f, ensure_ascii=False)
+        from recall.utils.atomic_write import atomic_json_dump
+        atomic_json_dump({k: list(v) for k, v in self.index.items()}, self.index_file, ensure_ascii=False)
     
     def add(self, keyword: str, turn_id: str):
         """添加索引项"""
@@ -108,11 +114,13 @@ class InvertedIndex:
         return list(result)
     
     def _compact(self):
-        """压缩：将内存状态全量写入主文件，删除 WAL"""
+        """压缩：将内存状态全量写入主文件，删除 WAL（v7.0.10: fsync保护）"""
         tmp_file = self.index_file + '.tmp'
         os.makedirs(self.index_dir, exist_ok=True)
         with open(tmp_file, 'w', encoding='utf-8') as f:
             json.dump({k: list(v) for k, v in self.index.items()}, f, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp_file, self.index_file)
         if os.path.exists(self._wal_file):
             os.remove(self._wal_file)

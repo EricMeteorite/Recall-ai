@@ -144,17 +144,22 @@ class MetadataIndex:
         self._save()
 
     def _save(self):
-        """持久化到 JSON 文件"""
+        """持久化到 JSON 文件（原子写入）"""
         os.makedirs(os.path.dirname(self._index_file), exist_ok=True)
         data = {
-            'by_source': {k: list(v) for k, v in self._by_source.items()},
-            'by_tag': {k: list(v) for k, v in self._by_tag.items()},
-            'by_category': {k: list(v) for k, v in self._by_category.items()},
-            'by_content_type': {k: list(v) for k, v in self._by_content_type.items()},
-            'by_event_date': {k: list(v) for k, v in self._by_event_date.items()},
+            'by_source': {k: list(v) for k, v in self._by_source.items() if v},
+            'by_tag': {k: list(v) for k, v in self._by_tag.items() if v},
+            'by_category': {k: list(v) for k, v in self._by_category.items() if v},
+            'by_content_type': {k: list(v) for k, v in self._by_content_type.items() if v},
+            'by_event_date': {k: list(v) for k, v in self._by_event_date.items() if v},
         }
-        with open(self._index_file, 'w', encoding='utf-8') as f:
+        # v7.0.9: 原子写入 + 清理空集合
+        tmp_file = self._index_file + '.tmp'
+        with open(tmp_file, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_file, self._index_file)
 
     def _load(self):
         """从 JSON 文件加载"""

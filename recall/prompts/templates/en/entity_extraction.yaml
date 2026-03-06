@@ -1,0 +1,35 @@
+# entity_extraction.yaml — Entity Extraction prompt template (English)
+
+universal: |
+  Extract all entities (people, places, organizations, items, etc.) from the following text.
+
+  Text: {content}
+
+  Return in JSON format:
+  [{{"name": "entity name", "type": "entity type", "description": "brief description"}}]
+
+default: |
+  Extract all entities (people, places, organizations, items, etc.) from the following text.
+
+  Text: {content}
+
+  Return in JSON format:
+  [{{"name": "entity name", "type": "entity type", "description": "brief description"}}]
+
+roleplay: |
+  Extract all entities (characters, locations, items, events, etc.) from the following roleplay dialogue.
+  Pay attention to character names, NPC names, place names, props, and other RP-specific entities.
+
+  Dialogue: {content}
+
+  Return in JSON format:
+  [{{"name": "entity name", "type": "entity type", "description": "brief description"}}]
+
+knowledge_base: |
+  Extract all key entities (concepts, terms, people, organizations, etc.) from the following knowledge document.
+  Focus on professional terminology and core concepts.
+
+  Document: {content}
+
+  Return in JSON format:
+  [{{"name": "entity name", "type": "entity type", "description": "brief description"}}]

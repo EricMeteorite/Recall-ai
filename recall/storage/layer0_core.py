@@ -66,8 +66,9 @@ class CoreSettings:
         data = asdict(self)
         data.pop('_data_path', None)
         
-        with open(config_file, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+        # v7.0.10: 原子写入保护
+        from recall.utils.atomic_write import atomic_json_dump
+        atomic_json_dump(data, config_file, ensure_ascii=False, indent=2)
     
     def get_injection_text(self, scenario: str) -> str:
         """根据场景返回需要注入的核心设定

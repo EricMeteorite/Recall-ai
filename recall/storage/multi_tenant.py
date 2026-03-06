@@ -24,12 +24,17 @@ class MemoryScope:
 class ScopedMemory:
     """作用域内的记忆存储"""
     
+    MAX_MEMORIES = 5000  # A12: LRU 内存保护上限
+    
     def __init__(self, data_path: str, scope: MemoryScope):
         self.data_path = data_path
         self.scope = scope
         self.working_memory = WorkingMemory()
         self._memories: List[Dict[str, Any]] = []
+        self._memory_index: Dict[str, Dict[str, Any]] = {}  # A11: memory_id → memory (O(1) lookup)
         self._memory_file = os.path.join(data_path, 'memories.json')
+        # v7.0.2: 驱逐回调 — 用于通知引擎清理被驱逐记忆的索引条目
+        self._on_evict_callback: Optional[Any] = None
         self._load()
     
     def _load(self):
@@ -38,17 +43,60 @@ class ScopedMemory:
             try:
                 with open(self._memory_file, 'r', encoding='utf-8') as f:
                     self._memories = json.load(f)
-            except Exception:
+            except Exception as e:
+                # v7.0.14: 修复 M5 — 损坏时记录警告日志，而非静默丢弃
+                import logging
+                logging.warning(
+                    f"[Recall] memories.json 加载失败，数据可能已损坏，回退为空列表: "
+                    f"file={self._memory_file}, error={e}"
+                )
                 self._memories = []
+        self._rebuild_index()
+        # A12: 加载时如果超出上限，裁剪最旧的条目
+        if len(self._memories) > self.MAX_MEMORIES:
+            self._evict_oldest(len(self._memories) - self.MAX_MEMORIES)
+    
+    def _rebuild_index(self):
+        """重建 memory_id → memory 的 O(1) 索引"""
+        self._memory_index = {}
+        for memory in self._memories:
+            mid = memory.get('metadata', {}).get('id')
+            if mid:
+                self._memory_index[mid] = memory
+    
+    def _evict_oldest(self, count: int):
+        """驱逐最旧的 count 条记忆 (LRU 保护)"""
+        if count <= 0:
+            return
+        evicted = self._memories[:count]
+        self._memories = self._memories[count:]
+        # 同步索引
+        evicted_ids = []
+        for memory in evicted:
+            mid = memory.get('metadata', {}).get('id')
+            if mid and mid in self._memory_index:
+                del self._memory_index[mid]
+                evicted_ids.append(mid)
+        self._save()
+        # v7.0.2: 通知引擎清理被驱逐记忆的所有索引条目（消除幽灵条目）
+        if evicted_ids and self._on_evict_callback:
+            try:
+                self._on_evict_callback(evicted_ids)
+            except Exception as e:
+                import logging
+                logging.warning(f"[Recall] ScopedMemory 驱逐回调失败: {e}")
+    
+    def get_content_by_id(self, memory_id: str) -> Optional[str]:
+        """通过 ID 获取记忆内容 — O(1) 查找"""
+        memory = self._memory_index.get(memory_id)
+        if memory:
+            return memory.get('content', '')
+        return None
     
     def _save(self):
-        """保存记忆"""
-        # 确保目录存在
-        memory_dir = os.path.dirname(self._memory_file)
-        if memory_dir:
-            os.makedirs(memory_dir, exist_ok=True)
-        with open(self._memory_file, 'w', encoding='utf-8') as f:
-            json.dump(self._memories, f, ensure_ascii=False, indent=2)
+        """保存记忆（原子写入：tmp+rename 防止断电损坏）"""
+        from recall.utils.atomic_write import atomic_json_dump
+        atomic_json_dump(self._memories, self._memory_file, indent=2)
     
     def add(self, content: str, metadata: Dict[str, Any] = None):
         """添加记忆"""
@@ -58,6 +106,13 @@ class ScopedMemory:
             'timestamp': __import__('time').time()
         }
         self._memories.append(memory)
+        # A11: 维护 O(1) 索引
+        mid = memory.get('metadata', {}).get('id')
+        if mid:
+            self._memory_index[mid] = memory
+        # A12: LRU 驱逐
+        if len(self._memories) > self.MAX_MEMORIES:
+            self._evict_oldest(len(self._memories) - self.MAX_MEMORIES)
         self._save()
         
         # 更新工作记忆
@@ -170,6 +225,8 @@ class ScopedMemory:
         for i, memory in enumerate(self._memories):
             if memory.get('metadata', {}).get('id') == memory_id:
                 del self._memories[i]
+                # A11: 同步索引
+                self._memory_index.pop(memory_id, None)
                 self._save()
                 return True
         return False
@@ -189,6 +246,7 @@ class ScopedMemory:
     def clear(self):
         """清空所有记忆"""
         self._memories = []
+        self._memory_index = {}  # A11: 清空索引
         self._save()
         self.working_memory = WorkingMemory()
 
@@ -199,6 +257,15 @@ class MultiTenantStorage:
     def __init__(self, base_path: str):
         self.base_path = base_path
         self._scopes: Dict[str, ScopedMemory] = {}
+        # v7.0.2: 驱逐回调 — 引擎注册此回调来清理被驱逐记忆的索引
+        self._on_evict_callback: Optional[Any] = None
+    
+    def set_evict_callback(self, callback):
+        """v7.0.2: 设置驱逐回调（引擎调用此方法注册级联清理）"""
+        self._on_evict_callback = callback
+        # 同步到已有 scopes
+        for scope in self._scopes.values():
+            scope._on_evict_callback = callback
     
     def get_scope(self, user_id: str, session_id: str = "default", 
                   character_id: str = "default") -> ScopedMemory:
@@ -209,7 +276,11 @@ class MultiTenantStorage:
         
         if scope_key not in self._scopes:
             data_path = self.get_data_path(scope)
-            self._scopes[scope_key] = ScopedMemory(data_path, scope)
+            scoped = ScopedMemory(data_path, scope)
+            # v7.0.2: 注册驱逐回调
+            if self._on_evict_callback:
+                scoped._on_evict_callback = self._on_evict_callback
+            self._scopes[scope_key] = scoped
         
         return self._scopes[scope_key]
     
@@ -267,5 +338,6 @@ class MultiTenantStorage:
         for rel_path, content in export_data['files'].items():
             file_path = os.path.join(path, rel_path)
             os.makedirs(os.path.dirname(file_path), exist_ok=True)
-            with open(file_path, 'w', encoding='utf-8') as f:
-                json.dump(content, f, ensure_ascii=False, indent=2)
+            # v7.0.12: 修复 — 使用原子写入保护导入数据
+            from recall.utils.atomic_write import atomic_json_dump
+            atomic_json_dump(content, file_path, ensure_ascii=False)

@@ -49,7 +49,9 @@ class OptimizedNgramIndex:
         self.noun_phrases: Dict[str, List[str]] = {}
         
         # 原文存储：memory_id → content（用于兜底搜索）
+        # v7.0.3: 添加 LRU 上限防止内存无限增长
         self._raw_content: Dict[str, str] = {}
+        self._raw_content_max_size: int = 20000  # 最多缓存 2 万条原文在内存中
         
         # 可选的布隆过滤器
         self._bloom_filter = None
@@ -57,6 +59,10 @@ class OptimizedNgramIndex:
         # 从磁盘加载已有数据
         if data_path:
             self._load()
+        
+        # v7.0.11: atexit 注册 — 进程退出时确保索引被保存
+        import atexit
+        atexit.register(self._atexit_save)
     
     @property
     def bloom_filter(self):
@@ -80,6 +86,13 @@ class OptimizedNgramIndex:
         # 1. 存储原文（用于兜底搜索）
         self._raw_content[turn] = content
         
+        # 1.1 LRU 保护：内存缓存超限时清除最早一半
+        if len(self._raw_content) > self._raw_content_max_size:
+            keys = list(self._raw_content.keys())
+            half = len(keys) // 2
+            for k in keys[:half]:
+                del self._raw_content[k]
+        
         # 1.5 增量持久化原文（避免重启丢失）
         self.append_raw_content(turn, content)
         
@@ -102,13 +115,13 @@ class OptimizedNgramIndex:
             self._save_noun_phrases()
     
     def _save_noun_phrases(self):
-        """只保存名词短语索引（轻量级操作）"""
+        """只保存名词短语索引（原子写入）"""
         if not self._index_file:
             return
         try:
+            from recall.utils.atomic_write import atomic_json_dump
             os.makedirs(os.path.dirname(self._index_file), exist_ok=True)
-            with open(self._index_file, 'w', encoding='utf-8') as f:
-                json.dump(self.noun_phrases, f, ensure_ascii=False)
+            atomic_json_dump(self.noun_phrases, self._index_file)
         except Exception as e:
             _safe_print(f"[NgramIndex] 保存名词短语索引失败: {e}")
     
@@ -152,10 +165,13 @@ class OptimizedNgramIndex:
         return self._raw_text_fallback_search(query)
     
     def _raw_text_fallback_search(self, query: str, max_results: int = 50) -> List[str]:
-        """原文兜底搜索 - 扫描所有原文寻找包含查询子串的记忆
+        """原文兜底搜索 - 扫描内存缓存+磁盘原文寻找包含查询子串的记忆
         
         这是"终极兜底"机制，确保即使名词短语索引未命中，
         只要原文中包含查询内容就能找到。
+        
+        v7.0.3: 当内存缓存被 LRU 驱逐后，自动扫描磁盘 JSONL 文件
+        以确保长期运行后归档数据仍可搜索（"100%不遗忘"保证）。
         
         Args:
             query: 搜索查询
@@ -166,26 +182,60 @@ class OptimizedNgramIndex:
         """
         results = []
         query_lower = query.lower()
+        seen_ids = set()
         
         # 提取查询中的关键子串（2-6字符）
         search_terms = self._extract_search_terms(query)
         
+        # 第一阶段：扫描内存缓存（快速）
         for memory_id, content in self._raw_content.items():
             content_lower = content.lower()
             
             # 直接子串匹配
             if query_lower in content_lower:
                 results.append(memory_id)
+                seen_ids.add(memory_id)
                 continue
             
             # 检查任一关键子串是否匹配
             for term in search_terms:
                 if term in content_lower:
                     results.append(memory_id)
+                    seen_ids.add(memory_id)
                     break
             
             if len(results) >= max_results:
-                break
+                return results
+        
+        # 第二阶段：如果内存缓存被 LRU 截断过，扫描磁盘 JSONL（保证不遗忘）
+        if self._raw_content_file and os.path.exists(self._raw_content_file) and len(results) < max_results:
+            try:
+                with open(self._raw_content_file, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            item = json.loads(line)
+                            mid = item['id']
+                            if mid in seen_ids:
+                                continue  # 已在内存结果中
+                            content_lower = item['content'].lower()
+                            if query_lower in content_lower:
+                                results.append(mid)
+                                seen_ids.add(mid)
+                            else:
+                                for term in search_terms:
+                                    if term in content_lower:
+                                        results.append(mid)
+                                        seen_ids.add(mid)
+                                        break
+                            if len(results) >= max_results:
+                                break
+                        except (json.JSONDecodeError, KeyError):
+                            continue
+            except Exception:
+                pass  # 磁盘读取失败不影响已有结果
         
         return results
     
@@ -326,6 +376,13 @@ class OptimizedNgramIndex:
             except Exception as e:
                 _safe_print(f"[NgramIndex] 加载原文失败: {e}")
     
+    def _atexit_save(self):
+        """atexit 回调 — 确保退出时保存索引（v7.0.11）"""
+        try:
+            self.save()
+        except Exception:
+            pass
+
     def save(self):
         """保存索引数据到磁盘"""
         if not self.data_path:
@@ -333,20 +390,31 @@ class OptimizedNgramIndex:
         
         os.makedirs(self.data_path, exist_ok=True)
         
-        # 保存名词短语索引
+        # 保存名词短语索引（原子写入）
         if self._index_file:
             try:
-                with open(self._index_file, 'w', encoding='utf-8') as f:
-                    json.dump(self.noun_phrases, f, ensure_ascii=False)
+                from recall.utils.atomic_write import atomic_json_dump
+                atomic_json_dump(self.noun_phrases, self._index_file)
             except Exception as e:
                 _safe_print(f"[NgramIndex] 保存索引失败: {e}")
         
-        # 保存原文内容（完全重写，避免重复）
+        # 保存原文内容（原子写入 JSONL）
         if self._raw_content_file:
             try:
-                with open(self._raw_content_file, 'w', encoding='utf-8') as f:
-                    for memory_id, content in self._raw_content.items():
-                        f.write(json.dumps({'id': memory_id, 'content': content}, ensure_ascii=False) + '\n')
+                import tempfile
+                dir_name = os.path.dirname(self._raw_content_file)
+                fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix='.tmp')
+                try:
+                    with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                        for memory_id, content in self._raw_content.items():
+                            f.write(json.dumps({'id': memory_id, 'content': content}, ensure_ascii=False) + '\n')
+                        f.flush()
+                        os.fsync(f.fileno())
+                    os.replace(tmp_path, self._raw_content_file)
+                except Exception:
+                    if os.path.exists(tmp_path):
+                        os.remove(tmp_path)
+                    raise
             except Exception as e:
                 _safe_print(f"[NgramIndex] 保存原文失败: {e}")
     

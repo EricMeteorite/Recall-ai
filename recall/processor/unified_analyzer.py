@@ -13,7 +13,7 @@ import json
 import os
 import re
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, TYPE_CHECKING
 from enum import Enum
 
 from ..utils.llm_client import LLMClient
@@ -161,16 +161,19 @@ class UnifiedAnalyzer:
     def __init__(
         self,
         llm_client: Optional[LLMClient] = None,
-        enabled: bool = True
+        enabled: bool = True,
+        prompt_manager: Optional[Any] = None
     ):
         """初始化统一分析器
         
         Args:
             llm_client: LLM 客户端
             enabled: 是否启用（False 时所有调用直接返回空结果）
+            prompt_manager: v7.0 PromptManager 实例（可选，用于 YAML 模板渲染）
         """
         self.llm_client = llm_client
         self.enabled = enabled
+        self.prompt_manager = prompt_manager
         
         # 从环境变量读取配置
         self.max_tokens = int(os.environ.get('UNIFIED_ANALYSIS_MAX_TOKENS', '4000'))
@@ -238,6 +241,19 @@ class UnifiedAnalyzer:
                                       for m in input.existing_memories[:10]])
         else:
             memories_str = "（无）"
+        
+        # v7.0: 优先使用 PromptManager YAML 模板
+        if self.prompt_manager:
+            try:
+                return self.prompt_manager.render(
+                    'unified_analysis',
+                    content=input.content,
+                    entities=entities_str,
+                    existing_memories=memories_str,
+                    tasks_description=tasks_description
+                )
+            except Exception:
+                pass  # 回退到硬编码模板
         
         return UNIFIED_ANALYSIS_PROMPT.format(
             content=input.content,

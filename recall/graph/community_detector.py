@@ -173,10 +173,55 @@ class CommunityDetector:
                         weight=rel.confidence,
                         edge_type=rel.relation_type
                     )
+        elif hasattr(self.backend, 'backend_name') and self.backend.backend_name == 'kuzu':
+            # KuzuGraphBackend - 通过 Cypher 查询获取所有边
+            try:
+                results = self.backend.query(
+                    "MATCH (a:Node)-[r:Edge]->(b:Node) "
+                    "RETURN a.id, b.id, r.weight, r.edge_type"
+                )
+                for row in results:
+                    source_id = row.get(0, '')
+                    target_id = row.get(1, '')
+                    weight = row.get(2, 1.0) or 1.0
+                    edge_type = row.get(3, 'related')
+                    if source_id and target_id:
+                        G.add_node(source_id)
+                        G.add_node(target_id)
+                        G.add_edge(
+                            source_id,
+                            target_id,
+                            weight=weight,
+                            edge_type=edge_type
+                        )
+            except Exception as e:
+                logger.error(f"[CommunityDetector] Failed to query Kuzu backend: {e}")
+        elif hasattr(self.backend, 'query'):
+            # 通用后端 - 尝试通过 query() 获取边
+            try:
+                results = self.backend.query(
+                    "MATCH (a:Node)-[r:Edge]->(b:Node) "
+                    "RETURN a.id, b.id, r.weight, r.edge_type"
+                )
+                for row in results:
+                    source_id = row.get(0, '')
+                    target_id = row.get(1, '')
+                    weight = row.get(2, 1.0) or 1.0
+                    edge_type = row.get(3, 'related')
+                    if source_id and target_id:
+                        G.add_node(source_id)
+                        G.add_node(target_id)
+                        G.add_edge(
+                            source_id,
+                            target_id,
+                            weight=weight,
+                            edge_type=edge_type
+                        )
+            except Exception as e:
+                logger.error(f"[CommunityDetector] Failed to query graph backend: {e}")
         else:
-            # 通用方法：遍历所有节点获取邻居
-            logger.warning("[CommunityDetector] Using slow graph construction method")
-            # 这种情况下需要后端提供节点列表，暂不实现
+            # 无法识别的后端
+            logger.warning("[CommunityDetector] Unknown backend type, cannot build graph")
         
         self._nx_graph = G
         logger.info(f"[CommunityDetector] Built NetworkX graph with {G.number_of_nodes()} nodes, "

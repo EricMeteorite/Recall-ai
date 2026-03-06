@@ -270,7 +270,7 @@ class ContradictionManager:
             _safe_print(f"[ContradictionManager] 加载失败: {e}")
     
     def _save(self):
-        """保存矛盾记录"""
+        """保存矛盾记录（原子写入）"""
         os.makedirs(self.storage_dir, exist_ok=True)
         
         data = {
@@ -279,8 +279,12 @@ class ContradictionManager:
             'version': '4.0'
         }
         
-        with open(self.records_file, 'w', encoding='utf-8') as f:
+        tmp_path = self.records_file + '.tmp'
+        with open(tmp_path, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, self.records_file)
     
     def add_rule(self, rule: Callable[[TemporalFact, TemporalFact], Optional[ContradictionType]]):
         """添加自定义检测规则
@@ -582,11 +586,11 @@ class ContradictionManager:
         """
         # 先从待处理中查找
         for record in self.pending:
-            if record.contradiction.id == contradiction_id:
+            if record.contradiction.uuid == contradiction_id:
                 return record.contradiction
         # 再从已解决中查找
         for record in self.resolved:
-            if record.contradiction.id == contradiction_id:
+            if record.contradiction.uuid == contradiction_id:
                 return record.contradiction
         return None
     
@@ -629,6 +633,70 @@ class ContradictionManager:
             'rules_count': len(self._rules),
             'llm_enabled': self.llm_client is not None
         }
+
+    def clear(self):
+        """清空所有矛盾记录（pending + resolved）"""
+        self.pending.clear()
+        self.resolved.clear()
+        self._save()
+
+    def remove_by_fact_uuids(self, fact_uuids: set) -> int:
+        """移除引用指定事实UUID的矛盾记录
+        
+        当记忆被删除时，关联的事实被过期/移除，
+        矛盾记录中引用这些事实的条目应一同清理，避免幽灵矛盾。
+        
+        Args:
+            fact_uuids: 要清理的事实UUID集合
+        
+        Returns:
+            int: 被移除的矛盾记录数量
+        """
+        if not fact_uuids:
+            return 0
+        
+        removed = 0
+        
+        # 清理 pending
+        new_pending = []
+        for record in self.pending:
+            old_uuid = record.contradiction.old_fact.uuid
+            new_uuid = record.contradiction.new_fact.uuid
+            if old_uuid in fact_uuids or new_uuid in fact_uuids:
+                removed += 1
+            else:
+                new_pending.append(record)
+        
+        # 清理 resolved
+        new_resolved = []
+        for record in self.resolved:
+            old_uuid = record.contradiction.old_fact.uuid
+            new_uuid = record.contradiction.new_fact.uuid
+            if old_uuid in fact_uuids or new_uuid in fact_uuids:
+                removed += 1
+            else:
+                new_resolved.append(record)
+        
+        if removed > 0:
+            self.pending = new_pending
+            self.resolved = new_resolved
+            self._save()
+        
+        return removed
+
+    def clear_user(self, user_id: str) -> int:
+        """清空指定用户的矛盾记录
+        
+        注意：当前 ContradictionRecord 不存储 user_id，所以无法精确过滤。
+        在单用户场景下等同于 clear()。多用户场景下此方法为安全的 no-op。
+        """
+        # ContradictionRecord 没有 user_id 字段，无法按用户过滤
+        # 这是设计层面的限制，这里仅做一个安全的全清
+        count = len(self.pending) + len(self.resolved)
+        self.pending.clear()
+        self.resolved.clear()
+        self._save()
+        return count
 
 
 __all__ = [

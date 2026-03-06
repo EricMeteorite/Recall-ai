@@ -1,6 +1,7 @@
 """recall/mcp/tools.py — MCP Tools 注册与桥接"""
 
 import json
+import traceback
 from mcp.server import Server
 from mcp.types import Tool, TextContent
 from recall.engine import RecallEngine
@@ -116,6 +117,18 @@ def register_tools(app: Server, engine: RecallEngine):
                 }
             ),
             Tool(
+                name="recall_clear",
+                description="清空指定用户的所有记忆（危险操作）",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "user_id": {"type": "string", "description": "要清空记忆的用户ID", "default": "default"},
+                        "confirm": {"type": "boolean", "description": "确认清空（必须为 true）"},
+                    },
+                    "required": ["confirm"]
+                }
+            ),
+            Tool(
                 name="recall_stats",
                 description="获取 Recall 系统统计信息",
                 inputSchema={"type": "object", "properties": {}}
@@ -170,115 +183,136 @@ def register_tools(app: Server, engine: RecallEngine):
 
     @app.call_tool()
     async def call_tool(name: str, arguments: dict):
-        """Tool 调用入口 — 桥接到 RecallEngine"""
-        if name == "recall_add":
-            result = engine.add(
-                content=arguments["content"],
-                user_id=arguments.get("user_id", "default"),
-                metadata=arguments.get("metadata", {}),
-            )
-            # AddResult dataclass 字段名是 .id（非 .memory_id）
-            return [TextContent(type="text", text=f"已添加记忆: {result.id}")]
+        """Tool 调用入口 — 桥接到 RecallEngine（含错误处理）"""
+        try:
+            return await _dispatch_tool(name, arguments, engine)
+        except Exception as e:
+            error_msg = f"[Recall MCP] 工具 {name} 执行失败: {type(e).__name__}: {e}"
+            tb = traceback.format_exc()
+            print(f"{error_msg}\n{tb}")
+            return [TextContent(type="text", text=error_msg)]
 
-        elif name == "recall_search":
-            results = engine.search(
-                query=arguments["query"],
-                user_id=arguments.get("user_id", "default"),
-                top_k=arguments.get("top_k", 10),
-            )
-            # SearchResult 是 dataclass（字段: id, content, score, metadata, entities）
-            # source/tags 存于 metadata 字典中，需从 metadata 获取
-            if "source" in arguments:
-                results = [r for r in results if r.metadata.get("source", "") == arguments["source"]]
-            if "tags" in arguments:
-                results = [r for r in results if set(arguments["tags"]) & set(r.metadata.get("tags", []))]
 
-            text = "\n\n".join([f"[{r.score:.2f}] {r.content[:200]}" for r in results])
-            return [TextContent(type="text", text=text or "未找到相关记忆")]
+async def _dispatch_tool(name: str, arguments: dict, engine: RecallEngine):
+    """实际的工具分发逻辑（从 call_tool 中分离以便统一 try/except）"""
+    if name == "recall_add":
+        result = engine.add(
+            content=arguments["content"],
+            user_id=arguments.get("user_id", "default"),
+            metadata=arguments.get("metadata", {}),
+        )
+        # AddResult dataclass 字段名是 .id（非 .memory_id）
+        return [TextContent(type="text", text=f"已添加记忆: {result.id}")]
 
-        elif name == "recall_context":
-            context = engine.build_context(
-                query=arguments["query"],
-                user_id=arguments.get("user_id", "default"),
-                character_id=arguments.get("character_id", "default"),
-            )
-            return [TextContent(type="text", text=context)]
+    elif name == "recall_search":
+        results = engine.search(
+            query=arguments["query"],
+            user_id=arguments.get("user_id", "default"),
+            top_k=arguments.get("top_k", 10),
+        )
+        # SearchResult 是 dataclass（字段: id, content, score, metadata, entities）
+        # source/tags 存于 metadata 字典中，需从 metadata 获取
+        if "source" in arguments:
+            results = [r for r in results if r.metadata.get("source", "") == arguments["source"]]
+        if "tags" in arguments:
+            results = [r for r in results if set(arguments["tags"]) & set(r.metadata.get("tags", []))]
 
-        elif name == "recall_add_batch":
-            ids = engine.add_batch(
-                items=arguments["items"],
-                user_id=arguments.get("user_id", "default"),
-            )
-            return [TextContent(type="text", text=f"批量添加完成: {len(ids)} 条")]
+        text = "\n\n".join([f"[{r.score:.2f}] {r.content[:200]}" for r in results])
+        return [TextContent(type="text", text=text or "未找到相关记忆")]
 
-        elif name == "recall_add_turn":
-            result = engine.add_turn(
-                user_message=arguments["user_message"],
-                ai_response=arguments["ai_response"],
-                user_id=arguments.get("user_id", "default"),
-                character_id=arguments.get("character_id", "default"),
-                metadata=arguments.get("metadata"),
-            )
-            # AddTurnResult 是 dataclass，需显式格式化
-            return [TextContent(type="text", text=f"已添加对话轮次: user={result.user_memory_id}, ai={result.ai_memory_id}")]
+    elif name == "recall_context":
+        context = engine.build_context(
+            query=arguments["query"],
+            user_id=arguments.get("user_id", "default"),
+            character_id=arguments.get("character_id", "default"),
+        )
+        return [TextContent(type="text", text=context)]
 
-        elif name == "recall_list":
-            # get_paginated() 返回 tuple: (memories, total_count)
-            memories, total = engine.get_paginated(
-                user_id=arguments.get("user_id", "default"),
-                offset=arguments.get("offset", 0),
-                limit=arguments.get("limit", 100),
-            )
-            # memories 中每条记忆格式为 {'content': ..., 'metadata': {'id': ..., ...}, 'timestamp': ...}
-            text = "\n".join([f"[{m.get('metadata', {}).get('id', 'N/A')}] {m['content'][:100]}" for m in memories])
-            return [TextContent(type="text", text=text or "暂无记忆")]
+    elif name == "recall_add_batch":
+        ids = engine.add_batch(
+            items=arguments["items"],
+            user_id=arguments.get("user_id", "default"),
+        )
+        return [TextContent(type="text", text=f"批量添加完成: {len(ids)} 条")]
 
-        elif name == "recall_delete":
-            success = engine.delete(
-                arguments["memory_id"],
-                user_id=arguments.get("user_id", "default"),
-            )
-            if success:
-                return [TextContent(type="text", text=f"已删除记忆: {arguments['memory_id']}")]
-            else:
-                return [TextContent(type="text", text=f"记忆不存在: {arguments['memory_id']}")]
+    elif name == "recall_add_turn":
+        result = engine.add_turn(
+            user_message=arguments["user_message"],
+            ai_response=arguments["ai_response"],
+            user_id=arguments.get("user_id", "default"),
+            character_id=arguments.get("character_id", "default"),
+            metadata=arguments.get("metadata"),
+        )
+        # AddTurnResult 是 dataclass，需显式格式化
+        return [TextContent(type="text", text=f"已添加对话轮次: user={result.user_memory_id}, ai={result.ai_memory_id}")]
 
-        elif name == "recall_stats":
-            stats = engine.get_stats()
-            return [TextContent(type="text", text=json.dumps(stats, ensure_ascii=False, indent=2))]
+    elif name == "recall_list":
+        # get_paginated() 返回 tuple: (memories, total_count)
+        memories, total = engine.get_paginated(
+            user_id=arguments.get("user_id", "default"),
+            offset=arguments.get("offset", 0),
+            limit=arguments.get("limit", 100),
+        )
+        # memories 中每条记忆格式为 {'content': ..., 'metadata': {'id': ..., ...}, 'timestamp': ...}
+        text = "\n".join([f"[{m.get('metadata', {}).get('id', 'N/A')}] {m['content'][:100]}" for m in memories])
+        return [TextContent(type="text", text=text or "暂无记忆")]
 
-        elif name == "recall_entities":
-            entities = engine.list_entities(
-                user_id=arguments.get("user_id", "default"),
-                entity_type=arguments.get("entity_type"),
-                limit=arguments.get("limit", 100),
-            )
-            text = "\n".join([f"{e['name']} ({e['type']}): {e.get('summary', '')[:80]}" for e in entities])
-            return [TextContent(type="text", text=text or "暂无实体")]
-
-        elif name == "recall_graph_traverse":
-            graph_result = engine.traverse_graph(
-                start_entity=arguments["start_entity"],
-                max_depth=arguments.get("max_depth", 2),
-                relation_types=arguments.get("relation_types"),
-                user_id=arguments.get("user_id", "default"),
-            )
-            return [TextContent(type="text", text=json.dumps(graph_result, ensure_ascii=False, indent=2))]
-
-        elif name == "recall_search_filtered":
-            results = engine.search(
-                query=arguments["query"],
-                user_id=arguments.get("user_id", "default"),
-                top_k=arguments.get("top_k", 10),
-                source=arguments.get("source"),
-                tags=arguments.get("tags"),
-                category=arguments.get("category"),
-                content_type=arguments.get("content_type"),
-                event_time_start=arguments.get("event_time_start"),
-                event_time_end=arguments.get("event_time_end"),
-            )
-            text = "\n\n".join([f"[{r.score:.2f}] {r.content[:200]}" for r in results])
-            return [TextContent(type="text", text=text or "未找到相关记忆")]
-
+    elif name == "recall_delete":
+        success = engine.delete(
+            arguments["memory_id"],
+            user_id=arguments.get("user_id", "default"),
+        )
+        if success:
+            return [TextContent(type="text", text=f"已删除记忆: {arguments['memory_id']}")]
         else:
-            return [TextContent(type="text", text=f"未知工具: {name}")]
+            return [TextContent(type="text", text=f"记忆不存在: {arguments['memory_id']}")]
+
+    elif name == "recall_clear":
+        if not arguments.get("confirm", False):
+            return [TextContent(type="text", text="清空操作需要 confirm=true 确认")]
+        user_id = arguments.get("user_id", "default")
+        success = engine.clear(user_id=user_id)
+        if success:
+            return [TextContent(type="text", text=f"已清空用户 {user_id} 的所有记忆")]
+        else:
+            return [TextContent(type="text", text=f"清空失败: 用户 {user_id}")]
+
+    elif name == "recall_stats":
+        stats = engine.get_stats()
+        return [TextContent(type="text", text=json.dumps(stats, ensure_ascii=False, indent=2))]
+
+    elif name == "recall_entities":
+        entities = engine.list_entities(
+            user_id=arguments.get("user_id", "default"),
+            entity_type=arguments.get("entity_type"),
+            limit=arguments.get("limit", 100),
+        )
+        text = "\n".join([f"{e['name']} ({e['type']}): {e.get('summary', '')[:80]}" for e in entities])
+        return [TextContent(type="text", text=text or "暂无实体")]
+
+    elif name == "recall_graph_traverse":
+        graph_result = engine.traverse_graph(
+            start_entity=arguments["start_entity"],
+            max_depth=arguments.get("max_depth", 2),
+            relation_types=arguments.get("relation_types"),
+            user_id=arguments.get("user_id", "default"),
+        )
+        return [TextContent(type="text", text=json.dumps(graph_result, ensure_ascii=False, indent=2))]
+
+    elif name == "recall_search_filtered":
+        results = engine.search(
+            query=arguments["query"],
+            user_id=arguments.get("user_id", "default"),
+            top_k=arguments.get("top_k", 10),
+            source=arguments.get("source"),
+            tags=arguments.get("tags"),
+            category=arguments.get("category"),
+            content_type=arguments.get("content_type"),
+            event_time_start=arguments.get("event_time_start"),
+            event_time_end=arguments.get("event_time_end"),
+        )
+        text = "\n\n".join([f"[{r.score:.2f}] {r.content[:200]}" for r in results])
+        return [TextContent(type="text", text=text or "未找到相关记忆")]
+
+    else:
+        return [TextContent(type="text", text=f"未知工具: {name}")]

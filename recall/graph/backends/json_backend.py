@@ -112,8 +112,9 @@ class JSONGraphBackend(GraphBackend):
                 print(f"[JSONGraphBackend] Warning: Failed to load edges: {e}")
     
     def _save(self):
-        """保存数据"""
+        """保存数据（v7.0.10: 原子写入）"""
         os.makedirs(self.data_path, exist_ok=True)
+        from recall.utils.atomic_write import atomic_json_dump
         
         # 保存节点
         nodes_data = []
@@ -128,8 +129,7 @@ class JSONGraphBackend(GraphBackend):
             }
             nodes_data.append(node_dict)
         
-        with open(self.nodes_file, 'w', encoding='utf-8') as f:
-            json.dump(nodes_data, f, ensure_ascii=False, indent=2)
+        atomic_json_dump(nodes_data, self.nodes_file, ensure_ascii=False, indent=2)
         
         # 保存边
         edges_data = []
@@ -145,8 +145,7 @@ class JSONGraphBackend(GraphBackend):
             }
             edges_data.append(edge_dict)
         
-        with open(self.edges_file, 'w', encoding='utf-8') as f:
-            json.dump(edges_data, f, ensure_ascii=False, indent=2)
+        atomic_json_dump(edges_data, self.edges_file, ensure_ascii=False, indent=2)
     
     def add_node(self, node: GraphNode) -> str:
         """添加节点"""

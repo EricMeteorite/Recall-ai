@@ -74,17 +74,57 @@ class EntityExtractor:
             # 电商平台
             '闲鱼': 'ORG', '淘宝': 'ORG', '京东': 'ORG', '拼多多': 'ORG',
             '骏河屋': 'ORG', '煤炉': 'ORG', '雅虎': 'ORG', 'ebay': 'ORG', 
-            'amazon': 'ORG', 'etsy': 'ORG', 'shopify': 'ORG',
+            'amazon': 'ORG', 'etsy': 'ORG', 'shopify': 'ORG', '亚马逊': 'ORG',
             # 技术平台
             'github': 'ORG', 'n8n': 'ORG', '扣子': 'ORG', 'coze': 'ORG',
             'discord': 'ORG', 'reddit': 'ORG', 'twitter': 'ORG', 'x': 'ORG',
+            'tiktok': 'ORG', '抖音': 'ORG', '微信': 'ORG', '微博': 'ORG',
             # 娃圈品牌
             'bjd': 'CONCEPT', 'mjd': 'CONCEPT', 'mamachapp': 'ORG', 'azone': 'ORG',
             'volks': 'ORG', 'dollfie': 'ITEM',
-            # AI相关
+            # AI 相关
             'ai': 'CONCEPT', 'chatgpt': 'ORG', 'claude': 'ORG', 'deepseek': 'ORG',
-            'openai': 'ORG', 'anthropic': 'ORG',
+            'openai': 'ORG', 'anthropic': 'ORG', 'gemini': 'ORG', 'llama': 'ORG',
+            'gpt-4': 'ORG', 'gpt-4o': 'ORG', 'gpt-3.5': 'ORG',
+            # 科技公司
+            'google': 'ORG', 'meta': 'ORG', 'apple': 'ORG', 'microsoft': 'ORG',
+            'spacex': 'ORG', 'tesla': 'ORG', 'nvidia': 'ORG', 'intel': 'ORG',
+            'amd': 'ORG', 'tsmc': 'ORG', 'samsung': 'ORG',
+            # 中文科技/机构
+            '英伟达': 'ORG', '华为': 'ORG', '台积电': 'ORG', '三星': 'ORG',
+            '苹果': 'ORG', '腾讯': 'ORG', '阿里巴巴': 'ORG', '百度': 'ORG',
+            '字节跳动': 'ORG', '小米': 'ORG', '比亚迪': 'ORG', '联想': 'ORG',
+            # 国际组织
+            'who': 'ORG', 'un': 'ORG', 'nato': 'ORG', 'eu': 'ORG',
+            'imf': 'ORG', 'wto': 'ORG', 'opec': 'ORG', 'ieee': 'ORG',
+            '联合国': 'ORG', '欧盟': 'ORG', '美联储': 'ORG', '世卫组织': 'ORG',
+            '北约': 'ORG',
+            # 产品/品牌
+            'macbook': 'ITEM', 'iphone': 'ITEM', 'ipad': 'ITEM', 'ios': 'CONCEPT',
+            'android': 'CONCEPT', 'macos': 'CONCEPT', 'windows': 'CONCEPT',
+            'linux': 'CONCEPT', 'python': 'CONCEPT', 'javascript': 'CONCEPT',
+            '星链': 'CONCEPT', '星舰': 'ITEM',
+            # 地名增强
+            '北京': 'LOCATION', '上海': 'LOCATION', '深圳': 'LOCATION',
+            '广州': 'LOCATION', '杭州': 'LOCATION', '成都': 'LOCATION',
+            '东京': 'LOCATION', '纽约': 'LOCATION', '硅谷': 'LOCATION',
+            '迪拜': 'LOCATION', '巴黎': 'LOCATION', '伦敦': 'LOCATION',
+            '台北': 'LOCATION', '首尔': 'LOCATION', '新加坡': 'LOCATION',
+            '加沙': 'LOCATION', '乌克兰': 'LOCATION', '俄罗斯': 'LOCATION',
+            '美国': 'LOCATION', '中国': 'LOCATION', '日本': 'LOCATION',
+            '韩国': 'LOCATION', '欧洲': 'LOCATION', '非洲': 'LOCATION',
+            '土耳其': 'LOCATION', '以色列': 'LOCATION', '台湾': 'LOCATION',
+            '英国': 'LOCATION', '法国': 'LOCATION', '德国': 'LOCATION',
+            '印度': 'LOCATION', '巴西': 'LOCATION', '澳大利亚': 'LOCATION',
+            '加拿大': 'LOCATION', '墨西哥': 'LOCATION', '波兰': 'LOCATION',
+            '卡塔尔': 'LOCATION', '沙特': 'LOCATION', '伊朗': 'LOCATION',
         }
+        
+        # CJK-safe 英文词匹配模式（修复 \b 在中英混排时失效的问题）
+        # \b 在 Python 正则中把 CJK 字符视为 \w，导致 "WHO宣布"、"Google发布" 等无法匹配
+        self._re_english_proper = re.compile(r'(?<![a-zA-Z])([A-Z][a-zA-Z0-9]{1,20})(?![a-zA-Z])')
+        self._re_english_abbr = re.compile(r'(?<![a-zA-Z])([A-Z]{2,10})(?![a-zA-Z])')
+        self._re_english_mixed = re.compile(r'(?<![a-zA-Z0-9])([a-z]+[0-9]+[a-z0-9]*|[0-9]+[a-z]+[a-z0-9]*)(?![a-zA-Z0-9])', re.IGNORECASE)
     
     @property
     def nlp(self):
@@ -140,7 +180,52 @@ class EntityExtractor:
         return spacy.blank('zh')  # 空白模型，只有分词，没有NER
     
     def extract(self, text: str) -> List[ExtractedEntity]:
-        """提取实体 - 增强版，结合多种方法"""
+        """提取实体 - 增强版，结合多种方法。
+        
+        内置 fallback：如果 spaCy/jieba 等依赖失败，
+        自动降级到纯正则规则提取，确保永远不会返回异常。
+        """
+        try:
+            return self._extract_full(text)
+        except Exception as e:
+            _safe_print(f"[Recall] 实体提取主流程异常，降级到规则提取: {e}")
+            return self._extract_fallback_rules(text)
+
+    def _extract_fallback_rules(self, text: str) -> List[ExtractedEntity]:
+        """纯正则规则回退提取 — 无外部依赖，保证可用"""
+        entities: List[ExtractedEntity] = []
+        if not text:
+            return entities
+
+        max_len = 10000
+        truncated = text[:max_len]
+        text_lower = truncated.lower()
+        seen: Set[str] = set()
+
+        # 1. 已知词典匹配
+        for name, etype in self.known_entities.items():
+            if name.lower() in text_lower and name.lower() not in seen:
+                entities.append(ExtractedEntity(name=name, entity_type=etype, confidence=0.9, source_text=""))
+                seen.add(name.lower())
+
+        # 2. 引号 / 书名号内容
+        for m in re.finditer(r'[「『"\'《](.*?)[」』"\'》]', truncated):
+            n = m.group(1).strip()
+            if 2 <= len(n) <= 20 and n.lower() not in self.stopwords and n.lower() not in seen:
+                entities.append(ExtractedEntity(name=n, entity_type='ITEM', confidence=0.6, source_text=""))
+                seen.add(n.lower())
+
+        # 3. 英文专有名词 / 缩写（CJK-safe 模式）
+        for m in re.finditer(r'(?<![a-zA-Z])([A-Z][a-zA-Z0-9]{1,20})(?![a-zA-Z])', truncated):
+            w = m.group(1)
+            if w.lower() not in self.stopwords and w.lower() not in seen:
+                entities.append(ExtractedEntity(name=w, entity_type='ORG', confidence=0.5, source_text=""))
+                seen.add(w.lower())
+
+        return entities
+
+    def _extract_full(self, text: str) -> List[ExtractedEntity]:
+        """完整实体提取流程（原 extract 逻辑）"""
         entities = []
         
         # 限制处理长度，避免性能问题
@@ -209,9 +294,9 @@ class EntityExtractor:
                 ))
         
         # 4. 英文专有名词提取（首字母大写的词、全大写缩写）
-        # 匹配如 GitHub, AI, BJD, MJD, SillyTavern 等
-        english_proper = re.findall(r'\b([A-Z][a-zA-Z0-9]{1,20})\b', truncated_text)
-        english_abbr = re.findall(r'\b([A-Z]{2,10})\b', truncated_text)
+        # 使用 CJK-safe 模式，避免 \b 在中英混排文本中失效
+        english_proper = self._re_english_proper.findall(truncated_text)
+        english_abbr = self._re_english_abbr.findall(truncated_text)
         for word in set(english_proper + english_abbr):
             if word.lower() not in self.stopwords and len(word) >= 2:
                 # 判断类型
@@ -227,8 +312,8 @@ class EntityExtractor:
                 ))
         
         # 5. 混合词提取（如 n8n, mamachapp 等小写专有名词）
-        # 匹配 字母+数字 混合 或 连续小写但看起来像专有名词的
-        mixed_words = re.findall(r'\b([a-z]+[0-9]+[a-z0-9]*|[0-9]+[a-z]+[a-z0-9]*)\b', truncated_text, re.IGNORECASE)
+        # 使用 CJK-safe 模式
+        mixed_words = self._re_english_mixed.findall(truncated_text)
         for word in set(mixed_words):
             if word.lower() not in self.stopwords and len(word) >= 2:
                 entities.append(ExtractedEntity(
@@ -241,9 +326,9 @@ class EntityExtractor:
         # 6. jieba 名词短语提取（补充中文实体）
         try:
             import jieba.posseg as pseg
-            words = pseg.cut(truncated_text)
-            for word, flag in words:
-                # nr=人名, ns=地名, nt=机构, nz=其他专名, n=名词
+            words = list(pseg.cut(truncated_text))
+            for i, (word, flag) in enumerate(words):
+                # nr=人名, ns=地名, nt=机构, nz=其他专名
                 if flag in ('nr', 'ns', 'nt', 'nz') and len(word) >= 2:
                     if word not in self.stopwords:
                         entity_type = {
@@ -258,8 +343,69 @@ class EntityExtractor:
                             confidence=0.65,
                             source_text=truncated_text[:100]
                         ))
+            
+            # 6b. 连续名词短语合并（捕获 "技术组长"、"公共卫生事件" 等复合词）
+            compound_buffer = []
+            compound_flags = set()
+            for word, flag in words:
+                # n=名词, nr=人名, ns=地名, nt=机构, nz=其他专名, vn=动名词, an=形容词名词
+                if flag in ('n', 'nr', 'ns', 'nt', 'nz', 'vn', 'an', 'j') and len(word) >= 2:
+                    compound_buffer.append(word)
+                    compound_flags.add(flag)
+                else:
+                    if len(compound_buffer) >= 2:
+                        compound = ''.join(compound_buffer)
+                        if 4 <= len(compound) <= 20 and compound not in self.stopwords:
+                            # 根据标记的组成判断类型
+                            if 'ns' in compound_flags:
+                                ctype = 'LOCATION'
+                            elif 'nt' in compound_flags:
+                                ctype = 'ORG'
+                            elif 'nr' in compound_flags:
+                                ctype = 'PERSON'
+                            else:
+                                ctype = 'CONCEPT'
+                            entities.append(ExtractedEntity(
+                                name=compound,
+                                entity_type=ctype,
+                                confidence=0.55,
+                                source_text=truncated_text[:100]
+                            ))
+                    compound_buffer = []
+                    compound_flags = set()
+            # 处理末尾残余
+            if len(compound_buffer) >= 2:
+                compound = ''.join(compound_buffer)
+                if 4 <= len(compound) <= 20 and compound not in self.stopwords:
+                    entities.append(ExtractedEntity(
+                        name=compound, entity_type='CONCEPT',
+                        confidence=0.55, source_text=truncated_text[:100]
+                    ))
         except Exception:
             pass  # jieba.posseg 可能不可用
+        
+        # 7. 中文叠字昵称模式（糖糖、明明、甜甜、乐乐等 AA 模式）
+        for m in re.finditer(r'([\u4e00-\u9fff])\1', truncated_text):
+            name = m.group(0)  # e.g. 糖糖
+            if name not in self.stopwords:
+                entities.append(ExtractedEntity(
+                    name=name,
+                    entity_type='PERSON',
+                    confidence=0.6,
+                    source_text=truncated_text[:100]
+                ))
+        
+        # 8. 中文称谓+名字模式（老板、老师、医生、兽医 等角色词作为实体）
+        role_pattern = re.compile(r'([\u4e00-\u9fff]{1,2}(?:老板|老师|医生|兽医|教练|导师|师傅|同学|同事|经理|总监|组长|主任|院长|校长|部长|局长|厅长))')
+        for m in role_pattern.finditer(truncated_text):
+            name = m.group(1)
+            if len(name) >= 2 and name not in self.stopwords:
+                entities.append(ExtractedEntity(
+                    name=name,
+                    entity_type='PERSON',
+                    confidence=0.55,
+                    source_text=truncated_text[:100]
+                ))
         
         # 去重（保留置信度最高的）+ 过滤误识别
         seen: Dict[str, ExtractedEntity] = {}

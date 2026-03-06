@@ -26,6 +26,7 @@ class TestContextSystem:
         from recall import RecallEngine
         engine = RecallEngine(data_root=temp_dir, lite=True)
         yield engine
+        engine.close()
         shutil.rmtree(temp_dir, ignore_errors=True)
     
     def test_persistent_context_extraction(self, engine):

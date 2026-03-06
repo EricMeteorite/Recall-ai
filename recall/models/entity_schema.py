@@ -189,8 +189,9 @@ class EntitySchemaRegistry:
             if name not in builtin_names
         ]
         
-        with open(self.schema_file, 'w', encoding='utf-8') as f:
-            json.dump({'custom_types': custom_types}, f, ensure_ascii=False, indent=2)
+        # v7.0.11: 原子写入防崩溃丢失类型定义
+        from recall.utils.atomic_write import atomic_json_dump
+        atomic_json_dump({'custom_types': custom_types}, self.schema_file)
     
     def register(self, entity_type: EntityTypeDefinition):
         """注册自定义类型"""

@@ -476,9 +476,10 @@ class TestIntegration:
         # 验证结果
         assert len(results) > 0
         
-        # 验证分数排序
+        # 验证分数合理（MMR 多样性重排序可能打破严格降序）
         scores = [r.score for r in results]
-        assert scores == sorted(scores, reverse=True)
+        assert all(s >= 0 for s in scores), "所有分数应非负"
+        assert max(scores) == scores[0], "最高分应在第一位"
         
         # 验证统计
         stats = full_retriever.get_stats_summary()

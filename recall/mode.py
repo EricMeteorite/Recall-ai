@@ -1,24 +1,32 @@
-"""全局模式管理器 — 控制 RP/通用/知识库 模式切换"""
+"""Recall 7.0 — 统一模式配置（无模式切换，全部功能始终可用）
+
+v7.0 变更：移除 RP/通用/知识库 三模式切换。
+所有功能（伏笔、关系类型、上下文类型等）在任何场景下默认启用。
+环境变量仍可单独关闭某项功能（向后兼容）。
+RecallMode 枚举保留 UNIVERSAL 一个值，兼容已有 .mode.value 引用。
+"""
 
 import os
-import logging
 from enum import Enum
 from dataclasses import dataclass
 from typing import Optional
 
 
 class RecallMode(Enum):
-    ROLEPLAY = "roleplay"          # RP 模式（默认，向后兼容）
-    GENERAL = "general"            # 通用模式（爬虫、知识库、Agent）
-    KNOWLEDGE_BASE = "knowledge_base"  # 知识库模式（纯知识管理）
+    """v7.0: 仅保留一个通用模式，旧值映射到 UNIVERSAL"""
+    UNIVERSAL = "universal"
+    # 向后兼容别名（均解析为 UNIVERSAL）
+    ROLEPLAY = "universal"
+    GENERAL = "universal"
+    KNOWLEDGE_BASE = "universal"
 
 
 @dataclass
 class ModeConfig:
-    """模式配置 — 根据模式自动推导子开关"""
+    """模式配置 — v7.0: 所有功能默认启用，可通过环境变量单独禁用"""
     mode: RecallMode
 
-    # RP 特性开关
+    # 功能开关（全部默认 True，任何场景即插即用）
     foreshadowing_enabled: bool
     character_dimension_enabled: bool
     rp_consistency_enabled: bool
@@ -27,33 +35,20 @@ class ModeConfig:
 
     @classmethod
     def from_env(cls) -> 'ModeConfig':
-        mode_str = os.getenv('RECALL_MODE', 'roleplay').lower()
-        if mode_str not in [m.value for m in RecallMode]:
-            logging.getLogger('recall.mode').warning(
-                f"未知的 RECALL_MODE 值 '{mode_str}'，已回退到 'roleplay'。"
-                f"有效值: {[m.value for m in RecallMode]}")
-        mode = RecallMode(mode_str) if mode_str in [m.value for m in RecallMode] else RecallMode.ROLEPLAY
-
-        # 模式默认值
-        defaults = {
-            RecallMode.ROLEPLAY: dict(foreshadowing=True, character=True, rp_consistency=True, rp_relations=True, rp_context=True),
-            RecallMode.GENERAL: dict(foreshadowing=False, character=False, rp_consistency=False, rp_relations=False, rp_context=False),
-            RecallMode.KNOWLEDGE_BASE: dict(foreshadowing=False, character=False, rp_consistency=False, rp_relations=False, rp_context=False),
-        }
-        d = defaults[mode]
-
-        # 允许环境变量手动覆盖任意子开关
-        def env_bool(key, default):
+        # v7.0: 忽略 RECALL_MODE 环境变量，始终使用 UNIVERSAL
+        def env_bool(key: str, default: bool = True) -> bool:
             val = os.getenv(key)
-            return val.lower() in ('true', '1', 'yes') if val else default
+            if val is not None:
+                return val.lower() in ('true', '1', 'yes')
+            return default
 
         return cls(
-            mode=mode,
-            foreshadowing_enabled=env_bool('FORESHADOWING_ENABLED', d['foreshadowing']),
-            character_dimension_enabled=env_bool('CHARACTER_DIMENSION_ENABLED', d['character']),
-            rp_consistency_enabled=env_bool('RP_CONSISTENCY_ENABLED', d['rp_consistency']),
-            rp_relation_types=env_bool('RP_RELATION_TYPES', d['rp_relations']),
-            rp_context_types=env_bool('RP_CONTEXT_TYPES', d['rp_context']),
+            mode=RecallMode.UNIVERSAL,
+            foreshadowing_enabled=env_bool('FORESHADOWING_ENABLED', True),
+            character_dimension_enabled=env_bool('CHARACTER_DIMENSION_ENABLED', True),
+            rp_consistency_enabled=env_bool('RP_CONSISTENCY_ENABLED', True),
+            rp_relation_types=env_bool('RP_RELATION_TYPES', True),
+            rp_context_types=env_bool('RP_CONTEXT_TYPES', True),
         )
 
 

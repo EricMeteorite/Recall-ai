@@ -1,0 +1,58 @@
+# memory_summary.yaml — Memory Summary prompt template (English)
+
+universal: |
+  Summarize the following memory content, preserving key information:
+
+  Memory content:
+  {memories}
+
+  Requirements:
+  1. Preserve all names, places, numbers, and key details
+  2. Merge similar or duplicate content
+  3. Organize by time or topic
+  4. Output a concise but complete summary
+
+  Summary:
+
+default: |
+  Summarize the following memory content, preserving key information:
+
+  Memory content:
+  {memories}
+
+  Requirements:
+  1. Preserve all names, places, numbers, and key details
+  2. Merge similar or duplicate content
+  3. Organize by time or topic
+  4. Output a concise but complete summary
+
+  Summary:
+
+roleplay: |
+  Summarize the following roleplay memory content, preserving key information:
+
+  Memory content:
+  {memories}
+
+  Requirements:
+  1. Preserve all character names, locations, items, and key details
+  2. Merge similar or duplicate content
+  3. Organize by story timeline
+  4. Preserve character relationships and state changes
+  5. Output a concise but complete summary
+
+  Summary:
+
+knowledge_base: |
+  Consolidate and summarize the following knowledge snippets:
+
+  Knowledge content:
+  {memories}
+
+  Requirements:
+  1. Preserve all technical terms, data, and key definitions
+  2. Merge similar or duplicate knowledge points
+  3. Organize by topic or logical relationship
+  4. Output a structured knowledge summary
+
+  Summary:

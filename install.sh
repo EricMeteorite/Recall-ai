@@ -35,7 +35,7 @@ USE_CPU=false         # 是否使用 CPU 版 PyTorch（无需显卡）
 print_header() {
     echo ""
     echo -e "${CYAN}╔════════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║${NC}       ${BOLD}Recall AI v4.2.0 安装程序${NC}           ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}       ${BOLD}Recall AI v7.0.0 安装程序${NC}           ${CYAN}║${NC}"
     echo -e "${CYAN}╚════════════════════════════════════════════╝${NC}"
     echo ""
 }
@@ -524,7 +524,7 @@ do_install() {
             echo ""
             echo -e "  ${YELLOW}启用 Kuzu 后端:${NC}"
             echo -e "    TEMPORAL_GRAPH_BACKEND=kuzu  # 使用 Kuzu 图数据库"
-            echo -e "    KUZU_BUFFER_POOL_SIZE=256    # Kuzu 内存池大小 (MB)"
+            echo -e "    KUZU_BUFFER_POOL_SIZE=1024   # Kuzu 内存池大小 (MB)"
             ;;
     esac
     

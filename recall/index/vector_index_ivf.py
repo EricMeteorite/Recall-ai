@@ -159,7 +159,23 @@ class VectorIndexIVF:
         
         self._load_or_create()
         
+        # v7.0.12: atexit 注册（之前遗漏，进程退出时可能丢失未保存的 pending 向量）
+        import atexit
+        atexit.register(self._atexit_save)
+        
         logger.info(f"[VectorIndexIVF] Initialized at {data_path}, dimension={dimension}, nlist={nlist}")
+    
+    def _atexit_save(self):
+        """atexit 回调 — 安全保存"""
+        try:
+            # v7.0.12: 检查数据目录是否仍存在（pytest 清理临时目录后 atexit 仍会触发）
+            if not os.path.exists(self.data_path):
+                return
+            if self._pending_vectors:
+                self._save_pending()
+            self._save()
+        except Exception:
+            pass
     
     def _load_or_create(self):
         """加载或创建索引"""
@@ -382,6 +398,10 @@ class VectorIndexIVF:
                 
                 doc_id = self.id_mapping[idx]
                 
+                # v7.0.6: 过滤已标记删除的向量（之前缺失，导致幽灵数据出现在搜索结果中）
+                if doc_id in self.doc_metadata and self.doc_metadata[doc_id].get('_deleted'):
+                    continue
+                
                 # 用户过滤（多租户隔离保障）
                 if user_id and doc_id in self.doc_metadata:
                     meta = self.doc_metadata[doc_id]
@@ -401,15 +421,18 @@ class VectorIndexIVF:
     def _save(self):
         """保存索引和元数据"""
         try:
+            # v7.0.13: 检查数据目录是否仍存在（pytest 临时目录可能已被清理）
+            if not os.path.exists(self.data_path):
+                return
             # 保存索引
             faiss.write_index(self.index, self.index_file)
             
             # 保存 ID 映射
             np.save(self.mapping_file, np.array(self.id_mapping, dtype=object))
             
-            # 保存元数据
-            with open(self.metadata_file, 'w', encoding='utf-8') as f:
-                json.dump(self.doc_metadata, f, ensure_ascii=False)
+            # 保存元数据（v7.0.10: 原子写入）
+            from recall.utils.atomic_write import atomic_json_dump
+            atomic_json_dump(self.doc_metadata, self.metadata_file, ensure_ascii=False)
             
             logger.debug(f"[VectorIndexIVF] Saved {self.index.ntotal} vectors")
         except Exception as e:
@@ -418,6 +441,9 @@ class VectorIndexIVF:
     def _save_pending(self):
         """保存待处理的向量"""
         try:
+            # v7.0.13: 检查数据目录是否仍存在
+            if not os.path.exists(self.data_path):
+                return
             pending_data = {
                 'vectors': self._pending_vectors,
                 'ids': self._pending_ids
@@ -503,9 +529,12 @@ class VectorIndexIVF:
         """
         if doc_id in self.doc_metadata:
             self.doc_metadata[doc_id]['_deleted'] = True
-            self._save()
-            return True
-        return False
+        else:
+            # v7.0.6: 即使没有 metadata 条目，也要创建一个并标记删除
+            # （add() 在没有 metadata/user_id 时不会写 doc_metadata，导致 remove 静默失败）
+            self.doc_metadata[doc_id] = {'_deleted': True}
+        self._save()
+        return True
     
     def rebuild(self):
         """重建索引（删除标记为删除的向量）"""

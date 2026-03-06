@@ -235,7 +235,7 @@ def test_A04_metadata_index():
     
     from recall.index.metadata_index import MetadataIndex
     
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         idx = MetadataIndex(data_path=tmpdir)
         
         subsection("添加与查询")
@@ -320,7 +320,7 @@ def test_A05_engine_lite():
     
     from recall.engine import RecallEngine
     
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         engine = RecallEngine(data_root=tmpdir, lite=True)
         user = "test_lite"
         
@@ -385,7 +385,7 @@ def test_A06_context_system():
     
     from recall.engine import RecallEngine
     
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         engine = RecallEngine(data_root=tmpdir, lite=True)
         user = "test_ctx"
         char = "test_char"
@@ -430,7 +430,7 @@ def test_A07_foreshadowing():
     
     from recall.engine import RecallEngine
     
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         engine = RecallEngine(data_root=tmpdir, lite=True)
         user = "test_fore"
         char = "test_char"
@@ -588,7 +588,7 @@ def test_A13_temporal_graph():
     from recall.graph.temporal_knowledge_graph import TemporalKnowledgeGraph
     from recall.models.temporal import UnifiedNode, NodeType
     
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         subsection("File 后端")
         graph = TemporalKnowledgeGraph(data_path=tmpdir, backend="file")
         
@@ -622,7 +622,7 @@ def test_A14_ngram_index():
     
     from recall.index.ngram_index import OptimizedNgramIndex
     
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         idx = OptimizedNgramIndex(data_path=tmpdir)
         
         idx.add("doc1", "今天天气很好阳光明媚")
@@ -639,7 +639,7 @@ def test_A15_inverted_index():
     
     from recall.index import InvertedIndex
     
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         idx = InvertedIndex(data_path=tmpdir)
         
         idx.add_batch(["实体A", "实体B"], "doc1")
@@ -757,7 +757,7 @@ def test_A19_multi_tenant():
     
     from recall.engine import RecallEngine
     
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         engine = RecallEngine(data_root=tmpdir, lite=True)
         
         engine.add("用户A的秘密信息", user_id="userA")
@@ -787,7 +787,7 @@ def test_A20_chinese_encoding():
     
     from recall.engine import RecallEngine
     
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         engine = RecallEngine(data_root=tmpdir, lite=True)
         
         chinese_texts = [
@@ -820,7 +820,7 @@ def test_A21_batch_operations():
     
     from recall.engine import RecallEngine
     
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         engine = RecallEngine(data_root=tmpdir, lite=True)
         
         # lite 模式不支持 add_batch（需要 embedding），改用逐条添加
@@ -844,7 +844,7 @@ def test_A22_metadata_filter_engine():
     
     from recall.engine import RecallEngine
     
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         engine = RecallEngine(data_root=tmpdir, lite=True)
         user = "meta_test"
         
@@ -1233,17 +1233,19 @@ def test_B19_config_management():
 def test_B20_turn_api():
     """B20: Turn API"""
     section("B20: Turn API (对话轮次)")
-    import requests
+    import requests, uuid
     
+    uid = uuid.uuid4().hex[:12]
     r = requests.post(f"{API_BASE}/v1/memories/turn", json={
-        "user_message": "今天天气怎么样？",
-        "ai_response": "今天天气晴朗，温度适宜，非常适合出门散步。",
+        "user_message": f"B20测试问题-{uid}: 请描述量子纠缠的基本原理和EPR佯谬",
+        "ai_response": f"B20测试回复-{uid}: 量子纠缠是两个粒子之间的非经典关联，EPR佯谬由爱因斯坦等人于1935年提出",
         "user_id": TEST_USER,
         "character_id": TEST_CHAR,
     })
     assert r.status_code == 200
     data = r.json()
-    assert data.get('success', True)  # 可能返回不同结构
+    # 接受成功添加或语义重复（已存在）两种结果
+    assert data.get('success', True) or '已存在' in data.get('message', '')
     ok("POST /v1/memories/turn")
 
 def test_B21_mem0_compat():

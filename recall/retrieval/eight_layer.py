@@ -122,7 +122,9 @@ class EightLayerRetriever:
         self.embedding_backend = embedding_backend
         
         # 内部内容缓存（用于索引时存储内容）
+        # v7.0.14: 加 LRU 上限保护，防止无界增长导致 OOM
         self._content_cache: Dict[str, str] = {}
+        self._cache_max_size: int = 10000  # LRU 上限（与 ElevenLayerRetriever 一致）
         
         # 统计
         self.stats: List[LayerStats] = []
@@ -156,6 +158,15 @@ class EightLayerRetriever:
     def cache_content(self, doc_id: str, content: str):
         """缓存文档内容（在添加索引时调用）"""
         self._content_cache[doc_id] = content
+        self._evict_cache_if_needed()
+    
+    def _evict_cache_if_needed(self):
+        """v7.0.14: LRU 缓存驱逐 — 超过上限时清除最早一半"""
+        if len(self._content_cache) > self._cache_max_size:
+            keys = list(self._content_cache.keys())
+            evict_count = len(keys) // 2
+            for key in keys[:evict_count]:
+                del self._content_cache[key]
     
     def get_content(self, doc_id: str) -> str:
         """获取文档内容"""

@@ -153,14 +153,14 @@ def test_engine_search_signature():
 def test_add_single_fast_returns_relations():
     """验证 _add_single_fast 返回值包含 relations（4 元素元组）"""
     import inspect
-    from recall.engine import RecallEngine
+    from recall.memory_ops import MemoryOperations
     
-    # 通过 source code 验证返回值格式
-    source = inspect.getsource(RecallEngine._add_single_fast)
+    # 通过 source code 验证返回值格式（实现在 MemoryOperations 中）
+    source = inspect.getsource(MemoryOperations._add_single_fast)
     assert "return (memory_id, entities, keywords, relations)" in source, \
         "_add_single_fast 应返回 (memory_id, entities, keywords, relations)"
-    assert "self.relation_extractor.extract" in source, \
-        "_add_single_fast 应调用 self.relation_extractor.extract"
+    assert "relation_extractor.extract" in source, \
+        "_add_single_fast 应调用 relation_extractor.extract"
     
     print("  ✅ test_add_single_fast_returns_relations PASSED")
 
@@ -170,9 +170,9 @@ def test_add_single_fast_returns_relations():
 def test_add_batch_collects_relations():
     """验证 add_batch 正确解包 4 元素结果并传递 all_relations"""
     import inspect
-    from recall.engine import RecallEngine
+    from recall.memory_ops import MemoryOperations
     
-    source = inspect.getsource(RecallEngine.add_batch)
+    source = inspect.getsource(MemoryOperations.add_batch)
     assert "all_relations" in source, "add_batch 应声明 all_relations 列表"
     assert "memory_id, entities, keywords, relations = result" in source, \
         "add_batch 应解包 4 元素元组"
@@ -189,20 +189,20 @@ def test_add_batch_collects_relations():
 def test_batch_update_indexes_has_kg_and_fulltext():
     """验证 _batch_update_indexes 包含知识图谱和全文索引更新"""
     import inspect
-    from recall.engine import RecallEngine
+    from recall.memory_ops import MemoryOperations
     
-    source = inspect.getsource(RecallEngine._batch_update_indexes)
-    sig = inspect.signature(RecallEngine._batch_update_indexes)
+    source = inspect.getsource(MemoryOperations._batch_update_indexes)
+    sig = inspect.signature(MemoryOperations._batch_update_indexes)
     
     # 验证签名
     assert "all_relations" in sig.parameters, "_batch_update_indexes 应有 all_relations 参数"
     
-    # 验证包含知识图谱更新
-    assert "self.knowledge_graph" in source, "应包含知识图谱更新逻辑"
+    # 验证包含知识图谱更新（MemoryOperations 中使用 engine. 前缀）
+    assert "knowledge_graph" in source, "应包含知识图谱更新逻辑"
     assert "knowledge_graph.add_relation" in source, "应调用 knowledge_graph.add_relation"
     
     # 验证包含全文索引更新
-    assert "self.fulltext_index" in source, "应包含全文索引更新逻辑"
+    assert "fulltext_index" in source, "应包含全文索引更新逻辑"
     assert "fulltext_index.add" in source, "应调用 fulltext_index.add"
     
     print("  ✅ test_batch_update_indexes_has_kg_and_fulltext PASSED")
@@ -213,10 +213,10 @@ def test_batch_update_indexes_has_kg_and_fulltext():
 def test_engine_delete_cleans_metadata():
     """验证 engine.delete() 调用 metadata_index.remove()"""
     import inspect
-    from recall.engine import RecallEngine
+    from recall.memory_ops import MemoryOperations
     
-    source = inspect.getsource(RecallEngine.delete)
-    assert "self._metadata_index" in source, "delete() 应检查 _metadata_index"
+    source = inspect.getsource(MemoryOperations.delete)
+    assert "_metadata_index" in source, "delete() 应检查 _metadata_index"
     assert "_metadata_index.remove(memory_id)" in source, "delete() 应调用 _metadata_index.remove"
     
     print("  ✅ test_engine_delete_cleans_metadata PASSED")
@@ -227,16 +227,21 @@ def test_engine_delete_cleans_metadata():
 def test_clear_includes_metadata_cleanup():
     """验证 clear() 和 clear_all() 包含 MetadataIndex 清理"""
     import inspect
+    from recall.memory_ops import MemoryOperations
     from recall.engine import RecallEngine
     
-    # per-user clear
-    clear_source = inspect.getsource(RecallEngine.clear)
+    # per-user clear（实现在 MemoryOperations 中）
+    clear_source = inspect.getsource(MemoryOperations.clear)
     assert "_metadata_index" in clear_source, "clear() 应包含 _metadata_index 清理"
     assert "remove_batch" in clear_source, "clear() 应调用 remove_batch"
     
-    # clear_all
-    clear_all_source = inspect.getsource(RecallEngine.clear_all)
+    # clear_all（v7.0.7: 已委托到 MemoryOperations.clear_all()）
+    clear_all_source = inspect.getsource(MemoryOperations.clear_all)
     assert "_metadata_index" in clear_all_source, "clear_all() 应包含 _metadata_index 清理"
+    
+    # 验证 engine.clear_all 正确委托
+    engine_clear_all_source = inspect.getsource(RecallEngine.clear_all)
+    assert "_memory_ops" in engine_clear_all_source, "engine.clear_all() 应委托到 _memory_ops"
     
     print("  ✅ test_clear_includes_metadata_cleanup PASSED")
 

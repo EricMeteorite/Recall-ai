@@ -206,8 +206,9 @@ class EnvironmentManager:
         config_path = self.dirs['config'] / 'recall.json'
         
         try:
-            with open(config_path, 'w', encoding='utf-8') as f:
-                json.dump(config, f, ensure_ascii=False, indent=2)
+            # v7.0.11: 原子写入防崩溃丢配置
+            from recall.utils.atomic_write import atomic_json_dump
+            atomic_json_dump(config, config_path)
         except IOError as e:
             _safe_print(f"[Recall] 警告：保存配置失败（建议使用 api_keys.env）: {e}")
     

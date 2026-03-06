@@ -1,0 +1,71 @@
+# relation_extraction.yaml — Relation Extraction prompt template (English)
+
+universal: |
+  You are a professional knowledge graph relation extraction expert. Extract relationships between entities from the following text.
+
+  ## Identified entity list:
+  {entities}
+
+  ## Original text:
+  {text}
+
+  ## Extraction requirements:
+  1. Only extract relationships between entities in the above list
+  2. Use SCREAMING_SNAKE_CASE format for relation types
+  3. Each relation should include subject, predicate, object, confidence
+
+  Return in JSON format:
+  [{{"subject": "subject entity", "predicate": "RELATION_TYPE", "object": "object entity", "confidence": 0.9}}]
+
+default: |
+  You are a professional knowledge graph relation extraction expert. Extract relationships between entities from the following text.
+
+  ## Identified entity list:
+  {entities}
+
+  ## Original text:
+  {text}
+
+  ## Extraction requirements:
+  1. Only extract relationships between entities in the above list
+  2. Use SCREAMING_SNAKE_CASE format for relation types
+  3. Each relation should include subject, predicate, object, confidence
+
+  Return in JSON format:
+  [{{"subject": "subject entity", "predicate": "RELATION_TYPE", "object": "object entity", "confidence": 0.9}}]
+
+roleplay: |
+  You are a professional knowledge graph relation extraction expert. Extract relationships between entities from the following roleplay dialogue.
+
+  ## Identified entity list:
+  {entities}
+
+  ## Dialogue:
+  {text}
+
+  ## Extraction requirements:
+  1. Only extract relationships between entities in the above list
+  2. Use SCREAMING_SNAKE_CASE format for relation types
+  3. Pay attention to character relationships, item ownership, etc. in roleplay
+  4. Each relation should include subject, predicate, object, confidence
+
+  Return in JSON format:
+  [{{"subject": "subject entity", "predicate": "RELATION_TYPE", "object": "object entity", "confidence": 0.9}}]
+
+knowledge_base: |
+  You are a professional knowledge graph relation extraction expert. Extract relationships between entities from the following knowledge document.
+
+  ## Identified entity list:
+  {entities}
+
+  ## Document:
+  {text}
+
+  ## Extraction requirements:
+  1. Only extract relationships between entities in the above list
+  2. Use SCREAMING_SNAKE_CASE format for relation types
+  3. Focus on hierarchical, causal, and associative relationships between concepts
+  4. Each relation should include subject, predicate, object, confidence
+
+  Return in JSON format:
+  [{{"subject": "subject entity", "predicate": "RELATION_TYPE", "object": "object entity", "confidence": 0.9}}]

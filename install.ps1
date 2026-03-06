@@ -49,7 +49,7 @@ $UseCPU = $false       # 是否使用 CPU 版 PyTorch（无需显卡）
 function Write-Header {
     Write-Host ""
     Write-Host "╔════════════════════════════════════════════╗" -ForegroundColor Cyan
-    Write-Host "║       Recall AI v4.2.0 安装程序           ║" -ForegroundColor Cyan
+    Write-Host "║       Recall AI v7.0.0 安装程序           ║" -ForegroundColor Cyan
     Write-Host "╚════════════════════════════════════════════╝" -ForegroundColor Cyan
     Write-Host ""
 }
@@ -580,7 +580,7 @@ function Invoke-Install {
                 Write-Host ""
                 Write-Host "  启用 Kuzu 后端:" -ForegroundColor Yellow
                 Write-Host "    TEMPORAL_GRAPH_BACKEND=kuzu  # 使用 Kuzu 图数据库"
-                Write-Host "    KUZU_BUFFER_POOL_SIZE=256    # Kuzu 内存池大小 (MB)"
+                Write-Host "    KUZU_BUFFER_POOL_SIZE=1024   # Kuzu 内存池大小 (MB)"
             }
         }
         
@@ -835,6 +835,11 @@ function Invoke-Uninstall {
             Remove-Item -Force $pidFile
         }
         
+        $logFile = Join-Path $ScriptDir "recall.log"
+        if (Test-Path $logFile) {
+            Remove-Item -Force $logFile
+        }
+        
         $script:InstallSuccess = $true
         Write-Host ""
         Write-Success "卸载完成！"
@@ -897,7 +902,7 @@ function Show-Status {
     
     # API 检查
     try {
-        $null = Invoke-WebRequest -Uri "http://localhost:18888/" -TimeoutSec 2 -ErrorAction Stop
+        $null = Invoke-WebRequest -Uri "http://127.0.0.1:18888/health" -TimeoutSec 2 -UseBasicParsing -ErrorAction Stop
         Write-Success "API 响应: 正常"
     } catch {
         Write-Info "API 响应: 无法连接"

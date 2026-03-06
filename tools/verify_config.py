@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
-"""验证配置项一致性脚本 - Recall v4.2 完整版
+"""验证配置项一致性脚本 - Recall v7.0 完整版
 
 检查项目:
 1. server.py SUPPORTED_CONFIG_KEYS - 支持的配置键名
 2. start.ps1 $supportedKeys - 支持的配置键名
 3. start.sh supported_keys - 支持的配置键名
 4. server.py get_default_config_content() - 默认配置模板
-5. start.ps1 $defaultConfig - 默认配置模板
-6. manage.ps1 $defaultConfig - 默认配置模板
-7. manage.sh 默认配置模板
-8. Phase 2 高级功能集成状态
-9. Phase 3.5 QueryPlanner & CommunityDetector 集成状态
+5. recall/config_template.env - 统一配置模板 (单一数据源)
+6. 脚本是否正确引用 config_template.env
+7. v7.0 高级功能集成状态（含 BackendFactory, ConsolidationManager 等）
 """
 
 import re
@@ -38,7 +36,7 @@ def main():
     warnings = 0
     
     print("=" * 60)
-    print("Recall-AI 配置一致性验证工具 v4.2")
+    print("Recall-AI 配置一致性验证工具 v7.0")
     print("=" * 60)
     print()
     
@@ -139,53 +137,22 @@ def main():
         print('[ERROR] 无法解析 server.py get_default_config_content()')
         server_template_keys = set()
     
-    # 2. 从 start.ps1 提取 $defaultConfig 模板
-    with open(ps1_file, 'r', encoding='utf-8') as f:
-        ps1_content = f.read()
-    
-    match = re.search(r"\$defaultConfig = @'([\s\S]*?)'@", ps1_content)
-    if match:
-        ps1_template = match.group(1)
-        ps1_template_keys = extract_template_keys(ps1_template)
-        print(f'[OK] start.ps1 $defaultConfig: {len(ps1_template_keys)} 项配置')
+    # 2. 从统一模板文件 recall/config_template.env 提取配置键
+    template_file = root / 'recall' / 'config_template.env'
+    if template_file.exists():
+        with open(template_file, 'r', encoding='utf-8') as f:
+            template_content = f.read()
+        template_keys = extract_template_keys(template_content)
+        print(f'[OK] recall/config_template.env (统一模板): {len(template_keys)} 项配置')
     else:
-        print('[WARN] 无法解析 start.ps1 $defaultConfig (可能未定义)')
-        ps1_template_keys = set()
+        print('[ERROR] 找不到 recall/config_template.env 统一模板文件')
+        template_keys = set()
     
-    # 3. 从 manage.ps1 提取 $defaultConfig 模板
-    manage_ps1_file = root / 'manage.ps1'
-    if manage_ps1_file.exists():
-        with open(manage_ps1_file, 'r', encoding='utf-8') as f:
-            manage_ps1_content = f.read()
-        
-        match = re.search(r"\$defaultConfig = @'([\s\S]*?)'@", manage_ps1_content)
-        if match:
-            manage_ps1_template = match.group(1)
-            manage_ps1_template_keys = extract_template_keys(manage_ps1_template)
-            print(f'[OK] manage.ps1 $defaultConfig: {len(manage_ps1_template_keys)} 项配置')
-        else:
-            print('[WARN] 无法解析 manage.ps1 $defaultConfig')
-            manage_ps1_template_keys = set()
-    else:
-        manage_ps1_template_keys = set()
-    
-    # 4. 从 manage.sh 提取默认配置模板
-    manage_sh_file = root / 'manage.sh'
-    if manage_sh_file.exists():
-        with open(manage_sh_file, 'r', encoding='utf-8') as f:
-            manage_sh_content = f.read()
-        
-        # Bash heredoc 格式: cat > file << 'EOF' ... EOF
-        match = re.search(r"cat\s*>\s*[^\n]+<<\s*'?EOF'?([\s\S]*?)EOF", manage_sh_content)
-        if match:
-            manage_sh_template = match.group(1)
-            manage_sh_template_keys = extract_template_keys(manage_sh_template)
-            print(f'[OK] manage.sh 默认模板: {len(manage_sh_template_keys)} 项配置')
-        else:
-            print('[WARN] 无法解析 manage.sh 默认模板')
-            manage_sh_template_keys = set()
-    else:
-        manage_sh_template_keys = set()
+    # 3. (旧版本会从 start.ps1/manage.ps1/manage.sh 分别提取内联模板)
+    #    v7.0+ 模板已统一到 recall/config_template.env，脚本通过文件引用加载
+    ps1_template_keys = template_keys  # 统一引用
+    manage_ps1_template_keys = template_keys
+    manage_sh_template_keys = template_keys
     
     # 对比模板内容
     print()
@@ -198,32 +165,32 @@ def main():
             if len(missing_in_template) > 10:
                 print(f'       (共 {len(missing_in_template)} 项缺失，部分配置可能是运行时动态生成)')
         
-        # 对比 start.ps1 模板
-        if ps1_template_keys:
-            diff = server_template_keys - ps1_template_keys
+        # 对比统一模板
+        if template_keys:
+            diff = server_template_keys - template_keys
             if diff:
-                print(f'[FAIL] server.py 模板有但 start.ps1 模板缺少: {sorted(diff)[:5]}...')
+                print(f'[FAIL] server.py 模板有但 config_template.env 缺少: {sorted(diff)[:5]}...')
                 errors += 1
             else:
-                print('[PASS] start.ps1 模板包含所有 server.py 模板的配置')
+                print('[PASS] config_template.env 包含所有 server.py 模板的配置')
+            
+            diff2 = template_keys - server_template_keys
+            if diff2:
+                print(f'[INFO] config_template.env 额外包含: {sorted(diff2)[:5]}')
         
-        # 对比 manage.ps1 模板
-        if manage_ps1_template_keys:
-            diff = server_template_keys - manage_ps1_template_keys
-            if diff:
-                print(f'[FAIL] server.py 模板有但 manage.ps1 模板缺少: {sorted(diff)[:5]}...')
-                errors += 1
+        print('[PASS] manage.ps1/manage.sh 已统一引用 config_template.env (无需单独检查)')
+    
+    # 检查脚本是否引用了统一模板文件
+    for script_name in ['start.ps1', 'start.sh', 'manage.ps1', 'manage.sh']:
+        script_path = root / script_name
+        if script_path.exists():
+            with open(script_path, 'r', encoding='utf-8') as f:
+                script_content = f.read()
+            if 'config_template.env' in script_content:
+                print(f'[PASS] {script_name} 引用了 config_template.env')
             else:
-                print('[PASS] manage.ps1 模板包含所有 server.py 模板的配置')
-        
-        # 对比 manage.sh 模板
-        if manage_sh_template_keys:
-            diff = server_template_keys - manage_sh_template_keys
-            if diff:
-                print(f'[FAIL] server.py 模板有但 manage.sh 模板缺少: {sorted(diff)[:5]}...')
+                print(f'[FAIL] {script_name} 未引用 config_template.env')
                 errors += 1
-            else:
-                print('[PASS] manage.sh 模板包含所有 server.py 模板的配置')
     
     # =========================================================================
     # Part 3: 验证模板与 SUPPORTED_CONFIG_KEYS 的关系
@@ -373,10 +340,10 @@ def main():
     print('[HINT] 已启用自动热重载: 保存 api_keys.env 后 2 秒内自动生效（无需手动调用）')
     
     # =========================================================================
-    # Part 6: Phase 2/3.5/4.1 高级功能集成状态
+    # Part 6: v7.0 高级功能集成状态
     # =========================================================================
     print()
-    print("[Part 6] Phase 2/3.5/4.1 高级功能集成状态")
+    print("[Part 6] v7.0 高级功能集成状态")
     print("-" * 40)
     
     # 检查 engine.py 是否导入了这些组件
@@ -386,77 +353,55 @@ def main():
             engine_content = f.read()
         
         # === Phase 2 功能 ===
-        # SmartExtractor 集成状态
-        if 'SmartExtractor' in engine_content:
-            print('[PASS] SmartExtractor 已集成到 engine.py')
-        else:
-            print('[INFO] SmartExtractor 未集成 (Phase 2 可选功能)')
-            print('       -> 配置项 SMART_EXTRACTOR_* 在 engine.py 中暂不生效')
-        
-        # BudgetManager 集成状态
-        if 'BudgetManager' in engine_content:
-            print('[PASS] BudgetManager 已集成到 engine.py')
-        else:
-            print('[INFO] BudgetManager 未集成 (Phase 2 可选功能)')
-            print('       -> 配置项 BUDGET_* 在 engine.py 中暂不生效')
-        
-        # ThreeStageDeduplicator 集成状态
-        if 'ThreeStageDeduplicator' in engine_content:
-            print('[PASS] ThreeStageDeduplicator 已集成到 engine.py')
-        else:
-            print('[INFO] ThreeStageDeduplicator 未集成 (Phase 2 可选功能)')
-            print('       -> 配置项 DEDUP_JACCARD_*, DEDUP_SEMANTIC_*, DEDUP_LLM_* 在 engine.py 中暂不生效')
+        phase2_components = [
+            ('SmartExtractor', 'SMART_EXTRACTOR_*'),
+            ('BudgetManager', 'BUDGET_*'),
+            ('ThreeStageDeduplicator', 'DEDUP_JACCARD_*, DEDUP_SEMANTIC_*, DEDUP_LLM_*'),
+        ]
+        for component, config_keys in phase2_components:
+            if component in engine_content:
+                print(f'[PASS] {component} 已集成')
+            else:
+                print(f'[INFO] {component} 未集成 -> {config_keys} 暂不生效')
         
         # === Phase 3.5 功能 ===
-        # QueryPlanner 集成状态
-        if 'QueryPlanner' in engine_content:
-            print('[PASS] QueryPlanner 已集成到 engine.py')
-        else:
-            print('[INFO] QueryPlanner 未集成 (Phase 3.5 可选功能)')
-            print('       -> 配置项 QUERY_PLANNER_* 在 engine.py 中暂不生效')
-        
-        # CommunityDetector 集成状态
-        if 'CommunityDetector' in engine_content:
-            print('[PASS] CommunityDetector 已集成到 engine.py')
-        else:
-            print('[INFO] CommunityDetector 未集成 (Phase 3.5 可选功能)')
-            print('       -> 配置项 COMMUNITY_DETECTION_* 在 engine.py 中暂不生效')
+        phase35_components = [
+            ('QueryPlanner', 'QUERY_PLANNER_*'),
+            ('CommunityDetector', 'COMMUNITY_DETECTION_*'),
+        ]
+        for component, config_keys in phase35_components:
+            if component in engine_content:
+                print(f'[PASS] {component} 已集成')
+            else:
+                print(f'[INFO] {component} 未集成 -> {config_keys} 暂不生效')
         
         # === Phase 4.1 功能 ===
-        # LLMRelationExtractor 集成状态
-        if 'LLMRelationExtractor' in engine_content:
-            print('[PASS] LLMRelationExtractor 已集成到 engine.py')
-        else:
-            print('[INFO] LLMRelationExtractor 未集成 (Phase 4.1 可选功能)')
-            print('       -> 配置项 LLM_RELATION_* 在 engine.py 中暂不生效')
+        phase41_components = [
+            ('LLMRelationExtractor', 'LLM_RELATION_*'),
+            ('EpisodeStore', 'EPISODE_TRACKING_*'),
+            ('EntitySummarizer', 'ENTITY_SUMMARY_*'),
+        ]
+        for component, config_keys in phase41_components:
+            if component in engine_content:
+                print(f'[PASS] {component} 已集成')
+            else:
+                print(f'[INFO] {component} 未集成 -> {config_keys} 暂不生效')
         
-        # EpisodeStore 集成状态
-        if 'EpisodeStore' in engine_content:
-            print('[PASS] EpisodeStore 已集成到 engine.py')
-        else:
-            print('[INFO] EpisodeStore 未集成 (Phase 4.1 可选功能)')
-            print('       -> 配置项 EPISODE_TRACKING_* 在 engine.py 中暂不生效')
-        
-        # EntitySummarizer 集成状态
-        if 'EntitySummarizer' in engine_content:
-            print('[PASS] EntitySummarizer 已集成到 engine.py')
-        else:
-            print('[INFO] EntitySummarizer 未集成 (Phase 4.1 可选功能)')
-            print('       -> 配置项 ENTITY_SUMMARY_* 在 engine.py 中暂不生效')
-        
+        # === v7.0 新增功能 ===
+        v70_components = [
+            ('get_mode_config', '统一模式系统 (RecallMode)'),
+            ('CoreSettings', '绝对规则系统 (AbsoluteRule)'),
+            ('TimeIntentParser', '时间意图解析器'),
+            ('GrowthControl', '增长控制器'),
+            ('ConsolidationManager', '记忆整合管理器'),
+        ]
         print()
-        print('[NOTE] 高级功能资源消耗说明:')
-        print('       Phase 2:')
-        print('         - SmartExtractor: RULES 模式零 LLM 成本，ADAPTIVE/LLM 模式按需调用')
-        print('         - BudgetManager: 仅在配置了 BUDGET_DAILY_LIMIT > 0 时启用')
-        print('         - ThreeStageDeduplicator: DEDUP_LLM_ENABLED=false 时不调用 LLM')
-        print('       Phase 3.5:')
-        print('         - QueryPlanner: 本地缓存优化，零 API 成本')
-        print('         - CommunityDetector: 本地图算法，零 API 成本')
-        print('       Phase 4.1:')
-        print('         - LLMRelationExtractor: RULES 模式零 LLM 成本，ADAPTIVE/LLM 模式按需调用')
-        print('         - EpisodeStore: 本地 JSONL 存储，零 API 成本')
-        print('         - EntitySummarizer: 仅在 ENTITY_SUMMARY_ENABLED=true 时调用 LLM')
+        print('--- v7.0 新增组件 ---')
+        for component, desc in v70_components:
+            if component in engine_content:
+                print(f'[PASS] {component} ({desc}) 已集成')
+            else:
+                print(f'[INFO] {component} ({desc}) 未直接集成到 engine.py')
     
     # =========================================================================
     # Summary

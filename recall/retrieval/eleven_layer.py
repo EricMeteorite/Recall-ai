@@ -33,6 +33,7 @@ from .config import (
 )
 from .rrf_fusion import reciprocal_rank_fusion
 from .reranker import RerankerFactory, BuiltinReranker
+from .mmr import mmr_rerank_by_content
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +102,15 @@ class ElevenLayerRetriever:
         cross_encoder: Optional[Any] = None,            # CrossEncoder 模型
         # Phase 3.6 新增：用于 VectorIndexIVF 的向量编码
         embedding_backend: Optional[Any] = None,
+        # v7.0: QueryPlanner 查询规划器（缓存+优化 BFS）
+        query_planner: Optional[Any] = None,
+        # v7.0: 重排序器配置
+        reranker_backend: str = 'builtin',
+        reranker_api_key: str = '',
+        reranker_model: str = '',
+        # v7.0.1: 全文检索索引 + 权重
+        fulltext_index: Optional[Any] = None,
+        fulltext_weight: float = 0.3,
         # 配置
         config: Optional[RetrievalConfig] = None
     ):
@@ -116,16 +126,23 @@ class ElevenLayerRetriever:
         # Phase 3.6: embedding_backend 用于 VectorIndexIVF（无内置 encode）
         self.embedding_backend = embedding_backend
         
-        # 内部内容缓存（兼容旧代码）
+        # v7.0.2: 内部内容缓存（LRU 保护，防止无界增长导致 OOM）
         self._content_cache: Dict[str, str] = {}
-        # 元数据和实体缓存
         self._metadata_cache: Dict[str, Dict[str, Any]] = {}
         self._entities_cache: Dict[str, List[str]] = {}
+        self._cache_max_size: int = 10000  # LRU 上限
         
         # 新增依赖
         self.temporal_index = temporal_index
         self.knowledge_graph = knowledge_graph
         self.cross_encoder = cross_encoder
+        
+        # v7.0: QueryPlanner（BFS 查询规划+缓存优化）
+        self.query_planner = query_planner
+        
+        # v7.0.1: 全文检索索引 (BM25) + 权重
+        self.fulltext_index = fulltext_index
+        self.fulltext_weight = fulltext_weight
         
         self.config = config or RetrievalConfig.default()
         
@@ -135,20 +152,35 @@ class ElevenLayerRetriever:
         # 兼容旧配置格式（dict）
         self._legacy_config: Dict[str, Any] = {}
         
-        # Phase 5.0: 可插拔重排序器
-        self.reranker = RerankerFactory.create(os.getenv('RERANKER_BACKEND', 'builtin'))
+        # Phase 5.0: 可插拔重排序器（v7.0: 通过参数传入，不再直接读 os.getenv）
+        self.reranker = RerankerFactory.create(
+            backend=reranker_backend,
+            api_key=reranker_api_key,
+            model=reranker_model,
+        )
     
     def cache_content(self, doc_id: str, content: str):
         """缓存文档内容（在添加索引时调用）- 兼容 EightLayerRetriever"""
         self._content_cache[doc_id] = content
+        self._evict_cache_if_needed(self._content_cache)
     
     def cache_metadata(self, doc_id: str, metadata: Dict[str, Any]):
         """缓存文档元数据"""
         self._metadata_cache[doc_id] = metadata
+        self._evict_cache_if_needed(self._metadata_cache)
     
     def cache_entities(self, doc_id: str, entities: List[str]):
         """缓存文档相关实体"""
         self._entities_cache[doc_id] = entities
+        self._evict_cache_if_needed(self._entities_cache)
+    
+    def _evict_cache_if_needed(self, cache: dict):
+        """v7.0.2: LRU 缓存驱逐 — 超过上限时清除最早一半"""
+        if len(cache) > self._cache_max_size:
+            keys = list(cache.keys())
+            evict_count = len(keys) // 2
+            for key in keys[:evict_count]:
+                del cache[key]
     
     def _get_content(self, doc_id: str) -> str:
         """获取文档内容 - 委托给 content_store"""
@@ -175,6 +207,110 @@ class ElevenLayerRetriever:
         """获取文档内容（兼容方法名）"""
         return self._get_content(doc_id)
     
+    def _apply_metadata_prefilter(
+        self,
+        candidates: Set[str],
+        filters: Optional[Dict[str, Any]]
+    ) -> Set[str]:
+        """Phase 7.4: Metadata pre-filter
+        
+        在向量搜索前/后基于元数据字段过滤结果。
+        支持的过滤条件：
+        - user_id: 用户 ID 精确匹配
+        - importance_min: 最低重要性阈值
+        - importance_max: 最高重要性阈值
+        - created_after: 创建时间下限（时间戳）
+        - created_before: 创建时间上限（时间戳）
+        - entities_include: 必须包含的实体列表
+        - entities_exclude: 必须排除的实体列表
+        - has_metadata: 必须存在的元数据键列表
+        
+        Args:
+            candidates: 候选文档 ID 集合
+            filters: 过滤条件字典
+            
+        Returns:
+            过滤后的候选集合
+        """
+        if not filters or not candidates:
+            return candidates
+        
+        filtered = set()
+        
+        for doc_id in candidates:
+            metadata = self._get_metadata(doc_id)
+            if not metadata and filters:
+                # 无元数据时，仅在有严格过滤条件时跳过
+                if any(k in filters for k in ('importance_min', 'entities_include', 'created_after')):
+                    continue
+                filtered.add(doc_id)
+                continue
+            
+            passed = True
+            
+            # user_id 精确匹配
+            if 'user_id' in filters:
+                if metadata.get('user_id') != filters['user_id']:
+                    passed = False
+            
+            # importance 范围
+            if passed and 'importance_min' in filters:
+                importance = metadata.get('importance', 0.5)
+                if isinstance(importance, str):
+                    try:
+                        importance = float(importance)
+                    except (ValueError, TypeError):
+                        importance = 0.5
+                if importance < filters['importance_min']:
+                    passed = False
+            
+            if passed and 'importance_max' in filters:
+                importance = metadata.get('importance', 0.5)
+                if isinstance(importance, str):
+                    try:
+                        importance = float(importance)
+                    except (ValueError, TypeError):
+                        importance = 0.5
+                if importance > filters['importance_max']:
+                    passed = False
+            
+            # 时间范围
+            if passed and 'created_after' in filters:
+                created_at = metadata.get('created_at', 0)
+                if created_at < filters['created_after']:
+                    passed = False
+            
+            if passed and 'created_before' in filters:
+                created_at = metadata.get('created_at', float('inf'))
+                if created_at > filters['created_before']:
+                    passed = False
+            
+            # 实体包含
+            if passed and 'entities_include' in filters:
+                doc_entities = set(self._get_entities(doc_id))
+                required = set(filters['entities_include'])
+                if not required.issubset(doc_entities):
+                    passed = False
+            
+            # 实体排除
+            if passed and 'entities_exclude' in filters:
+                doc_entities = set(self._get_entities(doc_id))
+                excluded = set(filters['entities_exclude'])
+                if doc_entities & excluded:
+                    passed = False
+            
+            # 必须存在的元数据键
+            if passed and 'has_metadata' in filters:
+                for key in filters['has_metadata']:
+                    if key not in metadata:
+                        passed = False
+                        break
+            
+            if passed:
+                filtered.add(doc_id)
+        
+        return filtered
+    
     def retrieve(
         self,
         query: str,
@@ -190,6 +326,7 @@ class ElevenLayerRetriever:
         保持与 EightLayerRetriever.retrieve() 完全兼容的接口。
         
         Phase 3.6: 支持并行三路召回模式（默认启用）
+        Phase 7.4: 支持元数据预过滤 (filters 参数)
         
         Args:
             query: 查询文本
@@ -208,7 +345,7 @@ class ElevenLayerRetriever:
         
         # Phase 3.6: 根据配置选择并行或串行模式
         if config.parallel_recall_enabled:
-            return self._parallel_recall(query, entities, keywords, top_k, temporal_context, config)
+            return self._parallel_recall(query, entities, keywords, top_k, temporal_context, config, filters)
         else:
             return self._legacy_retrieve(query, entities, keywords, top_k, filters, temporal_context, config)
     
@@ -219,7 +356,8 @@ class ElevenLayerRetriever:
         keywords: Optional[List[str]],
         top_k: int,
         temporal_context: Optional[TemporalContext],
-        config: RetrievalConfig
+        config: RetrievalConfig,
+        filters: Optional[Dict[str, Any]] = None
     ) -> List[RetrievalResultItem]:
         """Phase 3.6: 并行三路召回实现
         
@@ -283,6 +421,21 @@ class ElevenLayerRetriever:
             graph_results = self._graph_recall_parallel(entities, top_k, config)
             all_results['graph'] = graph_results
         
+        # v7.0.1: BM25 全文检索召回（第4路）
+        if self.fulltext_index and query:
+            try:
+                bm25_raw = self.fulltext_index.search(query, top_k=top_k * 2)
+                bm25_results = []
+                for item in bm25_raw:
+                    doc_id = item[0] if isinstance(item, (list, tuple)) else getattr(item, 'doc_id', str(item))
+                    score = item[1] if isinstance(item, (list, tuple)) and len(item) > 1 else 1.0
+                    # v7.0.4: 修复 — RRF 期望 List[Tuple[str, float]]，之前错误使用 RetrievalResultItem 导致 100% 静默失败
+                    bm25_results.append((str(doc_id), float(score)))
+                all_results['fulltext'] = bm25_results
+            except Exception as e:
+                logger.warning(f"[ElevenLayer] BM25 fulltext recall failed: {e}")
+                pass
+
         # 2. RRF 融合
         results_to_fuse = [
             all_results.get('vector', []),
@@ -295,6 +448,11 @@ class ElevenLayerRetriever:
             config.entity_weight,
         ]
         
+        # v7.0.1: BM25 全文检索加入 RRF 融合
+        if 'fulltext' in all_results and all_results['fulltext']:
+            results_to_fuse.append(all_results['fulltext'])
+            weights.append(self.fulltext_weight)
+
         # 如果有图遍历结果，也加入融合
         if 'graph' in all_results and all_results['graph']:
             results_to_fuse.append(all_results['graph'])
@@ -315,6 +473,10 @@ class ElevenLayerRetriever:
             candidates.add(doc_id)
             scores[doc_id] = score
         
+        # Phase 7.4: Metadata pre-filter（在精排前过滤）
+        if filters:
+            candidates = self._apply_metadata_prefilter(candidates, filters)
+        
         # 4. 精排阶段
         vector_enabled = self.vector_index and getattr(self.vector_index, 'enabled', True)
         
@@ -330,7 +492,17 @@ class ElevenLayerRetriever:
         if config.l10_enabled and self.cross_encoder and candidates:
             self._l10_cross_encoder(query, candidates, scores, config)
         
-        return self._build_results(candidates, scores, top_k)
+        # L11: LLM Filter — v7.0.3 修复: 之前 _parallel_recall 路径遗漏了 L11
+        if config.l11_enabled and self.llm_client and candidates:
+            candidates, scores = self._l11_llm_filter_sync(query, candidates, scores, config)
+        
+        # Phase 7.4: importance-weighted scoring
+        self._apply_importance_recency_weighting(candidates, scores)
+        
+        # Phase 7.4: MMR diversity reranking
+        results = self._build_results(candidates, scores, top_k * 2)  # 取更多候选
+        results = self._apply_mmr_diversity(results, top_k)
+        return results
     
     def _vector_recall_parallel(self, query: str, top_k: int) -> List[Tuple[str, float]]:
         """Phase 3.6 路径 1: 语义向量召回
@@ -477,29 +649,51 @@ class ElevenLayerRetriever:
         top_k: int,
         config: RetrievalConfig
     ) -> List[Tuple[str, float]]:
-        """Phase 3.6 附加路径: 图遍历扩展"""
+        """Phase 3.6 附加路径: 图遍历扩展（v7.0: 通过 QueryPlanner 执行，获得缓存优化）"""
         start = time.perf_counter()
         graph_candidates: List[Tuple[str, float]] = []
         
         try:
-            for start_entity in entities[:config.l5_graph_max_entities]:
-                node = self.knowledge_graph.get_node_by_name(start_entity)
-                if not node:
-                    continue
+            # v7.0: 优先使用 QueryPlanner（带 LRU+TTL 缓存）
+            if self.query_planner is not None:
+                start_ids = []
+                for start_entity in entities[:config.l5_graph_max_entities]:
+                    node = self.knowledge_graph.get_node_by_name(start_entity)
+                    if node:
+                        start_ids.append(node.uuid)
                 
-                bfs_results = self.knowledge_graph.bfs(
-                    start=node.uuid,
-                    max_depth=config.l5_graph_max_depth,
-                    time_filter=config.reference_time,
-                    direction=config.l5_graph_direction
-                )
-                
-                for depth, items in bfs_results.items():
-                    depth_weight = 1.0 / (depth + 1)
-                    for target_node_id, edge in items:
-                        if hasattr(edge, 'source_episodes') and edge.source_episodes:
-                            for episode_id in edge.source_episodes:
-                                graph_candidates.append((episode_id, depth_weight * config.weights.graph))
+                if start_ids:
+                    bfs_results = self.query_planner.execute_bfs(
+                        start_ids=start_ids,
+                        max_depth=config.l5_graph_max_depth,
+                        limit=top_k * 5
+                    )
+                    for depth, items in bfs_results.items():
+                        depth_weight = 1.0 / (int(depth) + 1)
+                        for target_node_id, edge in items:
+                            if hasattr(edge, 'source_episodes') and edge.source_episodes:
+                                for episode_id in edge.source_episodes:
+                                    graph_candidates.append((episode_id, depth_weight * config.weights.graph))
+            else:
+                # Fallback: 直接调用 knowledge_graph.bfs()
+                for start_entity in entities[:config.l5_graph_max_entities]:
+                    node = self.knowledge_graph.get_node_by_name(start_entity)
+                    if not node:
+                        continue
+                    
+                    bfs_results = self.knowledge_graph.bfs(
+                        start=node.uuid,
+                        max_depth=config.l5_graph_max_depth,
+                        time_filter=config.reference_time,
+                        direction=config.l5_graph_direction
+                    )
+                    
+                    for depth, items in bfs_results.items():
+                        depth_weight = 1.0 / (depth + 1)
+                        for target_node_id, edge in items:
+                            if hasattr(edge, 'source_episodes') and edge.source_episodes:
+                                for episode_id in edge.source_episodes:
+                                    graph_candidates.append((episode_id, depth_weight * config.weights.graph))
             
             graph_candidates.sort(key=lambda x: x[1], reverse=True)
         except Exception as e:
@@ -619,14 +813,21 @@ class ElevenLayerRetriever:
         if config.l10_enabled and self.cross_encoder and candidates:
             self._l10_cross_encoder(query, candidates, scores, config)
         
-        # L11: LLM Filter（同步版本跳过，使用 retrieve_async）
-        # 注意：为保持向后兼容，同步版本不执行 L11
+        # L11: LLM Filter（同步版本）
+        if config.l11_enabled and self.llm_client and candidates:
+            candidates, scores = self._l11_llm_filter_sync(query, candidates, scores, config)
         
         # 终极兜底：如果所有层都没找到结果，使用 N-gram 原文搜索
         if not candidates and self.ngram_index:
             self._fallback_ngram_search(query, candidates, scores, top_k)
         
-        return self._build_results(candidates, scores, top_k)
+        # Phase 7.4: importance-weighted scoring
+        self._apply_importance_recency_weighting(candidates, scores)
+        
+        # Phase 7.4: MMR diversity reranking
+        results = self._build_results(candidates, scores, top_k * 2)
+        results = self._apply_mmr_diversity(results, top_k)
+        return results
     
     async def retrieve_async(
         self,
@@ -963,20 +1164,29 @@ class ElevenLayerRetriever:
         scores: Dict[str, float],
         config: RetrievalConfig
     ) -> None:
-        """L7: Vector Coarse - 向量粗筛"""
+        """L7: Vector Coarse - 向量粗筛（兼容 VectorIndex 和 VectorIndexIVF）"""
         start_time = time.perf_counter()
         input_count = len(candidates)
-        
-        vector_results = self.vector_index.search(
-            query, 
-            top_k=config.l7_vector_top_k
-        )
-        
+
+        # v7.0.2: 区分 VectorIndex（内置 encode + text search）和 VectorIndexIVF（需要外部 embedding）
+        is_ivf = hasattr(self.vector_index, 'search') and not hasattr(self.vector_index, 'encode')
+        if is_ivf and self.embedding_backend:
+            # IVF 索引：先编码，再用向量搜索
+            query_vec = self.embedding_backend.encode(query)
+            vec_list = query_vec.tolist() if hasattr(query_vec, 'tolist') else list(query_vec)
+            vector_results = self.vector_index.search(vec_list, top_k=config.l7_vector_top_k)
+        else:
+            # 普通 VectorIndex：直接传文本
+            vector_results = self.vector_index.search(
+                query,
+                top_k=config.l7_vector_top_k
+            )
+
         # 合并向量结果
         for doc_id, score in vector_results:
             candidates.add(doc_id)
             scores[doc_id] += score * config.weights.vector
-        
+
         self.stats.append(LayerStats(
             layer=RetrievalLayer.L7_VECTOR_COARSE.value,
             input_count=input_count,
@@ -1001,9 +1211,24 @@ class ElevenLayerRetriever:
         
         try:
             import numpy as np
-            
-            # 1. 获取查询向量
-            query_embedding = self.vector_index.encode(query)
+
+            # 1. 获取查询向量（v7.0.2: 兼容 IVF 模式）
+            is_ivf = not hasattr(self.vector_index, 'encode')
+            if is_ivf and self.embedding_backend:
+                query_embedding = self.embedding_backend.encode(query)
+            elif hasattr(self.vector_index, 'encode'):
+                query_embedding = self.vector_index.encode(query)
+            else:
+                # 无法编码，跳过 L8
+                self.stats.append(LayerStats(
+                    layer=RetrievalLayer.L8_VECTOR_FINE.value,
+                    input_count=input_count,
+                    output_count=len(candidates),
+                    time_ms=(time.perf_counter() - start_time) * 1000
+                ))
+                return
+            if hasattr(query_embedding, 'numpy'):
+                query_embedding = query_embedding.numpy()
             query_embedding = query_embedding / np.linalg.norm(query_embedding)
             
             # 2. 批量获取候选文档的已存储向量
@@ -1212,18 +1437,110 @@ class ElevenLayerRetriever:
             for doc_id, llm_score in zip(sorted_candidates, llm_scores):
                 scores[doc_id] = llm_score / 10.0
             
+            self.stats.append(LayerStats(
+                layer=RetrievalLayer.L11_LLM_FILTER.value,
+                input_count=len(candidates),
+                output_count=len(sorted_candidates),
+                time_ms=(time.perf_counter() - start_time) * 1000
+            ))
+            return set(sorted_candidates), scores
+            
         except Exception as e:
             logger.warning(f"L11 LLM filter failed: {e}, keeping original scores")
         
+        # v7.0.4: 修复 — LLM 失败时返回原始候选集，不截断
         self.stats.append(LayerStats(
             layer=RetrievalLayer.L11_LLM_FILTER.value,
             input_count=len(candidates),
-            output_count=len(sorted_candidates),
+            output_count=len(candidates),
             time_ms=(time.perf_counter() - start_time) * 1000
         ))
         
-        return set(sorted_candidates), scores
-    
+        return candidates, scores
+
+    def _l11_llm_filter_sync(
+        self,
+        query: str,
+        candidates: Set[str],
+        scores: Dict[str, float],
+        config: RetrievalConfig
+    ) -> Tuple[Set[str], Dict[str, float]]:
+        """L11: LLM 重排序（同步版本） - 使用 LLM 进行最终语义相关性判断"""
+
+        start_time = time.perf_counter()
+
+        # 取 top candidates
+        sorted_candidates = sorted(
+            candidates,
+            key=lambda x: scores[x],
+            reverse=True
+        )[:config.l11_llm_top_k]
+
+        # 构建评分 prompt
+        docs_text = "\n\n".join([
+            f"[Doc {i+1}] {self._get_content(doc_id)[:500]}"
+            for i, doc_id in enumerate(sorted_candidates)
+        ])
+
+        prompt = f"""请根据查询的相关性对以下文档进行评分（0-10分）。
+
+查询: {query}
+
+文档列表:
+{docs_text}
+
+请以 JSON 格式返回评分：{{"scores": [8, 6, 9, ...]}}
+只返回 JSON，不要其他内容。"""
+
+        llm_success = False
+
+        try:
+            retrieval_llm_max_tokens = int(os.environ.get('RETRIEVAL_LLM_MAX_TOKENS', '200'))
+
+            # 尝试同步调用 LLM
+            if hasattr(self.llm_client, 'complete'):
+                response = self.llm_client.complete(
+                    prompt=prompt, max_tokens=retrieval_llm_max_tokens, temperature=0.0
+                )
+            elif hasattr(self.llm_client, 'generate'):
+                response = self.llm_client.generate(
+                    prompt=prompt, max_tokens=retrieval_llm_max_tokens, temperature=0.0
+                )
+            else:
+                # v7.0.4: 无可用 LLM 方法，返回原始候选集（不截断）
+                logger.warning("L11 sync: llm_client has no complete() or generate() method, skipping")
+                self.stats.append(LayerStats(
+                    layer=RetrievalLayer.L11_LLM_FILTER.value,
+                    input_count=len(candidates),
+                    output_count=len(candidates),
+                    time_ms=(time.perf_counter() - start_time) * 1000
+                ))
+                return candidates, scores
+
+            result = json.loads(response)
+            llm_scores = result.get("scores", [])
+
+            # LLM 分数直接覆盖（最终裁判）
+            for doc_id, llm_score in zip(sorted_candidates, llm_scores):
+                scores[doc_id] = llm_score / 10.0
+            llm_success = True
+
+        except Exception as e:
+            logger.warning(f"L11 LLM filter sync failed: {e}, keeping original scores")
+
+        self.stats.append(LayerStats(
+            layer=RetrievalLayer.L11_LLM_FILTER.value,
+            input_count=len(candidates),
+            output_count=len(sorted_candidates) if llm_success else len(candidates),
+            time_ms=(time.perf_counter() - start_time) * 1000
+        ))
+
+        # v7.0.4: 修复 — LLM 失败时返回原始候选集，不截断
+        if llm_success:
+            return set(sorted_candidates), scores
+        else:
+            return candidates, scores
+
     # =========================================================================
     # 辅助方法
     # =========================================================================
@@ -1257,6 +1574,112 @@ class ElevenLayerRetriever:
                 output_count=len(candidates),
                 time_ms=(time.perf_counter() - start_time) * 1000
             ))
+    
+    def _apply_importance_recency_weighting(
+        self,
+        candidates: Set[str],
+        scores: Dict[str, float]
+    ) -> None:
+        """Phase 7.4: Importance-weighted scoring
+        
+        公式: final_score = relevance * 0.5 + importance * 0.3 + recency * 0.2
+        
+        - relevance: 原始检索分数（已归一化到 [0,1]）
+        - importance: 记忆的重要性（metadata.importance，默认 0.5）
+        - recency: 时间衰减因子（越新越高，指数衰减）
+        """
+        if not candidates:
+            return
+        
+        import math
+        now = time.time()
+        HALF_LIFE_DAYS = 30  # 半衰期 30 天
+        decay_lambda = math.log(2) / (HALF_LIFE_DAYS * 86400)
+        
+        # 归一化原始分数到 [0, 1]
+        if scores:
+            max_score = max(scores.get(c, 0) for c in candidates) or 1.0
+            min_score = min(scores.get(c, 0) for c in candidates)
+            score_range = max_score - min_score if max_score > min_score else 1.0
+        else:
+            score_range = 1.0
+            min_score = 0.0
+        
+        for doc_id in candidates:
+            # 1. 归一化相关性分数
+            raw_score = scores.get(doc_id, 0.0)
+            relevance = (raw_score - min_score) / score_range if score_range > 0 else 0.5
+            
+            # 2. 重要性（从元数据获取）
+            metadata = self._get_metadata(doc_id)
+            importance = metadata.get('importance', 0.5)
+            if isinstance(importance, str):
+                try:
+                    importance = float(importance)
+                except (ValueError, TypeError):
+                    importance = 0.5
+            importance = max(0.0, min(1.0, importance))
+            
+            # 3. 时间衰减（recency）
+            created_at = metadata.get('created_at', 0)
+            if created_at and created_at > 0:
+                age_seconds = max(0, now - created_at)
+                recency = math.exp(-decay_lambda * age_seconds)
+            else:
+                recency = 0.5  # 无时间戳时使用中间值
+            
+            # 4. 加权公式
+            final_score = relevance * 0.5 + importance * 0.3 + recency * 0.2
+            scores[doc_id] = final_score
+    
+    def _apply_mmr_diversity(
+        self,
+        results: List[RetrievalResultItem],
+        top_k: int,
+        lambda_param: float = 0.7
+    ) -> List[RetrievalResultItem]:
+        """Phase 7.4: MMR diversity reranking
+        
+        使用基于文本内容的 MMR 重排序，消除结果冗余。
+        
+        λ=0.7 偏重相关性，同时适度增加多样性。
+        """
+        if len(results) <= 1:
+            return results[:top_k]
+        
+        try:
+            # 转换为 mmr 需要的字典格式
+            result_dicts = [
+                {
+                    'id': r.id,
+                    'score': r.score,
+                    'content': r.content,
+                    'metadata': r.metadata,
+                    'entities': r.entities,
+                }
+                for r in results
+            ]
+            
+            mmr_results = mmr_rerank_by_content(
+                results=result_dicts,
+                lambda_param=lambda_param,
+                top_k=top_k
+            )
+            
+            # 转换回 RetrievalResultItem
+            return [
+                RetrievalResultItem(
+                    id=r['id'],
+                    score=r.get('score', 0.0),
+                    content=r.get('content', ''),
+                    metadata=r.get('metadata', {}),
+                    entities=r.get('entities', [])
+                )
+                for r in mmr_results
+            ]
+        except Exception as e:
+            logger.warning(f"MMR reranking failed, using original order: {e}")
+            return results[:top_k]
     
     def _build_results(
         self,

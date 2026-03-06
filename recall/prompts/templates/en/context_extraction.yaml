@@ -1,0 +1,58 @@
+# context_extraction.yaml — Persistent Context Extraction prompt template (English)
+
+universal: |
+  Analyze the following conversation and extract information that should be treated as "persistent context".
+
+  [IMPORTANT]
+  1. Only extract information explicitly mentioned or established in the conversation
+  2. If the conversation is short or lacks clear background info, return an empty array []
+  3. Extract key state changes, skills acquired, items obtained, relationship changes, etc.
+
+  Conversation:
+  {content}
+
+  Return in JSON format:
+  [{{"type": "state type", "description": "state description", "confidence": 0.9}}]
+
+default: |
+  Analyze the following conversation and extract information that should be treated as "persistent context".
+
+  [IMPORTANT]
+  1. Only extract information explicitly mentioned or established in the conversation
+  2. If the conversation is short or lacks clear background info, return an empty array []
+  3. Extract key state changes, skills acquired, items obtained, relationship changes, etc.
+
+  Conversation:
+  {content}
+
+  Return in JSON format:
+  [{{"type": "state type", "description": "state description", "confidence": 0.9}}]
+
+roleplay: |
+  Analyze the following roleplay conversation and extract information that should be treated as "persistent context".
+
+  [IMPORTANT]
+  1. Only extract information explicitly mentioned or established in the conversation
+  2. If the conversation is short or lacks clear background info, return an empty array []
+  3. For roleplay/story scenarios, extract character states, skills, items, relationship changes
+  4. Pay attention to scene transitions, time passage, weather changes, and environment info
+
+  Conversation:
+  {content}
+
+  Return in JSON format:
+  [{{"type": "state type", "description": "state description", "confidence": 0.9}}]
+
+knowledge_base: |
+  Analyze the following document and extract key background knowledge and prerequisites.
+
+  [IMPORTANT]
+  1. Only extract information explicitly described in the document
+  2. If the content is brief or lacks background info, return an empty array []
+  3. Focus on definitions, axioms, constraints, and foundational knowledge
+
+  Document:
+  {content}
+
+  Return in JSON format:
+  [{{"type": "knowledge type", "description": "knowledge description", "confidence": 0.9}}]

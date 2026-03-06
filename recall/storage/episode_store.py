@@ -107,12 +107,46 @@ class EpisodeStore:
         self._rewrite_all()
     
     def _rewrite_all(self):
-        """重写所有 Episode 到文件"""
+        """重写所有 Episode 到文件（原子写入）"""
         os.makedirs(os.path.dirname(self.episodes_file), exist_ok=True)
-        with open(self.episodes_file, 'w', encoding='utf-8') as f:
+        # v7.0.9: 原子写入 — tmp + fsync + rename
+        tmp_file = self.episodes_file + '.tmp'
+        with open(tmp_file, 'w', encoding='utf-8') as f:
             for ep in self._episodes.values():
                 f.write(json.dumps(ep.to_dict(), ensure_ascii=False) + '\n')
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_file, self.episodes_file)
     
+    def remove_memory_references(self, memory_id: str) -> int:
+        """从所有 Episode 中移除指定 memory_id 的引用
+        
+        如果某个 Episode 的 memory_ids 变为空，则删除该 Episode。
+        
+        Args:
+            memory_id: 要移除的记忆ID
+        
+        Returns:
+            int: 被修改或删除的 Episode 数量
+        """
+        modified_count = 0
+        episodes_to_delete = []
+        
+        for uuid, ep in self._episodes.items():
+            if memory_id in ep.memory_ids:
+                ep.memory_ids.remove(memory_id)
+                modified_count += 1
+                if not ep.memory_ids:
+                    episodes_to_delete.append(uuid)
+        
+        for uuid in episodes_to_delete:
+            del self._episodes[uuid]
+        
+        if modified_count > 0:
+            self._rewrite_all()
+        
+        return modified_count
+
     def count(self) -> int:
         """返回 Episode 数量"""
         return len(self._episodes)

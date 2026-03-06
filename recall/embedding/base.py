@@ -66,6 +66,13 @@ class EmbeddingConfig:
                 "BAAI/bge-large-en-v1.5": 1024,
                 "BAAI/bge-m3": 1024,
             }
+
+    # 暴露 MODEL_DIMENSIONS 类属性（兼容测试和外部代码）
+    class _ModelDimensionsDescriptor:
+        """Descriptor that lazily loads MODEL_DIMENSIONS."""
+        def __get__(self, obj, objtype=None):
+            return EmbeddingConfig._get_model_dimensions()
+    MODEL_DIMENSIONS = _ModelDimensionsDescriptor()
     
     @classmethod
     def cloud_openai(cls, api_key: str, api_base: str = None, model: str = "text-embedding-3-small") -> 'EmbeddingConfig':

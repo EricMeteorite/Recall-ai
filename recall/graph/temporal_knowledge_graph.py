@@ -10,7 +10,7 @@
 
 Kuzu 集成：
 - 设置 TEMPORAL_GRAPH_BACKEND=kuzu 启用 Kuzu 后端
-- 设置 KUZU_BUFFER_POOL_SIZE=256 配置缓冲池大小（MB）
+- 设置 KUZU_BUFFER_POOL_SIZE=1024 配置缓冲池大小（MB）
 - Kuzu 提供高性能图存储，比文件后端快 2-10x
 """
 
@@ -19,6 +19,7 @@ from __future__ import annotations
 import os
 import json
 import logging
+import atexit
 import uuid as uuid_lib
 from datetime import datetime
 from dataclasses import dataclass, field, asdict
@@ -113,7 +114,7 @@ class TemporalKnowledgeGraph:
         enable_fulltext: bool = True,   # 是否启用全文索引
         enable_temporal: bool = True,   # 是否启用时态索引
         auto_save: bool = True,         # 是否自动保存
-        kuzu_buffer_pool_size: int = 256  # Kuzu 缓冲池大小（MB）
+        kuzu_buffer_pool_size: int = 1024  # Kuzu 缓冲池大小（MB）
     ):
         """初始化时序知识图谱
         
@@ -127,7 +128,7 @@ class TemporalKnowledgeGraph:
             enable_fulltext: 是否启用全文索引
             enable_temporal: 是否启用时态索引
             auto_save: 是否自动保存
-            kuzu_buffer_pool_size: Kuzu 缓冲池大小（MB），默认 256MB
+            kuzu_buffer_pool_size: Kuzu 缓冲池大小（MB），默认 1024MB
         """
         self.data_path = data_path
         # 向后兼容：映射旧值 'local' 到 'file'
@@ -175,8 +176,18 @@ class TemporalKnowledgeGraph:
         # 脏标记
         self._dirty = False
         
+        # v7.0: 延迟批量保存（避免每次 add_node/add_edge 都全量 dump 4 个 JSON）
+        self._save_count = 0
+        self._save_threshold = 50   # 每 50 次修改才做一次全量保存
+        
+        # v7.0.2: 加载阶段标志位（防止从 Kuzu 加载数据时又写回 Kuzu 造成循环）
+        self._loading_from_backend = False
+        
         # 初始化后端
         self._init_backend()
+        
+        # 进程退出安全网：确保未刷盘的修改不丢失
+        atexit.register(self._atexit_flush)
         
         # 加载数据
         self._load()
@@ -272,6 +283,8 @@ class TemporalKnowledgeGraph:
         if not self._kuzu_backend:
             return
         
+        # v7.0.2: 设置标志位，防止 _index_node/_index_edge 将数据回写 Kuzu
+        self._loading_from_backend = True
         try:
             # 从 Kuzu 查询所有节点
             result = self._kuzu_backend.conn.execute(
@@ -371,6 +384,9 @@ class TemporalKnowledgeGraph:
         except Exception as e:
             logger.error(f"[TemporalKnowledgeGraph] Failed to load from Kuzu: {e}")
             _safe_print(f"[TemporalKnowledgeGraph] 从 Kuzu 加载失败: {e}")
+        finally:
+            # v7.0.2: 恢复标志位
+            self._loading_from_backend = False
         
         # 情节仍然使用 JSON 文件存储（Kuzu 主要用于节点和边）
         if os.path.exists(self.episodes_file):
@@ -383,6 +399,27 @@ class TemporalKnowledgeGraph:
             except Exception as e:
                 _safe_print(f"[TemporalKnowledgeGraph] 加载情节失败: {e}")
     
+    def _mark_dirty(self):
+        """标记脏数据并使用延迟保存策略
+
+        每次写操作调用此方法代替直接 _save()，
+        仅当累积修改达到阈值时才执行全量 JSON dump，
+        将单次写入从 O(N) 降低到分摊 O(1)。
+        """
+        self._dirty = True
+        self._save_count += 1
+        if self.auto_save and self._save_count >= self._save_threshold:
+            self._save()
+            self._save_count = 0
+
+    def _atexit_flush(self):
+        """进程退出时确保所有脏数据刷盘"""
+        if self._dirty:
+            try:
+                self._save()
+            except Exception:
+                pass  # 退出时不抛异常
+
     def _save(self):
         """保存图谱数据
         
@@ -396,17 +433,17 @@ class TemporalKnowledgeGraph:
         os.makedirs(self.graph_dir, exist_ok=True)
         
         # JSON 文件始终作为备份保存（即使使用 Kuzu）
+        # 原子写入：tmp+rename 防止断电损坏
+        from recall.utils.atomic_write import atomic_json_dump
+        
         # 保存节点
-        with open(self.nodes_file, 'w', encoding='utf-8') as f:
-            json.dump([n.to_dict() for n in self.nodes.values()], f, ensure_ascii=False, indent=2)
+        atomic_json_dump([n.to_dict() for n in self.nodes.values()], self.nodes_file, indent=2)
         
         # 保存边
-        with open(self.edges_file, 'w', encoding='utf-8') as f:
-            json.dump([e.to_dict() for e in self.edges.values()], f, ensure_ascii=False, indent=2)
+        atomic_json_dump([e.to_dict() for e in self.edges.values()], self.edges_file, indent=2)
         
         # 保存情节
-        with open(self.episodes_file, 'w', encoding='utf-8') as f:
-            json.dump([e.to_dict() for e in self.episodes.values()], f, ensure_ascii=False, indent=2)
+        atomic_json_dump([e.to_dict() for e in self.episodes.values()], self.episodes_file, indent=2)
         
         # 保存元数据
         meta = {
@@ -417,8 +454,7 @@ class TemporalKnowledgeGraph:
             'episode_count': len(self.episodes),
             'updated_at': datetime.now().isoformat()
         }
-        with open(self.meta_file, 'w', encoding='utf-8') as f:
-            json.dump(meta, f, ensure_ascii=False, indent=2)
+        atomic_json_dump(meta, self.meta_file, indent=2)
         
         # 保存索引
         if self._temporal_index:
@@ -463,8 +499,8 @@ class TemporalKnowledgeGraph:
             text = f"{node.name} {node.summary} {node.content}"
             self._fulltext_index.add(f"node:{node.uuid}", text)
         
-        # 同步到 Kuzu
-        if self.backend == "kuzu" and self._kuzu_backend:
+        # 同步到 Kuzu（加载阶段跳过，避免循环写入）
+        if self.backend == "kuzu" and self._kuzu_backend and not self._loading_from_backend:
             self._sync_node_to_kuzu(node)
     
     def _sync_node_to_kuzu(self, node: UnifiedNode):
@@ -519,8 +555,8 @@ class TemporalKnowledgeGraph:
         if self._fulltext_index:
             self._fulltext_index.add(f"edge:{edge.uuid}", edge.fact)
         
-        # 同步到 Kuzu
-        if self.backend == "kuzu" and self._kuzu_backend:
+        # 同步到 Kuzu（加载阶段跳过，避免循环写入）
+        if self.backend == "kuzu" and self._kuzu_backend and not self._loading_from_backend:
             self._sync_edge_to_kuzu(edge)
     
     def _sync_edge_to_kuzu(self, edge: TemporalFact):
@@ -640,18 +676,13 @@ class TemporalKnowledgeGraph:
                     existing.aliases = list(set(existing.aliases + node.aliases))
                 existing.updated_at = datetime.now()
                 existing.verification_count += 1
-                self._dirty = True
-                if self.auto_save:
-                    self._save()
+                self._mark_dirty()
                 return existing
             
             # 直接添加传入的节点
             self.nodes[node.uuid] = node
             self._index_node(node)
-            self._dirty = True
-            
-            if self.auto_save:
-                self._save()
+            self._mark_dirty()
             
             return node
         
@@ -672,9 +703,7 @@ class TemporalKnowledgeGraph:
                 existing.aliases = list(set(existing.aliases + aliases))
             existing.updated_at = datetime.now()
             existing.verification_count += 1
-            self._dirty = True
-            if self.auto_save:
-                self._save()
+            self._mark_dirty()
             return existing
         
         # 创建新节点
@@ -693,10 +722,7 @@ class TemporalKnowledgeGraph:
         
         self.nodes[node.uuid] = node
         self._index_node(node)
-        self._dirty = True
-        
-        if self.auto_save:
-            self._save()
+        self._mark_dirty()
         
         return node
     
@@ -722,10 +748,7 @@ class TemporalKnowledgeGraph:
                 setattr(node, key, value)
         
         node.updated_at = datetime.now()
-        self._dirty = True
-        
-        if self.auto_save:
-            self._save()
+        self._mark_dirty()
         
         return node
     
@@ -737,10 +760,7 @@ class TemporalKnowledgeGraph:
         
         node.expire()
         self._unindex_node(node)
-        self._dirty = True
-        
-        if self.auto_save:
-            self._save()
+        self._mark_dirty()
         
         return True
     
@@ -799,9 +819,7 @@ class TemporalKnowledgeGraph:
             self.edges[edge.uuid] = edge
             self._index_edge(edge)
             
-            self._dirty = True
-            if self.auto_save:
-                self._save()
+            self._mark_dirty()
             
             return edge, contradictions
         
@@ -858,9 +876,7 @@ class TemporalKnowledgeGraph:
         subject_node.source_episodes.append(edge.uuid)
         object_node.source_episodes.append(edge.uuid)
         
-        self._dirty = True
-        if self.auto_save:
-            self._save()
+        self._mark_dirty()
         
         return edge, contradictions
     
@@ -917,9 +933,7 @@ class TemporalKnowledgeGraph:
             if hasattr(edge, key):
                 setattr(edge, key, value)
         
-        self._dirty = True
-        if self.auto_save:
-            self._save()
+        self._mark_dirty()
         
         return edge
     
@@ -931,10 +945,7 @@ class TemporalKnowledgeGraph:
         
         edge.expire()
         self._unindex_edge(edge)
-        self._dirty = True
-        
-        if self.auto_save:
-            self._save()
+        self._mark_dirty()
         
         return True
     
@@ -984,10 +995,7 @@ class TemporalKnowledgeGraph:
         )
         
         self.episodes[episode.uuid] = episode
-        self._dirty = True
-        
-        if self.auto_save:
-            self._save()
+        self._mark_dirty()
         
         return episode
     
@@ -1078,6 +1086,51 @@ class TemporalKnowledgeGraph:
             timeline = [t for t in timeline if t[0] <= end]
         
         return timeline
+    
+    def get_entity_timeline(
+        self,
+        entity_name: str,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
+        limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        """获取实体的完整时间线（REST API 友好格式）
+        
+        封装 query_timeline()，返回可序列化的字典列表。
+        
+        Args:
+            entity_name: 实体名称
+            start_time: 时间范围起始（可选）
+            end_time: 时间范围结束（可选）
+            limit: 最大返回条数
+        
+        Returns:
+            [{"time": ..., "predicate": ..., "object": ..., "event_type": ..., "confidence": ...}, ...]
+        """
+        raw = self.query_timeline(
+            subject=entity_name,
+            start=start_time,
+            end=end_time
+        )
+        
+        results: List[Dict[str, Any]] = []
+        for ts, fact, event_type in raw:
+            # 获取 object 节点名称
+            object_node = self.get_node(fact.object_uuid)
+            object_name = object_node.name if object_node else fact.object_uuid
+            
+            results.append({
+                "time": ts.isoformat() if ts else None,
+                "predicate": fact.predicate,
+                "object": object_name,
+                "event_type": event_type,
+                "confidence": fact.confidence,
+                "fact_uuid": fact.uuid,
+            })
+            if len(results) >= limit:
+                break
+        
+        return results
     
     def compare_snapshots(
         self,
@@ -1227,9 +1280,7 @@ class TemporalKnowledgeGraph:
             old_fact.valid_until = new_fact.valid_from
             old_fact.superseded_at = datetime.now()
             contradiction.resolve(resolution, "新事实取代旧事实")
-            self._dirty = True
-            if self.auto_save:
-                self._save()
+            self._mark_dirty()
             return ResolutionResult(
                 success=True,
                 action="superseded",
@@ -1829,9 +1880,7 @@ class TemporalKnowledgeGraph:
             if target_node and target_node.name.lower() == target_id.lower():
                 # 更新置信度
                 edge.confidence = min(1.0, edge.confidence + 0.1)
-                self._dirty = True
-                if self.auto_save:
-                    self._save()
+                self._mark_dirty()
                 
                 return LegacyRelation(
                     source_id=source_id,

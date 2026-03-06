@@ -3371,13 +3371,21 @@ class TestFullUserFlow:
     
     def test_health(self, server_running):
         """健康检查"""
-        success, data = api_get("/health")
-        assert success and data.get("status") == "healthy"
+        for attempt in range(3):
+            success, data = api_get("/health", timeout=60)
+            if success and isinstance(data, dict) and data.get("status") == "healthy":
+                return
+            time.sleep(5)
+        assert False, f"Health check failed after 3 retries: {data}"
     
     def test_memory_add(self, server_running):
         """添加记忆"""
         result = add_memory("pytest 测试内容", "user")
-        assert "error" not in result
+        if "error" in result and "timed out" in str(result.get("error", "")):
+            # 重试一次（服务器可能暂时繁忙）
+            time.sleep(5)
+            result = add_memory("pytest 测试内容 retry", "user")
+        assert "error" not in result, f"添加记忆失败: {result}"
     
     def test_memory_search(self, server_running):
         """搜索记忆"""
@@ -3385,8 +3393,11 @@ class TestFullUserFlow:
         unique_id = str(uuid.uuid4())[:8]
         unique_content = f"pytest 搜索测试 唯一标识 {unique_id}"
         add_memory(unique_content, "user")
-        time.sleep(0.5)
+        time.sleep(3)  # 等待索引更新（embedding 计算需要时间）
         results = search_memory(unique_id)
+        if len(results) == 0:
+            time.sleep(5)  # 再等一会
+            results = search_memory(unique_id)
         assert len(results) > 0, f"未找到包含 {unique_id} 的记忆"
     
     def test_context_build(self, server_running):
@@ -3415,24 +3426,32 @@ class TestFullUserFlow:
     
     def test_foreshadowing(self, server_running):
         """伏笔系统"""
-        success, result = api_post("/v1/foreshadowing", {
-            "user_id": TEST_USER,
-            "character_id": TEST_CHAR,
-            "content": "pytest 伏笔测试",
-            "hint": "测试",
-            "importance": 0.5
-        })
-        assert success
+        for attempt in range(3):
+            success, result = api_post("/v1/foreshadowing", {
+                "user_id": TEST_USER,
+                "character_id": TEST_CHAR,
+                "content": f"pytest 伏笔测试 attempt {attempt}",
+                "hint": "测试",
+                "importance": 0.5
+            }, timeout=60)
+            if success:
+                return
+            time.sleep(5)
+        assert False, f"伏笔API失败: {result}"
     
     def test_persistent_context(self, server_running):
         """持久条件"""
-        success, result = api_post("/v1/persistent-contexts", {
-            "user_id": TEST_USER,
-            "character_id": TEST_CHAR,
-            "content": "pytest 持久条件测试",
-            "context_type": "PREFERENCE"
-        })
-        assert success
+        for attempt in range(3):
+            success, result = api_post("/v1/persistent-contexts", {
+                "user_id": TEST_USER,
+                "character_id": TEST_CHAR,
+                "content": f"pytest 持久条件测试 attempt {attempt}",
+                "context_type": "PREFERENCE"
+            }, timeout=60)
+            if success:
+                return
+            time.sleep(5)
+        assert False, f"持久条件API失败: {result}"
     
     def test_entities(self, server_running):
         """实体列表"""

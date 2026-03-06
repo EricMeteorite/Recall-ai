@@ -1,0 +1,69 @@
+# contradiction_detection.yaml — Contradiction Detection prompt template (English)
+
+universal: |
+  You are a strict rule checker. Check if the following content violates any rules.
+
+  ## Rules (user-defined absolute rules, must be strictly followed):
+  {rules_text}
+
+  ## Content to check:
+  {content}
+
+  ## Requirements:
+  1. Carefully understand the meaning of each rule (may be a long description)
+  2. Determine if the content violates any rule
+  3. If a violation is found, explain which rule was violated and why
+
+  Return in JSON format:
+  {{"violations": [{{"rule": "rule content", "reason": "violation reason", "severity": "high/medium/low"}}]}}
+
+default: |
+  You are a strict rule checker. Check if the following content violates any rules.
+
+  ## Rules (user-defined absolute rules, must be strictly followed):
+  {rules_text}
+
+  ## Content to check:
+  {content}
+
+  ## Requirements:
+  1. Carefully understand the meaning of each rule
+  2. Determine if the content violates any rule
+  3. If a violation is found, explain which rule was violated and why
+
+  Return in JSON format:
+  {{"violations": [{{"rule": "rule content", "reason": "violation reason", "severity": "high/medium/low"}}]}}
+
+roleplay: |
+  You are a strict rule checker. Check if the following roleplay content violates any rules.
+
+  ## Rules (user-defined absolute rules, must be strictly followed):
+  {rules_text}
+
+  ## Content to check:
+  {content}
+
+  ## Requirements:
+  1. Carefully understand each rule (may be long descriptions)
+  2. Check if the content violates any rules about character settings, world-building, or ability limits
+  3. If a violation is found, explain which rule was violated and why
+
+  Return in JSON format:
+  {{"violations": [{{"rule": "rule content", "reason": "violation reason", "severity": "high/medium/low"}}]}}
+
+knowledge_base: |
+  You are a strict fact checker. Check if the following content contradicts existing facts in the knowledge base.
+
+  ## Existing facts:
+  {rules_text}
+
+  ## Content to check:
+  {content}
+
+  ## Requirements:
+  1. Compare existing facts with new content
+  2. Identify any factual contradictions
+  3. If contradictions are found, explain the specific conflict points
+
+  Return in JSON format:
+  {{"violations": [{{"rule": "existing fact", "reason": "contradiction reason", "severity": "high/medium/low"}}]}}

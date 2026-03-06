@@ -16,6 +16,7 @@ from .version import __version__
 from .engine import RecallEngine
 from .utils.task_manager import get_task_manager, TaskType
 from .mode import get_mode_config
+from .config import RecallConfig
 
 # Windows GBK 编码兼容的安全打印函数
 def _safe_print(msg: str) -> None:
@@ -91,6 +92,16 @@ class ConfigFileWatcher:
 # 全局配置监控器
 _config_watcher: Optional[ConfigFileWatcher] = None
 
+# Global config instance (lazy-initialized)
+_recall_config: Optional[RecallConfig] = None
+
+def _get_config() -> RecallConfig:
+    """Get or create the global RecallConfig instance."""
+    global _recall_config
+    if _recall_config is None:
+        _recall_config = RecallConfig.from_env()
+    return _recall_config
+
 
 # ==================== 配置文件管理 ====================
 
@@ -139,7 +150,7 @@ SUPPORTED_CONFIG_KEYS = {
     # 时态知识图谱配置
     'TEMPORAL_GRAPH_ENABLED',         # 是否启用时态知识图谱
     'TEMPORAL_GRAPH_BACKEND',         # 图谱后端: file(JSON文件)/kuzu(嵌入式图数据库)
-    'KUZU_BUFFER_POOL_SIZE',          # Kuzu 缓冲池大小 (MB)，默认 256
+    'KUZU_BUFFER_POOL_SIZE',          # Kuzu 缓冲池大小 (MB)，默认 1024
     'TEMPORAL_DECAY_RATE',            # 时态信息衰减率 (0.0-1.0)
     'TEMPORAL_MAX_HISTORY',           # 保留的最大时态历史记录数
     # 矛盾检测与管理配置
@@ -267,8 +278,8 @@ SUPPORTED_CONFIG_KEYS = {
     'UNIFIED_ANALYSIS_MAX_TOKENS',    # 统一分析器 LLM 最大输出 tokens
     'TURN_API_ENABLED',               # 是否启用 Turn API（/v1/memories/turn）
     
-    # ====== v5.0 全局模式与重排序配置 ======
-    'RECALL_MODE',                    # 全局模式: roleplay/general/knowledge_base
+    # ====== v7.0 通用模式与重排序配置 ======
+    'RECALL_MODE',                    # 全局模式: universal (v7.0 唯一模式)
     'FORESHADOWING_ENABLED',          # 伏笔系统开关
     'CHARACTER_DIMENSION_ENABLED',    # 角色维度隔离开关
     'RP_CONSISTENCY_ENABLED',         # RP 一致性检查开关
@@ -277,13 +288,40 @@ SUPPORTED_CONFIG_KEYS = {
     'RERANKER_BACKEND',               # 重排序后端: builtin/cohere/cross-encoder
     'COHERE_API_KEY',                 # Cohere API 密钥
     'RERANKER_MODEL',                 # 自定义重排序模型名
+    
+    # ====== v7.0 日志/数据/管道/生命周期/性能配置 ======
+    'RECALL_DATA_ROOT',               # 数据根目录
+    'RECALL_LOG_LEVEL',               # 日志级别: DEBUG/INFO/WARNING/ERROR
+    'RECALL_LOG_JSON',                # 是否输出 JSON 格式日志
+    'RECALL_LOG_FILE',                # 日志文件路径 (auto=自动)
+    'RECALL_LANG',                    # 国际化语言 (auto/zh/en)
+    'RECALL_PIPELINE_MAX_SIZE',       # 异步写入管道最大队列大小
+    'RECALL_PIPELINE_RATE_LIMIT',     # 管道限速 (QPS, 0=不限制)
+    'RECALL_PIPELINE_WORKERS',        # 管道工作线程数
+    'RECALL_LIFECYCLE_ARCHIVE_DAYS',  # 归档天数
+    'RECALL_LIFECYCLE_BACKUP_ENABLED',# 是否启用自动备份
+    'RECALL_LIFECYCLE_BACKUP_DIR',    # 备份目录
+    'RECALL_LIFECYCLE_CLEANUP_TEMP',  # 是否清理临时文件
+    'IVF_AUTO_SWITCH_ENABLED',        # IVF 自动切换开关
+    'IVF_AUTO_SWITCH_THRESHOLD',      # IVF 自动切换阈值
+    'PARALLEL_RETRIEVER_WORKERS',     # 并行检索工作线程数
+    'PARALLEL_RETRIEVER_TIMEOUT',     # 并行检索超时时间（秒）
+    
+    # ====== v7.0 服务器与安全配置 ======
+    'ADMIN_KEY',                      # 管理员密钥（用于敏感操作）
+    'RECALL_BACKEND_TIER',            # 后端层级: community/pro/enterprise
+    'RECALL_CORS_ORIGINS',            # CORS 允许的源（逗号分隔）
+    'RECALL_CORS_METHODS',            # CORS 允许的方法（逗号分隔）
+    'RECALL_RATE_LIMIT_RPM',          # 速率限制（每分钟请求数）
+    'MCP_TRANSPORT',                  # MCP 传输方式: stdio/sse
+    'MCP_PORT',                       # MCP SSE 端口
 }
 
 
 def get_config_file_path() -> Path:
     """获取配置文件路径"""
     # 优先使用环境变量指定的数据目录
-    data_root = os.environ.get('RECALL_DATA_ROOT', './recall_data')
+    data_root = _get_config().recall_data_root
     return Path(data_root) / 'config' / 'api_keys.env'
 
 
@@ -470,7 +508,7 @@ TEMPORAL_GRAPH_BACKEND=file
 
 # Kuzu 缓冲池大小（MB），仅当 TEMPORAL_GRAPH_BACKEND=kuzu 时生效
 # Kuzu buffer pool size in MB, only used when backend is kuzu
-KUZU_BUFFER_POOL_SIZE=256
+KUZU_BUFFER_POOL_SIZE=1024
 
 # 时态信息衰减率（0.0-1.0，值越大衰减越快）
 # Temporal decay rate (0.0-1.0, higher = faster decay)
@@ -526,7 +564,7 @@ FULLTEXT_WEIGHT=0.3
 # ----------------------------------------------------------------------------
 # 抽取模式: RULES(规则), ADAPTIVE(自适应), LLM(全LLM)
 # Extraction mode: RULES/ADAPTIVE/LLM (LOCAL/HYBRID/LLM_FULL are deprecated aliases)
-SMART_EXTRACTOR_MODE=ADAPTIVE
+SMART_EXTRACTOR_MODE=RULES
 
 # 复杂度阈值（超过此值使用 LLM 辅助抽取，0.0-1.0）
 # Complexity threshold (use LLM when exceeded)
@@ -904,19 +942,19 @@ UNIFIED_ANALYSIS_MAX_TOKENS=4000
 TURN_API_ENABLED=true
 
 # ============================================================================
-# v5.0 全局模式配置 - RECALL 5.0 MODE CONFIGURATION
+# v7.0 通用模式配置 - RECALL 7.0 UNIVERSAL MODE CONFIGURATION
 # ============================================================================
 
 # ----------------------------------------------------------------------------
 # 全局模式开关 / Global Mode Switch
 # ----------------------------------------------------------------------------
-# 模式: roleplay（角色扮演，默认）/ general（通用）/ knowledge_base（知识库）
-# Mode: roleplay (default) / general / knowledge_base
-RECALL_MODE=roleplay
+# v7.0 统一模式 (所有功能始终可用，不再区分场景)
+# v7.0 Universal mode (all features always available, no scenario distinction)
+RECALL_MODE=universal
 
 # ----------------------------------------------------------------------------
-# 模式子开关（自动由 RECALL_MODE 推导，也可手动覆盖）
-# Mode Sub-switches (auto-derived from RECALL_MODE, can be overridden)
+# v7.0 功能开关（universal 模式下默认全部启用，可手动覆盖）
+# v7.0 Feature switches (all enabled by default in universal mode, can be overridden)
 # ----------------------------------------------------------------------------
 # 伏笔系统开关 / Foreshadowing system (roleplay=true, others=false)
 FORESHADOWING_ENABLED=true
@@ -930,7 +968,7 @@ RP_RELATION_TYPES=true
 RP_CONTEXT_TYPES=true
 
 # ============================================================================
-# v5.0 重排序器配置 - RECALL 5.0 RERANKER CONFIGURATION
+# v7.0 重排序器配置 - RECALL 7.0 RERANKER CONFIGURATION
 # ============================================================================
 # 重排序后端: builtin（内置）/ cohere / cross-encoder
 # Reranker backend: builtin (default) / cohere / cross-encoder
@@ -1056,13 +1094,36 @@ def save_config_to_file(updates: Dict[str, str]):
         _safe_print(f"[Config] 保存配置文件失败: {e}")
 
 
+# ==================== v7.0 namespace/character_id 双参数兼容 ====================
+
+def _resolve_ns(character_id: Optional[str] = None, namespace: Optional[str] = None) -> str:
+    """解析 namespace（优先）或 character_id，返回统一的标识符。
+    
+    v7.0: 内部统一使用 character_id 作为存储键（向后兼容），
+    但 API 层同时接受 namespace 参数。namespace 优先级高于 character_id。
+    """
+    return namespace or character_id or "default"
+
+
 # ==================== 请求/响应模型 ====================
+
+class _NamespaceMixin(BaseModel):
+    """v7.0: 为所有含 character_id 的模型提供 namespace 别名支持"""
+    namespace: Optional[str] = Field(default=None, description="命名空间（与 character_id 互为别名，优先级更高）")
+    
+    def model_post_init(self, __context: Any) -> None:
+        """如果提供了 namespace 但没提供 character_id，自动同步"""
+        if self.namespace and hasattr(self, 'character_id'):
+            if not self.character_id or self.character_id == "default":
+                object.__setattr__(self, 'character_id', self.namespace)
+
 
 class AddMemoryRequest(BaseModel):
     """添加记忆请求"""
-    content: str = Field(..., description="记忆内容")
+    content: str = Field(..., min_length=1, description="记忆内容")
     user_id: str = Field(default="default", description="用户ID")
-    character_id: Optional[str] = Field(default=None, description="角色ID（通用模式可忽略）")
+    character_id: Optional[str] = Field(default=None, description="角色/命名空间ID")
+    namespace: Optional[str] = Field(default=None, description="命名空间（与 character_id 互为别名，优先级更高）")
     source: Optional[str] = Field(default=None, description="来源平台（如 bilibili/twitter/github）")
     tags: Optional[List[str]] = Field(default=None, description="标签列表")
     category: Optional[str] = Field(default=None, description="分类（如 tech/finance/entertainment）")
@@ -1085,7 +1146,8 @@ class AddTurnRequest(BaseModel):
     user_message: str = Field(..., min_length=1, description="用户消息")
     ai_response: str = Field(..., min_length=1, description="AI回复")
     user_id: str = Field(default="default", description="用户ID")
-    character_id: str = Field(default="default", description="角色ID")
+    character_id: str = Field(default="default", description="角色/命名空间ID")
+    namespace: Optional[str] = Field(default=None, description="命名空间（与 character_id 互为别名）")
     metadata: Optional[Dict[str, Any]] = Field(default=None, description="元数据")
 
 
@@ -1130,6 +1192,8 @@ class SearchRequest(BaseModel):
     content_type: Optional[str] = Field(default=None, description="按内容类型过滤（v5.0）")
     event_time_start: Optional[str] = Field(default=None, description="事件时间范围起点（YYYY-MM-DD 或 ISO格式，v5.0）")
     event_time_end: Optional[str] = Field(default=None, description="事件时间范围终点（YYYY-MM-DD 或 ISO格式，v5.0）")
+    # v7.3 主题过滤
+    topics: Optional[List[str]] = Field(default=None, description="按主题标签过滤（v7.3）")
 
 
 class SearchResultItem(BaseModel):
@@ -1185,7 +1249,8 @@ class ContextRequest(BaseModel):
     """构建上下文请求"""
     query: str = Field(..., description="当前查询")
     user_id: str = Field(default="default", description="用户ID")
-    character_id: str = Field(default="default", description="角色ID")
+    character_id: str = Field(default="default", description="角色/命名空间ID")
+    namespace: Optional[str] = Field(default=None, description="命名空间（与 character_id 互为别名）")
     max_tokens: int = Field(default=2000, description="最大token数")
     include_recent: int = Field(default=5, description="包含的最近对话数")
     include_core_facts: bool = Field(default=True, description="是否包含核心事实摘要")
@@ -1222,8 +1287,9 @@ class CoreSettingsResponse(BaseModel):
 class ForeshadowingRequest(BaseModel):
     """伏笔请求"""
     content: str = Field(..., description="伏笔内容")
-    user_id: str = Field(default="default", description="用户ID（角色名）")
-    character_id: str = Field(default="default", description="角色ID")
+    user_id: str = Field(default="default", description="用户ID")
+    character_id: str = Field(default="default", description="角色/命名空间ID")
+    namespace: Optional[str] = Field(default=None, description="命名空间（与 character_id 互为别名）")
     related_entities: Optional[List[str]] = Field(default=None, description="相关实体")
     importance: float = Field(default=0.5, ge=0, le=1, description="重要性")
 
@@ -1235,7 +1301,8 @@ class PersistentContextRequest(BaseModel):
     content: str = Field(..., description="条件内容")
     context_type: str = Field(default="custom", description="条件类型：user_identity, user_goal, user_preference, environment, project, character_trait, world_setting, relationship, assumption, constraint, custom")
     user_id: str = Field(default="default", description="用户ID")
-    character_id: str = Field(default="default", description="角色ID")
+    character_id: str = Field(default="default", description="角色/命名空间ID")
+    namespace: Optional[str] = Field(default=None, description="命名空间（与 character_id 互为别名）")
     keywords: Optional[List[str]] = Field(default=None, description="关键词")
 
 
@@ -1314,25 +1381,25 @@ def _build_foreshadowing_config():
     Returns:
         ForeshadowingAnalyzerConfig 或 None
     """
-    llm_api_key = os.environ.get('LLM_API_KEY')
-    llm_enabled_str = os.environ.get('FORESHADOWING_LLM_ENABLED', 'true').lower()
-    llm_enabled = llm_enabled_str in ('true', '1', 'yes')
+    llm_api_key = _get_config().llm_api_key
+    llm_enabled = _get_config().foreshadowing_llm_enabled
     
     if llm_api_key and llm_enabled:
         # LLM 已配置且已启用
         from .processor.foreshadowing_analyzer import ForeshadowingAnalyzerConfig
         
-        trigger_interval = int(os.environ.get('FORESHADOWING_TRIGGER_INTERVAL', '10'))
-        auto_plant_str = os.environ.get('FORESHADOWING_AUTO_PLANT', 'true').lower()
-        auto_resolve_str = os.environ.get('FORESHADOWING_AUTO_RESOLVE', 'false').lower()
+        cfg = _get_config()
+        trigger_interval = cfg.foreshadowing_trigger_interval
+        auto_plant = cfg.foreshadowing_auto_plant
+        auto_resolve = cfg.foreshadowing_auto_resolve
         
         config = ForeshadowingAnalyzerConfig.llm_based(
             api_key=llm_api_key,
-            model=os.environ.get('LLM_MODEL', 'gpt-4o-mini'),
-            base_url=os.environ.get('LLM_API_BASE'),
+            model=cfg.llm_model,
+            base_url=cfg.llm_api_base or None,
             trigger_interval=trigger_interval,
-            auto_plant=auto_plant_str in ('true', '1', 'yes'),
-            auto_resolve=auto_resolve_str in ('true', '1', 'yes')
+            auto_plant=auto_plant,
+            auto_resolve=auto_resolve
         )
         _safe_print(f"[Recall] 伏笔分析器: LLM 模式已启用")
         return config
@@ -1350,7 +1417,7 @@ def _create_engine():
     Returns:
         RecallEngine 实例
     """
-    embedding_mode = os.environ.get('RECALL_EMBEDDING_MODE', '').lower()
+    embedding_mode = _get_config().recall_embedding_mode.lower()
     foreshadowing_config = _build_foreshadowing_config()
     
     lightweight = (embedding_mode == 'none')
@@ -1379,7 +1446,7 @@ def reload_engine():
     
     用于在修改配置文件后重新初始化引擎
     """
-    global _engine
+    global _engine, _recall_config
     
     # 关闭旧引擎
     if _engine is not None:
@@ -1389,6 +1456,9 @@ def reload_engine():
             pass
         _engine = None
     
+    # 重置配置缓存，强制下次重新读取环境变量
+    _recall_config = None
+    
     # 重新加载配置并创建引擎
     load_api_keys_from_file()
     _engine = _create_engine()
@@ -1396,14 +1466,54 @@ def reload_engine():
     return _engine
 
 
+# ==================== Async Write Pipeline (v7.0 4.2.F) ====================
+
+_pipeline = None  # type: ignore
+
+def get_pipeline():
+    """获取全局 AsyncWritePipeline 实例（懒初始化）"""
+    global _pipeline
+    return _pipeline
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
-    global _config_watcher
+    global _config_watcher, _pipeline
+    
+    # 初始化结构化日志 (v7.5)
+    from .observability.logging import setup_logging
+    _cfg = _get_config()
+    
+    # 解析日志文件路径：'auto' → recall_data/logs/recall.log
+    _log_file = _cfg.recall_log_file
+    if _log_file == 'auto':
+        _log_file = str(Path(_cfg.recall_data_root) / 'logs' / 'recall.log')
+    
+    setup_logging(
+        level=_cfg.recall_log_level,
+        json_output=_cfg.recall_log_json,
+        log_file=_log_file,
+    )
+    
+    # 配置验证 (v7.5)
+    from .config_validator import validate_and_log
+    validate_and_log()
     
     # 启动时
     _safe_print(f"[Recall API] 服务启动 v{__version__}")
-    get_engine()  # 预初始化
+    engine = get_engine()  # 预初始化
+    
+    # 启动 Async Write Pipeline
+    from .pipeline.async_writer import AsyncWritePipeline
+    _pcfg = _get_config()
+    _pipeline = AsyncWritePipeline(
+        engine=engine,
+        max_size=_pcfg.recall_pipeline_max_size,
+        rate_limit_qps=_pcfg.recall_pipeline_rate_limit,
+        num_workers=_pcfg.recall_pipeline_workers,
+    )
+    await _pipeline.start()
     
     # 启动配置文件监控（保存即生效）
     config_path = get_config_file_path()
@@ -1412,7 +1522,9 @@ async def lifespan(app: FastAPI):
     
     yield
     
-    # 关闭时
+    # 关闭时 – drain pipeline first
+    if _pipeline:
+        await _pipeline.stop()
     if _config_watcher:
         _config_watcher.stop()
     if _engine:
@@ -1429,14 +1541,134 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS
+
+# ---- v7.0.9: Global Exception Handler — 防止未处理异常返回裸 500 ----
+from fastapi.responses import JSONResponse as _FastAPIJSONResponse
+import traceback as _traceback_mod
+
+
+@app.exception_handler(Exception)
+async def _global_exception_handler(request: Request, exc: Exception):
+    """
+    全局异常兜底：所有未被 endpoint 自身 try/except 捕获的异常
+    都会被这里拦截，返回结构化 JSON 500 而不是裸错误页面。
+    """
+    tb = _traceback_mod.format_exception(type(exc), exc, exc.__traceback__)
+    _safe_print(f"[Recall][Server] 未处理异常 {request.method} {request.url.path}: {exc}")
+    # 仅在 debug 模式输出完整 traceback
+    if os.environ.get("RECALL_DEBUG", "").lower() in ("1", "true"):
+        for line in tb:
+            _safe_print(line.rstrip())
+    return _FastAPIJSONResponse(
+        status_code=500,
+        content={
+            "success": False,
+            "error": str(exc),
+            "detail": f"Internal server error on {request.method} {request.url.path}",
+        },
+    )
+
+# ---- Security Middleware (v7.0 4.2.D) ----
+from .middleware.auth import APIKeyMiddleware
+from .middleware.rate_limit import RateLimitMiddleware
+
+app.add_middleware(APIKeyMiddleware)
+app.add_middleware(RateLimitMiddleware)
+
+# ---- CORS (configurable via env) ----
+_cors_origins = _get_config().recall_cors_origins.split(',')
+_cors_methods = _get_config().recall_cors_methods.split(',')
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[o.strip() for o in _cors_origins],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=[m.strip() for m in _cors_methods],
     allow_headers=["*"],
 )
+
+
+# ---- Observability Middleware (v7.5) — trace_id + metrics + slow query ----
+import uuid as _uuid_mod
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+from .observability import RequestContext, get_metrics
+from .observability.logging import log_slow_query, get_logger as _obs_get_logger
+
+_obs_logger = _obs_get_logger("recall.server")
+
+
+class _ObservabilityMiddleware(BaseHTTPMiddleware):
+    """为每个请求注入 trace_id，记录延迟，检测慢查询"""
+
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint):
+        trace_id = request.headers.get("X-Trace-Id") or str(_uuid_mod.uuid4())
+        RequestContext.set(trace_id, method=request.method, path=str(request.url.path))
+
+        metrics = get_metrics()
+        metrics.active_connections.inc()
+        start = time.time()
+
+        try:
+            response = await call_next(request)
+            duration_ms = (time.time() - start) * 1000
+            metrics.record_request(request.method, str(request.url.path), response.status_code, duration_ms)
+
+            # 慢查询检测 (>200ms)
+            if duration_ms > 200:
+                log_slow_query(
+                    _obs_logger,
+                    f"{request.method} {request.url.path}",
+                    duration_ms,
+                )
+
+            response.headers["X-Trace-Id"] = trace_id
+            response.headers["X-Response-Time-Ms"] = f"{duration_ms:.0f}"
+            # v7.7: X-Cache header (populated by cache layer)
+            if not response.headers.get("X-Cache"):
+                response.headers["X-Cache"] = "BYPASS"
+            return response
+        except Exception as exc:
+            duration_ms = (time.time() - start) * 1000
+            metrics.record_request(request.method, str(request.url.path), 500, duration_ms)
+            raise
+        finally:
+            metrics.active_connections.dec()
+            RequestContext.clear()
+
+app.add_middleware(_ObservabilityMiddleware)
+
+
+# ---- Pipeline back-pressure middleware (v7.0 4.2.F) ----
+from starlette.responses import JSONResponse as _JSONResponse
+
+_PIPELINE_WRITE_PATHS: dict[str, set[str]] = {
+    "/v1/memories": {"POST"},
+    "/v1/memories/batch": {"POST"},
+    "/v1/memories/turn": {"POST"},
+}
+
+class _PipelineBackpressureMiddleware(BaseHTTPMiddleware):
+    """Return 429 when the async write pipeline is overloaded."""
+
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint):
+        path = request.url.path.rstrip("/") or "/"
+        method = request.method.upper()
+        methods = _PIPELINE_WRITE_PATHS.get(path)
+        if methods and method in methods:
+            pl = get_pipeline()
+            if pl and pl.is_overloaded:
+                retry = pl.retry_after
+                return _JSONResponse(
+                    status_code=429,
+                    content={
+                        "detail": f"写入队列繁忙，请在 {retry} 秒后重试",
+                        "retry_after": retry,
+                        "queue_depth": pl.status().queue_depth,
+                    },
+                    headers={"Retry-After": str(retry)},
+                )
+        return await call_next(request)
+
+app.add_middleware(_PipelineBackpressureMiddleware)
 
 
 # ==================== 健康检查 ====================
@@ -1457,6 +1689,32 @@ async def health():
     return {
         "status": "healthy",
         "timestamp": time.time()
+    }
+
+
+# ==================== Pipeline Status (v7.0 4.2.F) ====================
+
+@app.post("/v1/pipeline/status", tags=["Pipeline"])
+async def pipeline_status():
+    """返回异步写入管道的状态信息。
+
+    包括队列深度、处理速率、错误计数等监控指标。
+    """
+    pl = get_pipeline()
+    if pl is None:
+        return {"error": "Pipeline not initialized", "is_running": False}
+    s = pl.status()
+    return {
+        "queue_depth": s.queue_depth,
+        "queue_capacity": s.queue_capacity,
+        "utilization_pct": s.utilization_pct,
+        "total_enqueued": s.total_enqueued,
+        "total_processed": s.total_processed,
+        "total_errors": s.total_errors,
+        "processing_rate_qps": s.processing_rate_qps,
+        "is_running": s.is_running,
+        "workers": s.workers,
+        "rate_limit_qps": s.rate_limit_qps,
     }
 
 
@@ -1502,6 +1760,7 @@ async def frontend_log(request: FrontendLogRequest):
 async def get_active_tasks(
     user_id: Optional[str] = Query(default=None, description="按用户ID过滤"),
     character_id: Optional[str] = Query(default=None, description="按角色ID过滤"),
+    namespace: Optional[str] = Query(default=None, description="命名空间（与 character_id 互为别名）"),
     task_type: Optional[str] = Query(default=None, description="按任务类型过滤")
 ):
     """获取当前活动任务列表
@@ -1518,6 +1777,7 @@ async def get_active_tasks(
     
     前端可通过轮询此端点获取任务状态，建议轮询间隔 200-500ms。
     """
+    character_id = _resolve_ns(character_id, namespace)
     task_manager = get_task_manager()
     
     # 解析任务类型
@@ -1651,8 +1911,10 @@ async def add_memory(request: AddMemoryRequest):
     
     # v5.0: 合并顶层字段到 metadata（顶层字段优先）
     merged_metadata = dict(request.metadata) if request.metadata else {}
-    if request.character_id is not None:
-        merged_metadata['character_id'] = request.character_id
+    # v7.0: namespace/character_id 双参数兼容
+    resolved_cid = _resolve_ns(request.character_id, getattr(request, 'namespace', None))
+    if resolved_cid:
+        merged_metadata['character_id'] = resolved_cid
     if request.source is not None:
         merged_metadata['source'] = request.source
     if request.tags is not None:
@@ -1675,11 +1937,18 @@ async def add_memory(request: AddMemoryRequest):
     _safe_print(f"[Recall][Memory][{request_id}]    user={user_id}, char={character_id}, role={role}, hash={msg_hash}")
     _safe_print(f"[Recall][Memory][{request_id}]    内容({len(request.content)}字): {content_preview}{'...' if len(request.content) > 80 else ''}")
     
-    result = engine.add(
-        content=request.content,
-        user_id=request.user_id,
-        metadata=merged_metadata
-    )
+    # v7.0.7: 增加 try/except 包装（之前 engine.add 异常时返回不友好的 500 错误）
+    try:
+        result = engine.add(
+            content=request.content,
+            user_id=request.user_id,
+            metadata=merged_metadata
+        )
+    except Exception as e:
+        import traceback
+        _safe_print(f"[Recall][Memory][{request_id}] [ERROR] engine.add 异常: {e}")
+        _safe_print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"添加记忆失败: {e}")
     
     total_time_ms = (time.time() - request_start_time) * 1000
     
@@ -1710,21 +1979,66 @@ async def add_memory(request: AddMemoryRequest):
 
 @app.post("/v1/memories/batch", tags=["Memories"])
 async def add_memories_batch(request: Request):
-    """批量添加记忆（高吞吐模式）"""
+    """批量添加记忆（高吞吐模式）
+
+    v7.0.1: 支持 async 参数，当 async=true 时通过 AsyncWritePipeline 异步处理，
+    立即返回 op_id，可通过 /v1/pipeline/status 查询进度。
+    """
     body = await request.json()
     items = body.get('items', [])
     user_id = body.get('user_id', 'default')
     skip_dedup = body.get('skip_dedup', False)
     skip_llm = body.get('skip_llm', True)
-    
+    async_mode = body.get('async', False)
+
     engine = get_engine()
-    memory_ids = engine.add_batch(
-        items=items,
-        user_id=user_id,
-        skip_dedup=skip_dedup,
-        skip_llm=skip_llm,
-    )
-    return {"memory_ids": memory_ids, "count": len(memory_ids)}
+
+    # v7.0.1: 通过 AsyncWritePipeline 异步批量写入
+    if async_mode:
+        pipeline = get_pipeline()
+        if pipeline and pipeline._running:
+            from .pipeline.async_writer import WriteOperation, OperationType
+            op = WriteOperation(
+                op_type=OperationType.ADD_BATCH,
+                payload={
+                    "items": [
+                        {
+                            "content": it.get("content", ""),
+                            "user_id": it.get("user_id", user_id),
+                            "metadata": it.get("metadata"),
+                        }
+                        for it in items
+                    ],
+                },
+            )
+            success = pipeline.enqueue(op)
+            if success:
+                _safe_print(f"[Recall][Batch] 已入队 AsyncWritePipeline: op_id={op.op_id}, items={len(items)}")
+                return {
+                    "op_id": op.op_id,
+                    "async": True,
+                    "queued": len(items),
+                    "message": "已加入异步写入队列，可通过 /v1/pipeline/status 查询进度",
+                }
+            else:
+                _safe_print("[Recall][Batch] Pipeline 队列已满，回退到同步模式")
+        else:
+            _safe_print("[Recall][Batch] Pipeline 不可用，回退到同步模式")
+
+    # v7.0.8: 添加 try/except 包裹，防止未捕获异常导致 500
+    try:
+        memory_ids = engine.add_batch(
+            items=items,
+            user_id=user_id,
+            skip_dedup=skip_dedup,
+            skip_llm=skip_llm,
+        )
+        return {"memory_ids": memory_ids, "count": len(memory_ids)}
+    except Exception as e:
+        import traceback
+        _safe_print(f"[Recall][Batch] 批量添加失败: {e}")
+        _safe_print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"批量添加失败: {str(e)}")
 
 
 @app.post("/v1/memories/turn", response_model=AddTurnResponse, tags=["Memories"])
@@ -1743,9 +2057,9 @@ async def add_turn(request: AddTurnRequest):
     request_start_time = time.time()
     
     # 检查配置是否启用 Turn API
-    turn_api_enabled = os.environ.get('TURN_API_ENABLED', 'true').lower() in ('true', '1', 'yes')
+    turn_api_enabled = _get_config().turn_api_enabled
     if not turn_api_enabled:
-        _safe_print(f"[Recall][Turn][{request_id}] [WARN] Turn API 已禁用 (TURN_API_ENABLED={os.environ.get('TURN_API_ENABLED', 'not set')})")
+        _safe_print(f"[Recall][Turn][{request_id}] [WARN] Turn API 已禁用 (TURN_API_ENABLED={_get_config().turn_api_enabled})")
         return AddTurnResponse(
             success=False,
             message="Turn API 已禁用，请使用 /v1/memories 分别添加"
@@ -1761,18 +2075,27 @@ async def add_turn(request: AddTurnRequest):
     user_preview = request.user_message[:50].replace('\n', ' ') if len(request.user_message) > 50 else request.user_message.replace('\n', ' ')
     ai_preview = request.ai_response[:50].replace('\n', ' ') if len(request.ai_response) > 50 else request.ai_response.replace('\n', ' ')
     _safe_print(f"[Recall][Turn][{request_id}] [IN] ========== Turn API 请求开始 ==========")
-    _safe_print(f"[Recall][Turn][{request_id}]    user_id={request.user_id}, char={request.character_id}, msg_hash={msg_hash}")
+    # v7.0: namespace/character_id 双参数兼容
+    resolved_cid = _resolve_ns(request.character_id, getattr(request, 'namespace', None))
+    _safe_print(f"[Recall][Turn][{request_id}]    user_id={request.user_id}, char={resolved_cid}, msg_hash={msg_hash}")
     _safe_print(f"[Recall][Turn][{request_id}]    用户消息({len(request.user_message)}字): {user_preview}{'...' if len(request.user_message) > 50 else ''}")
     _safe_print(f"[Recall][Turn][{request_id}]    AI回复({len(request.ai_response)}字): {ai_preview}{'...' if len(request.ai_response) > 50 else ''}")
     
     _safe_print(f"[Recall][Turn][{request_id}]    调用 engine.add_turn...")
-    result = engine.add_turn(
-        user_message=request.user_message,
-        ai_response=request.ai_response,
-        user_id=request.user_id,
-        character_id=request.character_id,
-        metadata=request.metadata
-    )
+    # v7.0.8: 添加 try/except 包裹，防止未捕获异常导致 500
+    try:
+        result = engine.add_turn(
+            user_message=request.user_message,
+            ai_response=request.ai_response,
+            user_id=request.user_id,
+            character_id=resolved_cid,
+            metadata=request.metadata
+        )
+    except Exception as e:
+        import traceback
+        _safe_print(f"[Recall][Turn][{request_id}] [ERROR] engine.add_turn 异常: {e}")
+        _safe_print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"add_turn 失败: {str(e)}")
     
     total_time_ms = (time.time() - request_start_time) * 1000
     
@@ -1849,6 +2172,25 @@ async def search_memories(request: SearchRequest):
     if any([request.source, request.tags, request.category, request.content_type, request.event_time_start, request.event_time_end]):
         _safe_print(f"[Recall][Memory]    元数据过滤: source={request.source}, tags={request.tags}, category={request.category}, content_type={request.content_type}, event_time={request.event_time_start}~{request.event_time_end}")
     
+    # v7.3: 主题过滤
+    topic_filter_ids: set = None
+    if request.topics:
+        try:
+            from recall.processor.topic_cluster import TopicCluster
+            import os
+            engine_tmp = get_engine()
+            tc = getattr(engine_tmp, 'topic_cluster', None)
+            if tc is None:
+                tc = TopicCluster(data_path=os.path.join(engine_tmp.data_root, 'data'))
+            topic_filter_ids = set()
+            for topic in request.topics:
+                mems = tc.search_by_topic(topic=topic, engine=engine_tmp, user_id=request.user_id, limit=500)
+                for m in mems:
+                    topic_filter_ids.add(m.get('id', ''))
+            _safe_print(f"[Recall][Memory]    主题过滤: topics={request.topics}, 匹配={len(topic_filter_ids)}条")
+        except Exception as e:
+            _safe_print(f"[Recall][Memory]    主题过滤失败: {e}")
+
     try:
         engine = get_engine()
         results = engine.search(
@@ -1873,6 +2215,12 @@ async def search_memories(request: SearchRequest):
         raise HTTPException(status_code=500, detail=f"搜索失败: {str(e)}")
     
     _safe_print(f"[Recall][Memory] 📊 搜索结果: 找到 {len(results)} 条记忆")
+    
+    # v7.3: 应用主题过滤
+    if topic_filter_ids is not None:
+        results = [r for r in results if r.id in topic_filter_ids]
+        _safe_print(f"[Recall][Memory]    主题过滤后: {len(results)} 条记忆")
+
     for i, r in enumerate(results[:3]):  # 只打印前3条
         content_preview = r.content[:40].replace('\n', ' ')
         _safe_print(f"[Recall][Memory]    [{i+1}] score={r.score:.3f}: {content_preview}...")
@@ -2023,7 +2371,7 @@ async def clear_all_memories(
         DELETE /v1/memories/all?confirm=true&admin_key=your-admin-key
     """
     import os
-    expected_key = os.environ.get('ADMIN_KEY', '')
+    expected_key = _get_config().admin_key
     
     if not confirm:
         raise HTTPException(
@@ -2060,12 +2408,19 @@ async def clear_all_memories(
 async def update_memory(
     memory_id: str,
     content: str = Body(...),
-    user_id: str = Query(default="default"),
+    user_id: str = Body(default="default"),
     metadata: Optional[Dict[str, Any]] = Body(default=None)
 ):
     """更新记忆"""
     engine = get_engine()
-    success = engine.update(memory_id, content, user_id=user_id, metadata=metadata)
+    # v7.0.7: 增加 try/except 包装
+    try:
+        success = engine.update(memory_id, content, user_id=user_id, metadata=metadata)
+    except Exception as e:
+        import traceback
+        _safe_print(f"[Recall] ❌ 更新记忆异常: {memory_id}: {e}")
+        _safe_print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"更新记忆失败: {e}")
     
     if not success:
         raise HTTPException(status_code=404, detail="记忆不存在或更新失败")
@@ -2159,15 +2514,24 @@ async def build_context(request: ContextRequest):
     _safe_print(f"[Recall][Context]    查询: {query_preview}{'...' if len(request.query) > 60 else ''}")
     
     engine = get_engine()
-    context = engine.build_context(
-        query=request.query,
-        user_id=request.user_id,
-        character_id=request.character_id,
-        max_tokens=request.max_tokens,
-        include_recent=request.include_recent,
-        include_core_facts=request.include_core_facts,
-        auto_extract_context=request.auto_extract_context
-    )
+    # v7.0: namespace/character_id 双参数兼容
+    resolved_cid = _resolve_ns(request.character_id, getattr(request, 'namespace', None))
+    # v7.0.7: 增加 try/except 包装
+    try:
+        context = engine.build_context(
+            query=request.query,
+            user_id=request.user_id,
+            character_id=resolved_cid,
+            max_tokens=request.max_tokens,
+            include_recent=request.include_recent,
+            include_core_facts=request.include_core_facts,
+            auto_extract_context=request.auto_extract_context
+        )
+    except Exception as e:
+        import traceback
+        _safe_print(f"[Recall][Context] ❌ 上下文构建异常: {e}")
+        _safe_print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"上下文构建失败: {e}")
     
     _safe_print(f"[Recall][Context] ✅ 上下文构建完成: 总长度={len(context)}字符")
     return {"context": context}
@@ -2192,11 +2556,13 @@ async def add_persistent_context(request: PersistentContextRequest):
     except ValueError:
         ctx_type = ContextType.CUSTOM
     
+    # v7.0.9: 通过 _resolve_ns 统一处理 namespace/character_id
+    resolved_cid = _resolve_ns(request.character_id, getattr(request, 'namespace', None))
     ctx = engine.add_persistent_context(
         content=request.content,
         context_type=ctx_type,
         user_id=request.user_id,
-        character_id=request.character_id,
+        character_id=resolved_cid,
         keywords=request.keywords
     )
     
@@ -2217,9 +2583,11 @@ async def add_persistent_context(request: PersistentContextRequest):
 async def list_persistent_contexts(
     user_id: str = Query(default="default", description="用户ID"),
     character_id: str = Query(default="default", description="角色ID"),
+    namespace: Optional[str] = Query(default=None, description="命名空间（与 character_id 互为别名）"),
     context_type: Optional[str] = Query(default=None, description="按类型过滤")
 ):
     """获取所有活跃的持久条件"""
+    character_id = _resolve_ns(character_id, namespace)
     engine = get_engine()
     contexts = engine.get_persistent_contexts(user_id, character_id)
     
@@ -2256,9 +2624,11 @@ async def list_persistent_contexts(
 @app.get("/v1/persistent-contexts/stats", response_model=PersistentContextStats, tags=["Persistent Contexts"])
 async def get_persistent_context_stats(
     user_id: str = Query(default="default", description="用户ID"),
-    character_id: str = Query(default="default", description="角色ID")
+    character_id: str = Query(default="default", description="角色ID"),
+    namespace: Optional[str] = Query(default=None, description="命名空间（与 character_id 互为别名）")
 ):
     """获取持久条件统计信息"""
+    character_id = _resolve_ns(character_id, namespace)
     engine = get_engine()
     stats = engine.context_tracker.get_stats(user_id, character_id)
     return PersistentContextStats(**stats)
@@ -2268,6 +2638,7 @@ async def get_persistent_context_stats(
 async def consolidate_contexts(
     user_id: str = Query(default="default", description="用户ID"),
     character_id: str = Query(default="default", description="角色ID"),
+    namespace: Optional[str] = Query(default=None, description="命名空间（与 character_id 互为别名）"),
     force: bool = Query(default=False, description="是否强制执行（不管数量是否超过阈值）")
 ):
     """压缩合并持久条件
@@ -2275,6 +2646,7 @@ async def consolidate_contexts(
     当持久条件数量过多时，智能合并相似的条件。
     如果配置了LLM，会使用LLM进行智能压缩。
     """
+    character_id = _resolve_ns(character_id, namespace)
     engine = get_engine()
     result = engine.consolidate_persistent_contexts(user_id, character_id, force)
     return result
@@ -2284,12 +2656,14 @@ async def consolidate_contexts(
 async def extract_contexts_from_text(
     text: str = Body(..., embed=True, description="要分析的文本"),
     user_id: str = Query(default="default", description="用户ID"),
-    character_id: str = Query(default="default", description="角色ID")
+    character_id: str = Query(default="default", description="角色ID"),
+    namespace: Optional[str] = Query(default=None, description="命名空间（与 character_id 互为别名）")
 ):
     """从文本中自动提取持久条件
     
     使用 LLM（如果可用）或规则从文本中提取应该持久化的条件。
     """
+    character_id = _resolve_ns(character_id, namespace)
     engine = get_engine()
     contexts = engine.extract_contexts_from_text(text, user_id, character_id)
     return {
@@ -2302,9 +2676,11 @@ async def extract_contexts_from_text(
 async def remove_persistent_context(
     context_id: str,
     user_id: str = Query(default="default", description="用户ID"),
-    character_id: str = Query(default="default", description="角色ID")
+    character_id: str = Query(default="default", description="角色ID"),
+    namespace: Optional[str] = Query(default=None, description="命名空间（与 character_id 互为别名）")
 ):
     """停用持久条件"""
+    character_id = _resolve_ns(character_id, namespace)
     engine = get_engine()
     success = engine.remove_persistent_context(context_id, user_id, character_id)
     
@@ -2317,9 +2693,11 @@ async def remove_persistent_context(
 @app.delete("/v1/persistent-contexts", tags=["Persistent Contexts"])
 async def clear_all_persistent_contexts(
     user_id: str = Query(default="default", description="用户ID"),
-    character_id: str = Query(default="default", description="角色ID")
+    character_id: str = Query(default="default", description="角色ID"),
+    namespace: Optional[str] = Query(default=None, description="命名空间（与 character_id 互为别名）")
 ):
     """清空当前角色的所有持久条件"""
+    character_id = _resolve_ns(character_id, namespace)
     engine = get_engine()
     
     # 获取所有活跃条件
@@ -2338,13 +2716,15 @@ async def clear_all_persistent_contexts(
 async def mark_context_used(
     context_id: str,
     user_id: str = Query(default="default", description="用户ID"),
-    character_id: str = Query(default="default", description="角色ID")
+    character_id: str = Query(default="default", description="角色ID"),
+    namespace: Optional[str] = Query(default=None, description="命名空间（与 character_id 互为别名）")
 ):
     """标记持久条件已使用
     
     调用此接口可以更新条件的使用时间和使用次数，
     这对于置信度衰减机制很重要。
     """
+    character_id = _resolve_ns(character_id, namespace)
     engine = get_engine()
     engine.context_tracker.mark_used(context_id, user_id, character_id)
     return {"success": True, "message": "已标记使用"}
@@ -2354,12 +2734,14 @@ async def mark_context_used(
 async def list_archived_contexts(
     user_id: str = Query(default="default", description="用户ID"),
     character_id: str = Query(default="default", description="角色ID"),
+    namespace: Optional[str] = Query(default=None, description="命名空间（与 character_id 互为别名）"),
     page: int = Query(default=1, ge=1, description="页码"),
     page_size: int = Query(default=20, ge=1, le=100, description="每页数量"),
     search: Optional[str] = Query(default=None, description="搜索关键词"),
     context_type: Optional[str] = Query(default=None, description="类型筛选")
 ):
     """获取归档的持久条件列表（分页、搜索、筛选）"""
+    character_id = _resolve_ns(character_id, namespace)
     engine = get_engine()
     result = engine.context_tracker.get_archived_contexts(
         user_id=user_id,
@@ -2376,9 +2758,11 @@ async def list_archived_contexts(
 async def restore_context_from_archive(
     context_id: str,
     user_id: str = Query(default="default", description="用户ID"),
-    character_id: str = Query(default="default", description="角色ID")
+    character_id: str = Query(default="default", description="角色ID"),
+    namespace: Optional[str] = Query(default=None, description="命名空间（与 character_id 互为别名）")
 ):
     """从归档恢复持久条件到活跃列表"""
+    character_id = _resolve_ns(character_id, namespace)
     engine = get_engine()
     ctx = engine.context_tracker.restore_from_archive(context_id, user_id, character_id)
     
@@ -2401,9 +2785,11 @@ async def restore_context_from_archive(
 async def delete_archived_context(
     context_id: str,
     user_id: str = Query(default="default", description="用户ID"),
-    character_id: str = Query(default="default", description="角色ID")
+    character_id: str = Query(default="default", description="角色ID"),
+    namespace: Optional[str] = Query(default=None, description="命名空间（与 character_id 互为别名）")
 ):
     """彻底删除归档中的持久条件"""
+    character_id = _resolve_ns(character_id, namespace)
     engine = get_engine()
     success = engine.context_tracker.delete_archived(context_id, user_id, character_id)
     
@@ -2416,9 +2802,11 @@ async def delete_archived_context(
 @app.delete("/v1/persistent-contexts/archived", tags=["Persistent Contexts"])
 async def clear_all_archived_contexts(
     user_id: str = Query(default="default", description="用户ID"),
-    character_id: str = Query(default="default", description="角色ID")
+    character_id: str = Query(default="default", description="角色ID"),
+    namespace: Optional[str] = Query(default=None, description="命名空间（与 character_id 互为别名）")
 ):
     """清空所有归档的持久条件"""
+    character_id = _resolve_ns(character_id, namespace)
     engine = get_engine()
     count = engine.context_tracker.clear_archived(user_id, character_id)
     return {"success": True, "message": f"已清空 {count} 个归档条件", "count": count}
@@ -2428,9 +2816,11 @@ async def clear_all_archived_contexts(
 async def archive_context(
     context_id: str,
     user_id: str = Query(default="default", description="用户ID"),
-    character_id: str = Query(default="default", description="角色ID")
+    character_id: str = Query(default="default", description="角色ID"),
+    namespace: Optional[str] = Query(default=None, description="命名空间（与 character_id 互为别名）")
 ):
     """手动将活跃条件归档"""
+    character_id = _resolve_ns(character_id, namespace)
     engine = get_engine()
     success = engine.context_tracker.archive_context(context_id, user_id, character_id)
     
@@ -2445,9 +2835,11 @@ async def update_persistent_context(
     context_id: str,
     request: PersistentContextUpdateRequest,
     user_id: str = Query(default="default", description="用户ID"),
-    character_id: str = Query(default="default", description="角色ID")
+    character_id: str = Query(default="default", description="角色ID"),
+    namespace: Optional[str] = Query(default=None, description="命名空间（与 character_id 互为别名）")
 ):
     """编辑持久条件的字段"""
+    character_id = _resolve_ns(character_id, namespace)
     engine = get_engine()
     ctx = engine.context_tracker.update_context(
         context_id=context_id,
@@ -2478,16 +2870,13 @@ async def update_persistent_context(
 # ==================== 模式 API ====================
 
 def _foreshadowing_disabled_response():
-    """检查伏笔系统是否在当前模式下禁用，返回禁用响应或 None"""
-    cfg = get_mode_config()
-    if not cfg.foreshadowing_enabled:
-        return {"message": "Foreshadowing disabled in current mode", "mode": cfg.mode.value}
+    """v7.0: 伏笔始终可用，此函数保留用于向后兼容但始终返回 None"""
     return None
 
 
 @app.get("/v1/mode", tags=["Admin"])
 async def get_current_mode():
-    """获取当前全局模式配置"""
+    """获取当前全局模式配置 — v7.0: 统一模式，全功能启用"""
     cfg = get_mode_config()
     return {
         "mode": cfg.mode.value,
@@ -2507,17 +2896,19 @@ async def plant_foreshadowing(request: ForeshadowingRequest):
     if (guard := _foreshadowing_disabled_response()):
         return guard
     engine = get_engine()
+    # v7.0.9: 通过 _resolve_ns 统一处理 namespace/character_id
+    resolved_cid = _resolve_ns(request.character_id, getattr(request, 'namespace', None))
     fsh = engine.plant_foreshadowing(
         content=request.content,
         user_id=request.user_id,
-        character_id=request.character_id,
+        character_id=resolved_cid,
         related_entities=request.related_entities,
         importance=request.importance
     )
     return ForeshadowingItem(
         id=fsh.id,
         content=fsh.content,
-        status=fsh.status.value,
+        status=fsh.status.value if hasattr(fsh.status, 'value') else fsh.status,
         importance=fsh.importance,
         hints=fsh.hints,
         resolution=fsh.resolution
@@ -2527,9 +2918,11 @@ async def plant_foreshadowing(request: ForeshadowingRequest):
 @app.get("/v1/foreshadowing", response_model=List[ForeshadowingItem], tags=["Foreshadowing"])
 async def list_foreshadowing(
     user_id: str = Query(default="default", description="用户ID（角色名）"),
-    character_id: str = Query(default="default", description="角色ID")
+    character_id: str = Query(default="default", description="角色ID"),
+    namespace: Optional[str] = Query(default=None, description="命名空间（与 character_id 互为别名）")
 ):
     """获取活跃伏笔"""
+    character_id = _resolve_ns(character_id, namespace)
     if (guard := _foreshadowing_disabled_response()):
         return guard
     engine = get_engine()
@@ -2539,17 +2932,18 @@ async def list_foreshadowing(
     if active:
         status_summary = {}
         for f in active:
-            s = f.status.value
+            s = f.status.value if hasattr(f.status, 'value') else f.status
             status_summary[s] = status_summary.get(s, 0) + 1
         _safe_print(f"[Recall][Foreshadow]    状态分布: {status_summary}")
         for i, f in enumerate(active[:3]):
             preview = f.content[:40].replace('\n', ' ')
-            _safe_print(f"[Recall][Foreshadow]    [{i+1}] {f.status.value}: {preview}...")
+            st = f.status.value if hasattr(f.status, 'value') else f.status
+            _safe_print(f"[Recall][Foreshadow]    [{i+1}] {st}: {preview}...")
     return [
         ForeshadowingItem(
             id=f.id,
             content=f.content,
-            status=f.status.value,
+            status=f.status.value if hasattr(f.status, 'value') else f.status,
             importance=f.importance,
             hints=f.hints,
             resolution=f.resolution
@@ -2563,9 +2957,11 @@ async def resolve_foreshadowing(
     foreshadowing_id: str,
     resolution: str = Body(..., embed=True),
     user_id: str = Query(default="default", description="用户ID（角色名）"),
-    character_id: str = Query(default="default", description="角色ID")
+    character_id: str = Query(default="default", description="角色ID"),
+    namespace: Optional[str] = Query(default=None, description="命名空间（与 character_id 互为别名）")
 ):
     """解决伏笔"""
+    character_id = _resolve_ns(character_id, namespace)
     if (guard := _foreshadowing_disabled_response()):
         return guard
     engine = get_engine()
@@ -2582,12 +2978,14 @@ async def add_foreshadowing_hint(
     foreshadowing_id: str,
     hint: str = Body(..., embed=True, description="提示内容"),
     user_id: str = Query(default="default", description="用户ID（角色名）"),
-    character_id: str = Query(default="default", description="角色ID")
+    character_id: str = Query(default="default", description="角色ID"),
+    namespace: Optional[str] = Query(default=None, description="命名空间（与 character_id 互为别名）")
 ):
     """添加伏笔提示
     
     为伏笔添加进展提示，会将状态从 PLANTED 更新为 DEVELOPING
     """
+    character_id = _resolve_ns(character_id, namespace)
     if (guard := _foreshadowing_disabled_response()):
         return guard
     engine = get_engine()
@@ -2603,12 +3001,14 @@ async def add_foreshadowing_hint(
 async def abandon_foreshadowing(
     foreshadowing_id: str,
     user_id: str = Query(default="default", description="用户ID（角色名）"),
-    character_id: str = Query(default="default", description="角色ID")
+    character_id: str = Query(default="default", description="角色ID"),
+    namespace: Optional[str] = Query(default=None, description="命名空间（与 character_id 互为别名）")
 ):
     """放弃/删除伏笔
     
     将伏笔标记为已放弃状态（不会物理删除，保留历史记录）
     """
+    character_id = _resolve_ns(character_id, namespace)
     if (guard := _foreshadowing_disabled_response()):
         return guard
     engine = get_engine()
@@ -2623,9 +3023,11 @@ async def abandon_foreshadowing(
 @app.delete("/v1/foreshadowing", tags=["Foreshadowing"])
 async def clear_all_foreshadowings(
     user_id: str = Query(default="default", description="用户ID（角色名）"),
-    character_id: str = Query(default="default", description="角色ID")
+    character_id: str = Query(default="default", description="角色ID"),
+    namespace: Optional[str] = Query(default=None, description="命名空间（与 character_id 互为别名）")
 ):
     """清空当前角色的所有伏笔"""
+    character_id = _resolve_ns(character_id, namespace)
     if (guard := _foreshadowing_disabled_response()):
         return guard
     engine = get_engine()
@@ -2646,12 +3048,14 @@ async def clear_all_foreshadowings(
 async def list_archived_foreshadowings(
     user_id: str = Query(default="default", description="用户ID"),
     character_id: str = Query(default="default", description="角色ID"),
+    namespace: Optional[str] = Query(default=None, description="命名空间（与 character_id 互为别名）"),
     page: int = Query(default=1, ge=1, description="页码"),
     page_size: int = Query(default=20, ge=1, le=100, description="每页数量"),
     search: Optional[str] = Query(default=None, description="搜索关键词"),
     status: Optional[str] = Query(default=None, description="状态筛选（resolved/abandoned）")
 ):
     """获取归档的伏笔列表（分页、搜索、筛选）"""
+    character_id = _resolve_ns(character_id, namespace)
     if (guard := _foreshadowing_disabled_response()):
         return guard
     engine = get_engine()
@@ -2670,9 +3074,11 @@ async def list_archived_foreshadowings(
 async def restore_foreshadowing_from_archive(
     foreshadowing_id: str,
     user_id: str = Query(default="default", description="用户ID"),
-    character_id: str = Query(default="default", description="角色ID")
+    character_id: str = Query(default="default", description="角色ID"),
+    namespace: Optional[str] = Query(default=None, description="命名空间（与 character_id 互为别名）")
 ):
     """从归档恢复伏笔到活跃列表"""
+    character_id = _resolve_ns(character_id, namespace)
     if (guard := _foreshadowing_disabled_response()):
         return guard
     engine = get_engine()
@@ -2687,7 +3093,7 @@ async def restore_foreshadowing_from_archive(
         "foreshadowing": {
             "id": fsh.id,
             "content": fsh.content,
-            "status": fsh.status.value,
+            "status": fsh.status.value if hasattr(fsh.status, 'value') else fsh.status,
             "importance": fsh.importance
         }
     }
@@ -2697,9 +3103,11 @@ async def restore_foreshadowing_from_archive(
 async def delete_archived_foreshadowing(
     foreshadowing_id: str,
     user_id: str = Query(default="default", description="用户ID"),
-    character_id: str = Query(default="default", description="角色ID")
+    character_id: str = Query(default="default", description="角色ID"),
+    namespace: Optional[str] = Query(default=None, description="命名空间（与 character_id 互为别名）")
 ):
     """彻底删除归档中的伏笔"""
+    character_id = _resolve_ns(character_id, namespace)
     if (guard := _foreshadowing_disabled_response()):
         return guard
     engine = get_engine()
@@ -2714,9 +3122,11 @@ async def delete_archived_foreshadowing(
 @app.delete("/v1/foreshadowing/archived", tags=["Foreshadowing"])
 async def clear_all_archived_foreshadowings(
     user_id: str = Query(default="default", description="用户ID"),
-    character_id: str = Query(default="default", description="角色ID")
+    character_id: str = Query(default="default", description="角色ID"),
+    namespace: Optional[str] = Query(default=None, description="命名空间（与 character_id 互为别名）")
 ):
     """清空所有归档的伏笔"""
+    character_id = _resolve_ns(character_id, namespace)
     if (guard := _foreshadowing_disabled_response()):
         return guard
     engine = get_engine()
@@ -2728,9 +3138,11 @@ async def clear_all_archived_foreshadowings(
 async def archive_foreshadowing_manually(
     foreshadowing_id: str,
     user_id: str = Query(default="default", description="用户ID"),
-    character_id: str = Query(default="default", description="角色ID")
+    character_id: str = Query(default="default", description="角色ID"),
+    namespace: Optional[str] = Query(default=None, description="命名空间（与 character_id 互为别名）")
 ):
     """手动将活跃伏笔归档"""
+    character_id = _resolve_ns(character_id, namespace)
     if (guard := _foreshadowing_disabled_response()):
         return guard
     engine = get_engine()
@@ -2751,9 +3163,11 @@ async def update_foreshadowing(
     hints: Optional[List[str]] = Body(default=None, description="新提示列表"),
     resolution: Optional[str] = Body(default=None, description="解决方案"),
     user_id: str = Query(default="default", description="用户ID"),
-    character_id: str = Query(default="default", description="角色ID")
+    character_id: str = Query(default="default", description="角色ID"),
+    namespace: Optional[str] = Query(default=None, description="命名空间（与 character_id 互为别名）")
 ):
     """编辑伏笔的字段"""
+    character_id = _resolve_ns(character_id, namespace)
     if (guard := _foreshadowing_disabled_response()):
         return guard
     engine = get_engine()
@@ -2777,7 +3191,7 @@ async def update_foreshadowing(
         "foreshadowing": {
             "id": fsh.id,
             "content": fsh.content,
-            "status": fsh.status.value,
+            "status": fsh.status.value if hasattr(fsh.status, 'value') else fsh.status,
             "importance": fsh.importance,
             "hints": fsh.hints,
             "resolution": fsh.resolution
@@ -2792,8 +3206,8 @@ _background_analysis_tasks: set = set()
 
 
 def _get_llm_timeout() -> float:
-    """获取 LLM 超时配置（统一从环境变量读取）"""
-    return float(os.environ.get('LLM_TIMEOUT', '60'))
+    """获取 LLM 超时配置（统一从 RecallConfig 读取）"""
+    return _get_config().llm_timeout
 
 
 async def _background_foreshadowing_analysis(engine: RecallEngine, content: str, role: str, user_id: str, character_id: str):
@@ -2925,6 +3339,8 @@ async def analyze_foreshadowing_turn(request: ForeshadowingAnalysisRequest):
         return guard
     engine = get_engine()
     
+    # v7.0.9: 通过 _resolve_ns 统一处理 namespace/character_id
+    resolved_cid = _resolve_ns(request.character_id, getattr(request, 'namespace', None))
     # 创建后台任务执行分析（不等待结果）
     task = asyncio.create_task(
         _background_foreshadowing_analysis(
@@ -2932,7 +3348,7 @@ async def analyze_foreshadowing_turn(request: ForeshadowingAnalysisRequest):
             content=request.content,
             role=request.role,
             user_id=request.user_id,
-            character_id=request.character_id
+            character_id=resolved_cid
         )
     )
     
@@ -2952,12 +3368,14 @@ async def analyze_foreshadowing_turn(request: ForeshadowingAnalysisRequest):
 @app.post("/v1/foreshadowing/analyze/trigger", response_model=ForeshadowingAnalysisResult, tags=["Foreshadowing Analysis"])
 async def trigger_foreshadowing_analysis(
     user_id: str = Query(default="default", description="用户ID（角色名）"),
-    character_id: str = Query(default="default", description="角色ID")
+    character_id: str = Query(default="default", description="角色ID"),
+    namespace: Optional[str] = Query(default=None, description="命名空间（与 character_id 互为别名）")
 ):
     """手动触发伏笔分析
     
     强制触发 LLM 分析（如果已配置）。可以在任何时候调用。
     """
+    character_id = _resolve_ns(character_id, namespace)
     if (guard := _foreshadowing_disabled_response()):
         return guard
     engine = get_engine()
@@ -2991,7 +3409,7 @@ async def get_foreshadowing_analyzer_config():
     llm_enabled = (actual_backend == 'llm')
     
     # 检查 LLM API 是否已配置
-    llm_api_key = os.environ.get('LLM_API_KEY', '')
+    llm_api_key = _get_config().llm_api_key
     llm_configured = bool(llm_api_key)
     
     return {
@@ -3033,12 +3451,12 @@ async def update_foreshadowing_analyzer_config(config: ForeshadowingConfigUpdate
         # 动态切换分析器模式
         if config.llm_enabled:
             # 启用 LLM 模式
-            llm_api_key = os.environ.get('LLM_API_KEY')
+            llm_api_key = _get_config().llm_api_key
             if llm_api_key:
                 engine.enable_foreshadowing_llm_mode(
                     api_key=llm_api_key,
-                    model=os.environ.get('LLM_MODEL', 'gpt-4o-mini'),
-                    base_url=os.environ.get('LLM_API_BASE')
+                    model=_get_config().llm_model,
+                    base_url=_get_config().llm_api_base or None
                 )
             else:
                 # 记录错误但继续处理其他配置
@@ -3629,6 +4047,57 @@ async def hybrid_search(request: SearchRequest):
         }
 
 
+@app.post("/v1/search/parallel", tags=["Search"])
+async def parallel_search(request: SearchRequest):
+    """并行多源搜索（v7.0 C-3 ParallelRetriever）
+    
+    使用 ParallelRetriever 同时从向量/关键词/实体/图谱四路检索，
+    结果通过 RRF (Reciprocal Rank Fusion) 融合排序。
+    
+    适合需要最高召回率的场景（如"100%不遗忘"保证）。
+    """
+    engine = get_engine()
+    
+    try:
+        if hasattr(engine, 'search_parallel') and engine.parallel_retriever:
+            results = engine.search_parallel(
+                query=request.query,
+                user_id=request.user_id,
+                top_k=request.top_k,
+            )
+        else:
+            # ParallelRetriever 不可用，回退到标准搜索
+            results = engine.search(
+                query=request.query,
+                user_id=request.user_id,
+                top_k=request.top_k,
+                filters=request.filters
+            )
+        
+        return {
+            "success": True,
+            "query": request.query,
+            "retriever": "parallel" if engine.parallel_retriever else "eleven_layer",
+            "results": [
+                {
+                    "id": r.id,
+                    "content": r.content,
+                    "score": r.score,
+                    "metadata": r.metadata,
+                    "entities": r.entities if hasattr(r, 'entities') else []
+                }
+                for r in results
+            ],
+            "count": len(results)
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "results": []
+        }
+
+
 # ==================== Phase 3: 检索配置 API ====================
 
 @app.get("/v1/search/config", response_model=RetrievalConfigResponse, tags=["Search"])
@@ -3940,6 +4409,7 @@ async def get_query_stats():
 async def list_entities(
     user_id: str = Query(default="default", description="用户ID"),
     character_id: str = Query(default="default", description="角色ID"),
+    namespace: Optional[str] = Query(default=None, description="命名空间（与 character_id 互为别名）"),
     entity_type: str = Query(default="", description="实体类型过滤，如 PERSON、LOCATION 等"),
     limit: int = Query(default=100, description="最大返回数量")
 ):
@@ -3948,6 +4418,7 @@ async def list_entities(
     返回该用户/角色组合下提取到的所有实体。
     可通过 entity_type 参数过滤特定类型的实体。
     """
+    character_id = _resolve_ns(character_id, namespace)
     engine = get_engine()
     
     # 从实体索引获取所有实体
@@ -4197,7 +4668,7 @@ async def get_v41_config():
     return {
         "llm_relation_extractor": {
             "enabled": engine._llm_relation_extractor is not None,
-            "mode": os.environ.get('LLM_RELATION_MODE', 'llm')
+            "mode": _get_config().llm_relation_mode
         },
         "entity_schema_registry": {
             "enabled": engine.entity_schema_registry is not None,
@@ -4220,7 +4691,14 @@ async def get_v41_config():
 async def get_stats():
     """获取统计信息"""
     engine = get_engine()
-    return engine.get_stats()
+    # v7.0.7: 增加 try/except 包装
+    try:
+        return engine.get_stats()
+    except Exception as e:
+        import traceback
+        _safe_print(f"[Recall] ❌ 获取统计信息异常: {e}")
+        _safe_print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"获取统计信息失败: {e}")
 
 
 @app.post("/v1/indexes/rebuild-vector", tags=["Admin"])
@@ -4253,10 +4731,10 @@ async def list_users():
     
     result = []
     for user_id in users:
-        memories = engine.get_all(user_id=user_id, limit=10000)
+        # v7.0.5: 修复 — 使用 count_memories() O(1) 替代 get_all() O(n) 加载全量数据
         result.append({
             "user_id": user_id,
-            "memory_count": len(memories)
+            "memory_count": engine.count_memories(user_id=user_id)
         })
     
     return {
@@ -4367,38 +4845,39 @@ async def get_config():
         return val.lower() in ('true', '1', 'yes', 'on')
     
     # Embedding 配置
-    embedding_key = os.environ.get('EMBEDDING_API_KEY', '')
-    embedding_base = os.environ.get('EMBEDDING_API_BASE', '')
-    embedding_model = os.environ.get('EMBEDDING_MODEL', '')
-    embedding_dimension = os.environ.get('EMBEDDING_DIMENSION', '')
-    embedding_mode = os.environ.get('RECALL_EMBEDDING_MODE', 'auto')
+    cfg = _get_config()
+    embedding_key = cfg.embedding_api_key
+    embedding_base = cfg.embedding_api_base
+    embedding_model = cfg.embedding_model
+    embedding_dimension = str(cfg.embedding_dimension) if cfg.embedding_dimension else ''
+    embedding_mode = cfg.recall_embedding_mode
     
     # LLM 配置
-    llm_key = os.environ.get('LLM_API_KEY', '')
-    llm_base = os.environ.get('LLM_API_BASE', '')
-    llm_model = os.environ.get('LLM_MODEL', '')
+    llm_key = cfg.llm_api_key
+    llm_base = cfg.llm_api_base
+    llm_model = cfg.llm_model
     
-    # 容量限制配置
-    context_trigger_interval = safe_int(os.environ.get('CONTEXT_TRIGGER_INTERVAL', ''), 5)
-    context_max_context_turns = safe_int(os.environ.get('CONTEXT_MAX_CONTEXT_TURNS', ''), 20)
-    context_max_per_type = safe_int(os.environ.get('CONTEXT_MAX_PER_TYPE', ''), 30)
-    context_max_total = safe_int(os.environ.get('CONTEXT_MAX_TOTAL', ''), 100)
-    context_decay_days = safe_int(os.environ.get('CONTEXT_DECAY_DAYS', ''), 7)
-    context_decay_rate = safe_float(os.environ.get('CONTEXT_DECAY_RATE', ''), 0.1)
-    context_min_confidence = safe_float(os.environ.get('CONTEXT_MIN_CONFIDENCE', ''), 0.3)
+    # 容量限制配置（v7.0.1: 统一使用 RecallConfig，消除硬编码冲突）
+    context_trigger_interval = cfg.context_trigger_interval
+    context_max_context_turns = cfg.context_max_context_turns
+    context_max_per_type = cfg.context_max_per_type
+    context_max_total = cfg.context_max_total
+    context_decay_days = cfg.context_decay_days
+    context_decay_rate = cfg.context_decay_rate
+    context_min_confidence = cfg.context_min_confidence
     
     # 上下文构建配置
-    build_context_include_recent = safe_int(os.environ.get('BUILD_CONTEXT_INCLUDE_RECENT', ''), 10)
-    proactive_reminder_enabled = safe_bool(os.environ.get('PROACTIVE_REMINDER_ENABLED', ''), True)
-    proactive_reminder_turns = safe_int(os.environ.get('PROACTIVE_REMINDER_TURNS', ''), 50)
+    build_context_include_recent = cfg.build_context_include_recent
+    proactive_reminder_enabled = cfg.proactive_reminder_enabled
+    proactive_reminder_turns = cfg.proactive_reminder_turns
     
-    foreshadowing_max_return = safe_int(os.environ.get('FORESHADOWING_MAX_RETURN', ''), 5)
-    foreshadowing_max_active = safe_int(os.environ.get('FORESHADOWING_MAX_ACTIVE', ''), 50)
+    foreshadowing_max_return = cfg.foreshadowing_max_return
+    foreshadowing_max_active = cfg.foreshadowing_max_active
     
     # 智能去重配置
-    dedup_embedding_enabled = safe_bool(os.environ.get('DEDUP_EMBEDDING_ENABLED', ''), True)
-    dedup_high_threshold = safe_float(os.environ.get('DEDUP_HIGH_THRESHOLD', ''), 0.92)
-    dedup_low_threshold = safe_float(os.environ.get('DEDUP_LOW_THRESHOLD', ''), 0.75)
+    dedup_embedding_enabled = cfg.dedup_embedding_enabled
+    dedup_high_threshold = cfg.dedup_high_threshold
+    dedup_low_threshold = cfg.dedup_low_threshold
     
     return {
         "config_file": str(config_file),
@@ -4533,7 +5012,7 @@ async def test_connection():
             current_backend = cfg.backend.value if cfg and cfg.backend else 'unknown'
             current_model = (cfg.api_model or cfg.local_model) if cfg else None
         except Exception:
-            current_backend = os.environ.get('RECALL_EMBEDDING_MODE', 'auto')
+            current_backend = _get_config().recall_embedding_mode
             current_model = None
         
         return {
@@ -4564,13 +5043,10 @@ async def test_llm_connection():
     - latency_ms: API 调用延迟（毫秒）
     """
     # 获取 LLM 配置
-    llm_api_key = os.environ.get('LLM_API_KEY', '')
-    llm_api_base = os.environ.get('LLM_API_BASE', '')
-    llm_model = os.environ.get('LLM_MODEL', 'gpt-3.5-turbo')
-    
-    # 如果没有 LLM_API_KEY，尝试使用 OPENAI_API_KEY
-    if not llm_api_key:
-        llm_api_key = os.environ.get('OPENAI_API_KEY', '')
+    _llm_cfg = _get_config()
+    llm_api_key = _llm_cfg.llm_api_key
+    llm_api_base = _llm_cfg.llm_api_base
+    llm_model = _llm_cfg.llm_model
     
     if not llm_api_key:
         return {
@@ -4657,9 +5133,10 @@ async def detect_embedding_dimension(api_key: Optional[str] = None, api_base: Op
         model: 使用的模型
     """
     # 优先使用参数，否则使用配置
-    embedding_key = api_key or os.environ.get('EMBEDDING_API_KEY', '')
-    embedding_base = api_base or os.environ.get('EMBEDDING_API_BASE', '')
-    embedding_model = model or os.environ.get('EMBEDDING_MODEL', 'text-embedding-3-small')
+    _dcfg = _get_config()
+    embedding_key = api_key or _dcfg.embedding_api_key
+    embedding_base = api_base or _dcfg.embedding_api_base
+    embedding_model = model or _dcfg.embedding_model
     
     if not embedding_key:
         return {
@@ -4723,8 +5200,9 @@ async def get_embedding_models(api_key: Optional[str] = None, api_base: Optional
         api_base: 可选，临时使用的 API Base URL
     """
     # 优先使用参数，否则使用配置
-    embedding_key = api_key or os.environ.get('EMBEDDING_API_KEY', '')
-    embedding_base = api_base or os.environ.get('EMBEDDING_API_BASE', '')
+    _ecfg = _get_config()
+    embedding_key = api_key or _ecfg.embedding_api_key
+    embedding_base = api_base or _ecfg.embedding_api_base
     
     if not embedding_key:
         return {
@@ -4842,8 +5320,9 @@ async def get_llm_models(api_key: Optional[str] = None, api_base: Optional[str] 
         api_base: 可选，临时使用的 API Base URL
     """
     # 优先使用参数，否则使用配置
-    llm_key = api_key or os.environ.get('LLM_API_KEY', '')
-    llm_base = api_base or os.environ.get('LLM_API_BASE', '')
+    _lcfg = _get_config()
+    llm_key = api_key or _lcfg.llm_api_key
+    llm_base = api_base or _lcfg.llm_api_base
     
     if not llm_key:
         return {
@@ -5086,11 +5565,35 @@ async def update_config(request: ConfigUpdateRequest):
             if key not in existing_keys and key in SUPPORTED_CONFIG_KEYS:
                 lines.append(f"{key}={value}")
         
-        # 写入文件
-        with open(config_file, 'w', encoding='utf-8') as f:
-            f.write('\n'.join(lines))
-            if not lines[-1].endswith('\n'):
-                f.write('\n')
+        # 写入文件（v7.0.11: 原子写入 — tmp+fsync+os.replace 防崩溃丢配置）
+        import tempfile
+        config_dir = os.path.dirname(config_file)
+        try:
+            fd, tmp_path = tempfile.mkstemp(dir=config_dir, suffix='.tmp', prefix='.api_keys_')
+            with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                f.write('\n'.join(lines))
+                if not lines[-1].endswith('\n'):
+                    f.write('\n')
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, str(config_file))
+        except Exception:
+            # Windows 兼容性: os.replace 可能因文件锁失败，重试一次
+            import time as _time
+            _time.sleep(0.05)
+            try:
+                os.replace(tmp_path, str(config_file))
+            except Exception:
+                # 最终回退: 直接写入（不丢失用户修改）
+                if os.path.exists(tmp_path):
+                    try:
+                        os.remove(tmp_path)
+                    except Exception:
+                        pass
+                with open(config_file, 'w', encoding='utf-8') as f:
+                    f.write('\n'.join(lines))
+                    if not lines[-1].endswith('\n'):
+                        f.write('\n')
         
         # 重新加载引擎配置
         try:
@@ -5138,26 +5641,27 @@ async def get_full_config():
         return "已配置"
     
     # Embedding 配置（统一使用 OpenAI 兼容格式）
-    embedding_key = os.environ.get('EMBEDDING_API_KEY', '')
+    _fcfg = _get_config()
+    embedding_key = _fcfg.embedding_api_key
     
     embedding_config = {
         "api_key": mask_key(embedding_key),
         "api_key_status": get_key_status(embedding_key),
-        "api_base": os.environ.get('EMBEDDING_API_BASE', ''),
-        "model": os.environ.get('EMBEDDING_MODEL', ''),
-        "dimension": os.environ.get('EMBEDDING_DIMENSION', ''),
-        "mode": os.environ.get('RECALL_EMBEDDING_MODE', ''),
-        "rate_limit": os.environ.get('EMBEDDING_RATE_LIMIT', ''),
-        "rate_window": os.environ.get('EMBEDDING_RATE_WINDOW', ''),
+        "api_base": _fcfg.embedding_api_base,
+        "model": _fcfg.embedding_model,
+        "dimension": str(_fcfg.embedding_dimension) if _fcfg.embedding_dimension else '',
+        "mode": _fcfg.recall_embedding_mode,
+        "rate_limit": str(_fcfg.embedding_rate_limit),
+        "rate_window": str(_fcfg.embedding_rate_window),
     }
     
     # LLM 配置
-    llm_key = os.environ.get('LLM_API_KEY', '')
+    llm_key = _fcfg.llm_api_key
     llm_config = {
         "api_key": mask_key(llm_key),
         "api_key_status": get_key_status(llm_key),
-        "api_base": os.environ.get('LLM_API_BASE', ''),
-        "model": os.environ.get('LLM_MODEL', 'gpt-3.5-turbo'),
+        "api_base": _fcfg.llm_api_base,
+        "model": _fcfg.llm_model,
     }
     
     return {
@@ -5168,11 +5672,16 @@ async def get_full_config():
 
 
 @app.post("/v1/consolidate", tags=["Admin"])
-async def consolidate(user_id: str = Query(default="default")):
-    """执行记忆整合"""
+async def consolidate(
+    user_id: str = Query(default="default"),
+    force: bool = Query(default=False, description="强制执行（忽略阈值检查）"),
+):
+    """执行记忆整合（双层策略：Hot layer 摘要 + Cold layer 原文归档）"""
     engine = get_engine()
-    engine.consolidate(user_id=user_id)
-    return {"success": True, "message": "整合完成"}
+    result = engine.consolidate(user_id=user_id, force=force)
+    if result is None:
+        return {"success": False, "message": "整合管理器不可用"}
+    return {"success": result.get('status') != 'error', "result": result}
 
 
 @app.post("/v1/reset", tags=["Admin"])
@@ -5187,6 +5696,264 @@ async def reset(
     engine = get_engine()
     engine.reset(user_id=user_id)
     return {"success": True, "message": "重置完成"}
+
+
+# ==================== 数据导入导出 API (v7.0) ====================
+
+class DataImportRequest(BaseModel):
+    """数据导入请求"""
+    memories: List[Dict[str, Any]] = Field(..., description="待导入的记忆列表")
+    source: str = Field(default="import", description="数据来源标识")
+    namespace: str = Field(default="default", description="目标命名空间")
+    auto_chunk: bool = Field(default=True, description="内容过长时自动分块")
+    max_chunk_tokens: int = Field(default=512, description="分块最大 token 数")
+
+
+class DataRestoreRequest(BaseModel):
+    """数据恢复请求"""
+    backup_path: str = Field(..., description="备份文件路径")
+
+
+@app.post("/v1/data/export", tags=["Data"])
+async def export_data(
+    user_id: str = Query(default="default", description="用户ID"),
+    namespace: Optional[str] = Query(default=None, description="命名空间过滤（空=全部）")
+):
+    """导出所有记忆（或按命名空间过滤）为 JSON。
+
+    返回记忆数组，可直接用于 /v1/data/import 重新导入。
+    """
+    engine = get_engine()
+
+    # 尝试使用 SQLite 后端的 export
+    backend = getattr(engine, '_sqlite_backend', None)
+    if backend is not None:
+        from .backends.sqlite_memory import SQLiteMemoryBackend
+        if isinstance(backend, SQLiteMemoryBackend):
+            memories = backend.export_memories(
+                namespace=namespace,
+                global_export=(namespace is None),
+            )
+            return {
+                "success": True,
+                "count": len(memories),
+                "memories": memories,
+            }
+
+    # 回退到 engine.get_all
+    try:
+        memories = engine.get_all(user_id=user_id, limit=2**31)
+    except Exception:
+        memories = engine.get_all(user_id=user_id)
+
+    # 如果 namespace 指定了，做客户端过滤
+    if namespace:
+        memories = [
+            m for m in memories
+            if m.get('namespace') == namespace
+            or m.get('metadata', {}).get('namespace') == namespace
+            or m.get('metadata', {}).get('character_id') == namespace
+        ]
+
+    return {
+        "success": True,
+        "count": len(memories),
+        "memories": memories,
+    }
+
+
+@app.post("/v1/data/import", tags=["Data"])
+async def import_data(request: DataImportRequest):
+    """导入记忆。
+
+    支持 external_id 去重更新（upsert）。
+    若 auto_chunk=true 且内容超过 max_chunk_tokens，自动使用 document_chunker 分块。
+    """
+    from .processor.document_chunker import chunk as do_chunk, needs_chunking
+
+    engine = get_engine()
+    imported = 0
+    updated = 0
+    skipped = 0
+
+    for mem in request.memories:
+        content = mem.get('content') or mem.get('memory') or mem.get('text')
+        if not content:
+            skipped += 1
+            continue
+
+        metadata = mem.get('metadata', {}) or {}
+        metadata['source'] = request.source
+        external_id = mem.get('external_id') or mem.get('id')
+
+        # Auto-chunk long content
+        if request.auto_chunk and needs_chunking(content, request.max_chunk_tokens):
+            chunks = do_chunk(
+                content,
+                max_chunk_tokens=request.max_chunk_tokens,
+                metadata=metadata,
+            )
+            for ch in chunks:
+                try:
+                    engine.add(
+                        ch.text,
+                        user_id=mem.get('user_id', 'default'),
+                        metadata={
+                            **ch.metadata,
+                            'character_id': request.namespace,
+                            'external_id': f"{external_id}_chunk{ch.chunk_index}" if external_id else None,
+                        },
+                    )
+                    imported += 1
+                except Exception:
+                    skipped += 1
+        else:
+            try:
+                metadata['character_id'] = request.namespace
+                if external_id:
+                    metadata['external_id'] = external_id
+                engine.add(
+                    content,
+                    user_id=mem.get('user_id', 'default'),
+                    metadata=metadata,
+                )
+                imported += 1
+            except Exception:
+                skipped += 1
+
+    return {
+        "success": True,
+        "imported": imported,
+        "updated": updated,
+        "skipped": skipped,
+    }
+
+
+@app.post("/v1/data/backup", tags=["Data"])
+async def backup_data():
+    """创建完整数据备份。
+
+    将数据库文件复制到 recall_data/backups/ 目录。
+    """
+    import shutil
+    from pathlib import Path as _Path
+
+    engine = get_engine()
+    data_root = _Path(engine.data_root)
+    backup_dir = data_root / 'backups'
+    backup_dir.mkdir(parents=True, exist_ok=True)
+
+    timestamp = time.strftime('%Y%m%d_%H%M%S')
+    backup_name = f"backup_{timestamp}"
+    dest = backup_dir / backup_name
+    dest.mkdir(parents=True, exist_ok=True)
+
+    total_size = 0
+
+    # 备份 SQLite 数据库（如果存在）
+    db_path = data_root / 'data' / 'memories.db'
+    if db_path.exists():
+        backend = getattr(engine, '_sqlite_backend', None)
+        if backend is not None:
+            try:
+                backend.backup(dest / 'memories.db')
+            except Exception:
+                shutil.copy2(str(db_path), str(dest / 'memories.db'))
+        else:
+            shutil.copy2(str(db_path), str(dest / 'memories.db'))
+        total_size += db_path.stat().st_size
+
+    # 备份 JSON 数据目录
+    data_dir = data_root / 'data'
+    if data_dir.exists():
+        for item in data_dir.rglob('*'):
+            if item.is_file() and item.suffix in ('.json', '.jsonl', '.db'):
+                rel = item.relative_to(data_dir)
+                target = dest / 'data' / rel
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(str(item), str(target))
+                total_size += item.stat().st_size
+
+    # 备份索引目录
+    for idx_dir_name in ('index', 'indexes'):
+        idx_dir = data_root / idx_dir_name
+        if idx_dir.exists():
+            for item in idx_dir.rglob('*'):
+                if item.is_file():
+                    rel = item.relative_to(idx_dir)
+                    target = dest / idx_dir_name / rel
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(str(item), str(target))
+                    total_size += item.stat().st_size
+
+    return {
+        "success": True,
+        "backup_path": str(dest),
+        "size_bytes": total_size,
+        "timestamp": timestamp,
+    }
+
+
+@app.post("/v1/data/restore", tags=["Data"])
+async def restore_data(request: DataRestoreRequest):
+    """从备份恢复数据。
+
+    将备份目录中的文件复制回对应位置。
+    恢复前请确保服务已暂停写入或可以接受覆盖。
+    """
+    import shutil
+    from pathlib import Path as _Path
+
+    backup_path = _Path(request.backup_path)
+    if not backup_path.exists():
+        raise HTTPException(status_code=404, detail=f"备份路径不存在: {request.backup_path}")
+
+    engine = get_engine()
+    data_root = _Path(engine.data_root)
+    memories_count = 0
+
+    # 恢复 SQLite 数据库
+    db_backup = backup_path / 'memories.db'
+    if db_backup.exists():
+        dest_db = data_root / 'data' / 'memories.db'
+        dest_db.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(str(db_backup), str(dest_db))
+
+    # 恢复 JSON 数据
+    data_backup = backup_path / 'data'
+    if data_backup.exists():
+        for item in data_backup.rglob('*'):
+            if item.is_file():
+                rel = item.relative_to(data_backup)
+                target = data_root / 'data' / rel
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(str(item), str(target))
+                if item.suffix in ('.json', '.jsonl'):
+                    memories_count += 1
+
+    # 恢复索引
+    for idx_dir_name in ('index', 'indexes'):
+        idx_backup = backup_path / idx_dir_name
+        if idx_backup.exists():
+            for item in idx_backup.rglob('*'):
+                if item.is_file():
+                    rel = item.relative_to(idx_backup)
+                    target = data_root / idx_dir_name / rel
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(str(item), str(target))
+
+    # 重载引擎以拾取恢复的数据
+    try:
+        reload_engine()
+    except Exception:
+        pass  # 恢复数据成功即可，引擎重载失败不影响
+
+    return {
+        "success": True,
+        "restored": True,
+        "memories_count": memories_count,
+        "backup_path": str(backup_path),
+    }
 
 
 # ==================== mem0 兼容 API ====================
@@ -5265,3 +6032,718 @@ async def mem0_delete(memory_id: str, user_id: str = Query(default="default")):
     engine = get_engine()
     success = engine.delete(memory_id, user_id=user_id)
     return {"success": success}
+
+
+# ==================== v7.3 Topic Cluster API ====================
+
+@app.get("/v1/topics", tags=["Topics"])
+async def list_topics(
+    user_id: str = Query(default="default", description="用户ID"),
+):
+    """获取所有主题标签及统计信息（v7.3）"""
+    try:
+        from recall.processor.topic_cluster import TopicCluster
+        engine = get_engine()
+        # 尝试使用引擎上的 topic_cluster 实例
+        tc: Optional[TopicCluster] = getattr(engine, 'topic_cluster', None)
+        if tc is None:
+            # 临时构造一个（只读）
+            import os
+            tc = TopicCluster(data_path=os.path.join(engine.data_root, 'data'))
+        topics = tc.get_all_topics(user_id=user_id)
+        return {
+            "topics": [t.to_dict() for t in topics],
+            "count": len(topics),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取主题列表失败: {str(e)}")
+
+
+@app.get("/v1/topics/{topic_name}/memories", tags=["Topics"])
+async def get_topic_memories(
+    topic_name: str,
+    user_id: str = Query(default="default", description="用户ID"),
+    limit: int = Query(default=50, ge=1, le=500, description="最大返回数"),
+):
+    """获取某个主题下的所有记忆（v7.3）"""
+    try:
+        from recall.processor.topic_cluster import TopicCluster
+        engine = get_engine()
+        tc: Optional[TopicCluster] = getattr(engine, 'topic_cluster', None)
+        if tc is None:
+            import os
+            tc = TopicCluster(
+                data_path=os.path.join(engine.data_root, 'data'),
+            )
+        memories = tc.search_by_topic(
+            topic=topic_name,
+            engine=engine,
+            user_id=user_id,
+            limit=limit,
+        )
+        return {
+            "topic": topic_name,
+            "memories": memories,
+            "count": len(memories),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"主题搜索失败: {str(e)}")
+
+
+# ==================== v7.3 Event Chain API ====================
+
+@app.get("/v1/events/chain/{memory_id}", tags=["Events"])
+async def get_event_chain(
+    memory_id: str,
+    user_id: str = Query(default="default", description="用户ID"),
+    max_depth: int = Query(default=10, ge=1, le=20, description="最大遍历深度"),
+    max_nodes: int = Query(default=200, ge=1, le=500, description="最大节点数"),
+):
+    """获取事件因果链（v7.3）
+    
+    从指定记忆出发，BFS 遍历图谱中的 CAUSED/FOLLOWS/RELATED_TO 关系，
+    返回因果链的树形结构。
+    """
+    try:
+        from recall.processor.event_linker import EventLinker
+        engine = get_engine()
+        linker = EventLinker()
+        roots = linker.get_event_chain(
+            event_id=memory_id,
+            engine=engine,
+            user_id=user_id,
+            max_depth=max_depth,
+            max_nodes=max_nodes,
+        )
+        # 序列化
+        chain_data = [r.to_dict() for r in roots]
+        total_nodes = sum(len(r.flatten()) for r in roots)
+        return {
+            "memory_id": memory_id,
+            "chain": chain_data,
+            "total_nodes": total_nodes,
+            "max_depth": max_depth,
+        }
+    except Exception as e:
+        import traceback
+        _safe_print(f"[Recall][EventChain] 获取因果链失败: {e}")
+        _safe_print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"获取因果链失败: {str(e)}")
+
+
+# ==================== Phase 7.4: Consolidation Admin API ====================
+
+@app.post("/v1/admin/consolidate", tags=["Admin"])
+async def admin_consolidate(
+    user_id: str = Query(default="default", description="用户ID"),
+    force: bool = Query(default=False, description="强制执行（忽略阈值检查）"),
+):
+    """触发手动记忆整合（Phase 7.4）
+    
+    双层整合策略：
+    - Hot layer: 生成/更新实体结构化摘要
+    - Cold layer: 将低重要性记忆标记为归档
+    - importance >= 0.7 的记忆始终保留在热层
+    
+    触发条件：
+    - 每 1000 条未整合记忆 → 增量更新
+    - 每 5000 条 → 全量重建
+    - force=True → 强制执行
+    """
+    try:
+        from recall.processor.consolidation import ConsolidationManager
+        engine = get_engine()
+        
+        # 获取或创建 ConsolidationManager
+        consolidation_mgr: Optional[ConsolidationManager] = getattr(engine, 'consolidation_manager', None)
+        if consolidation_mgr is None:
+            import os
+            consolidation_mgr = ConsolidationManager(
+                data_path=os.path.join(engine.data_root, 'data')
+            )
+        
+        result = consolidation_mgr.consolidate(
+            engine=engine,
+            force=force,
+            user_id=user_id,
+        )
+        
+        return {
+            "status": "completed" if not result.errors else "completed_with_errors",
+            "result": result.to_dict(),
+        }
+    except Exception as e:
+        import traceback
+        _safe_print(f"[Recall][Consolidation] 整合失败: {e}")
+        _safe_print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"记忆整合失败: {str(e)}")
+
+
+@app.get("/v1/admin/consolidation/status", tags=["Admin"])
+async def admin_consolidation_status():
+    """查看记忆整合状态（Phase 7.4）
+    
+    返回：
+    - total_memories: 总记忆数
+    - unconsolidated_count: 未整合记忆数
+    - entity_summary_count: 实体摘要数
+    - archived_count: 已归档记忆数
+    - last_consolidation_at: 上次整合时间
+    - next_trigger_at: 下次自动触发阈值
+    - is_running: 是否正在整合
+    """
+    try:
+        from recall.processor.consolidation import ConsolidationManager
+        engine = get_engine()
+        
+        consolidation_mgr: Optional[ConsolidationManager] = getattr(engine, 'consolidation_manager', None)
+        if consolidation_mgr is None:
+            import os
+            consolidation_mgr = ConsolidationManager(
+                data_path=os.path.join(engine.data_root, 'data')
+            )
+        
+        status = consolidation_mgr.get_status(engine=engine)
+        return status.to_dict()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取整合状态失败: {str(e)}")
+
+
+@app.get("/v1/admin/consolidation/summaries", tags=["Admin"])
+async def admin_consolidation_summaries():
+    """获取所有实体摘要列表（Phase 7.4）"""
+    try:
+        from recall.processor.consolidation import ConsolidationManager
+        engine = get_engine()
+        
+        consolidation_mgr: Optional[ConsolidationManager] = getattr(engine, 'consolidation_manager', None)
+        if consolidation_mgr is None:
+            import os
+            consolidation_mgr = ConsolidationManager(
+                data_path=os.path.join(engine.data_root, 'data')
+            )
+        
+        summaries = consolidation_mgr.get_all_summaries()
+        return {
+            "count": len(summaries),
+            "summaries": summaries,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取实体摘要失败: {str(e)}")
+
+
+@app.get("/v1/admin/consolidation/summary/{entity_name}", tags=["Admin"])
+async def admin_get_entity_summary(
+    entity_name: str,
+    expand: bool = Query(default=False, description="是否展开到原始记忆"),
+    user_id: str = Query(default="default", description="用户ID"),
+    limit: int = Query(default=50, ge=1, le=500, description="展开时最大返回数"),
+):
+    """获取指定实体的摘要（Phase 7.4）
+    
+    expand=True 时同时返回原始记忆列表
+    """
+    try:
+        from recall.processor.consolidation import ConsolidationManager
+        engine = get_engine()
+        
+        consolidation_mgr: Optional[ConsolidationManager] = getattr(engine, 'consolidation_manager', None)
+        if consolidation_mgr is None:
+            import os
+            consolidation_mgr = ConsolidationManager(
+                data_path=os.path.join(engine.data_root, 'data')
+            )
+        
+        summary_text = consolidation_mgr.get_summary(entity_name)
+        if summary_text is None:
+            raise HTTPException(status_code=404, detail=f"未找到实体 '{entity_name}' 的摘要")
+        
+        response = {
+            "entity_name": entity_name,
+            "summary": summary_text,
+        }
+        
+        if expand:
+            originals = consolidation_mgr.expand_to_original(
+                entity_name=entity_name,
+                engine=engine,
+                user_id=user_id,
+                limit=limit,
+            )
+            response["originals"] = originals
+            response["original_count"] = len(originals)
+        
+        return response
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取实体摘要失败: {str(e)}")
+
+
+# ==================== Phase 7.5.A: Observability Endpoints ====================
+
+@app.get("/metrics", tags=["Observability"])
+async def prometheus_metrics():
+    """Prometheus 文本暴露格式指标（v7.5）"""
+    from starlette.responses import Response
+    from .observability.metrics import get_metrics
+    metrics = get_metrics()
+    return Response(
+        content=metrics.to_prometheus(),
+        media_type="text/plain; version=0.0.4; charset=utf-8",
+    )
+
+
+@app.get("/v1/admin/metrics", tags=["Observability"])
+async def admin_metrics_json():
+    """JSON 格式指标（v7.5）"""
+    from .observability.metrics import get_metrics
+    metrics = get_metrics()
+    return metrics.to_json()
+
+
+# ==================== Phase 7.5.B: Entity Resolution Endpoints ====================
+
+class EntityResolveRequest(BaseModel):
+    names: List[str] = Field(..., description="待解析的实体名列表")
+
+class AddAliasRequest(BaseModel):
+    alias: str = Field(..., description="别名")
+    canonical: str = Field(..., description="规范名")
+
+
+@app.post("/v1/entities/resolve", tags=["Entity Resolution"])
+async def resolve_entities(req: EntityResolveRequest):
+    """实体消解 — 将名称统一为规范形式（v7.5）
+
+    例: ["OpenAI", "openai", "Open AI"] → 全部解析为 "OpenAI"
+    """
+    try:
+        from .processor.entity_resolver import get_entity_resolver
+        engine = get_engine()
+        resolver = get_entity_resolver(
+            data_path=os.path.join(engine.data_root, 'data')
+        )
+        results = []
+        for name in req.names:
+            canonical = resolver.resolve(name)
+            results.append({
+                "original": name,
+                "canonical": canonical,
+                "changed": name.strip() != canonical,
+            })
+        return {
+            "results": results,
+            "count": len(results),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"实体消解失败: {str(e)}")
+
+
+@app.post("/v1/entities/aliases", tags=["Entity Resolution"])
+async def add_entity_alias(req: AddAliasRequest):
+    """添加实体别名映射（v7.5）"""
+    try:
+        from .processor.entity_resolver import get_entity_resolver
+        engine = get_engine()
+        resolver = get_entity_resolver(
+            data_path=os.path.join(engine.data_root, 'data')
+        )
+        success = resolver.add_alias(req.alias, req.canonical)
+        if not success:
+            existing = resolver.get_canonical(req.alias)
+            raise HTTPException(
+                status_code=409,
+                detail=f"别名 '{req.alias}' 已指向 '{existing}'"
+            )
+        return {
+            "alias": req.alias,
+            "canonical": req.canonical,
+            "success": True,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"添加别名失败: {str(e)}")
+
+
+@app.get("/v1/entities/{name}/aliases", tags=["Entity Resolution"])
+async def get_entity_aliases(name: str):
+    """获取实体的规范名和所有别名（v7.5）"""
+    try:
+        from .processor.entity_resolver import get_entity_resolver
+        engine = get_engine()
+        resolver = get_entity_resolver(
+            data_path=os.path.join(engine.data_root, 'data')
+        )
+        canonical = resolver.get_canonical(name)
+        if canonical is None:
+            # 未注册，直接返回自身
+            return {
+                "name": name,
+                "canonical": name,
+                "aliases": [],
+                "registered": False,
+            }
+        aliases = resolver.get_aliases(canonical)
+        return {
+            "name": name,
+            "canonical": canonical,
+            "aliases": aliases,
+            "registered": True,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取别名失败: {str(e)}")
+
+
+@app.get("/v1/entities/resolver/stats", tags=["Entity Resolution"])
+async def entity_resolver_stats():
+    """实体消解器统计信息（v7.5）"""
+    try:
+        from .processor.entity_resolver import get_entity_resolver
+        engine = get_engine()
+        resolver = get_entity_resolver(
+            data_path=os.path.join(engine.data_root, 'data')
+        )
+        return resolver.stats()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取统计信息失败: {str(e)}")
+
+
+# ==================== Phase 7.5.B: Job API Endpoints ====================
+
+class ImportJobRequest(BaseModel):
+    items: List[Dict[str, Any]] = Field(..., description="待导入的记忆列表")
+    user_id: str = Field(default="default", description="用户ID")
+    metadata: Optional[Dict[str, Any]] = Field(default=None, description="任务元数据")
+
+
+@app.post("/v1/jobs/import", tags=["Jobs"])
+async def submit_import_job(req: ImportJobRequest):
+    """提交异步导入任务（v7.5）
+
+    每条 item 格式: { "content": "...", "external_id": "...", "metadata": {...} }
+    返回 job_id, 通过 GET /v1/jobs/{id} 查询进度。
+    """
+    try:
+        from .jobs import get_job_manager
+        engine = get_engine()
+        manager = get_job_manager(
+            data_path=os.path.join(engine.data_root, 'data')
+        )
+        job = manager.submit_import(
+            items=req.items,
+            user_id=req.user_id,
+            engine=engine,
+            metadata=req.metadata,
+        )
+        return job.to_dict()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"提交导入任务失败: {str(e)}")
+
+
+@app.get("/v1/jobs", tags=["Jobs"])
+async def list_jobs(
+    offset: int = Query(default=0, ge=0, description="偏移量"),
+    limit: int = Query(default=20, ge=1, le=100, description="每页数量"),
+    status: Optional[str] = Query(default=None, description="状态过滤: pending/running/done/failed/partial/cancelled"),
+):
+    """列出所有导入任务（v7.5）"""
+    try:
+        from .jobs import get_job_manager, JobStatus
+        engine = get_engine()
+        manager = get_job_manager(
+            data_path=os.path.join(engine.data_root, 'data')
+        )
+        status_enum = None
+        if status:
+            try:
+                status_enum = JobStatus(status)
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"无效状态: {status}")
+        return manager.list_jobs(offset=offset, limit=limit, status=status_enum)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"列出任务失败: {str(e)}")
+
+
+@app.get("/v1/jobs/{job_id}", tags=["Jobs"])
+async def get_job_status(job_id: str):
+    """查询导入任务状态（v7.5）"""
+    try:
+        from .jobs import get_job_manager
+        engine = get_engine()
+        manager = get_job_manager(
+            data_path=os.path.join(engine.data_root, 'data')
+        )
+        job = manager.get_job(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail=f"任务 {job_id} 未找到")
+        return job.to_dict()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"查询任务失败: {str(e)}")
+
+
+@app.delete("/v1/jobs/{job_id}", tags=["Jobs"])
+async def cancel_job(job_id: str):
+    """取消导入任务（v7.5）"""
+    try:
+        from .jobs import get_job_manager
+        engine = get_engine()
+        manager = get_job_manager(
+            data_path=os.path.join(engine.data_root, 'data')
+        )
+        success = manager.cancel_job(job_id)
+        if not success:
+            job = manager.get_job(job_id)
+            if job is None:
+                raise HTTPException(status_code=404, detail=f"任务 {job_id} 未找到")
+            raise HTTPException(
+                status_code=409,
+                detail=f"无法取消任务 {job_id} (状态: {job.status.value})"
+            )
+        return {"job_id": job_id, "cancelled": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"取消任务失败: {str(e)}")
+
+
+# ==================== Phase 7.5.B: Event Chain API (confidence decay) ====================
+
+@app.get("/v1/events/chain/{memory_id}/decay", tags=["Events"])
+async def get_event_chain_with_decay(
+    memory_id: str,
+    user_id: str = Query(default="default", description="用户ID"),
+    max_depth: int = Query(default=10, ge=1, le=20, description="最大遍历深度"),
+    max_nodes: int = Query(default=200, ge=1, le=500, description="最大节点数"),
+    decay_factor: float = Query(default=0.9, ge=0.1, le=1.0, description="每跳置信度衰减因子"),
+):
+    """获取事件因果链（带置信度衰减, v7.5）
+
+    与 /v1/events/chain/{memory_id} 类似，但对每个节点的置信度
+    按 depth 应用指数衰减: confidence *= decay_factor^depth
+    """
+    try:
+        from recall.processor.event_linker import EventLinker
+        engine = get_engine()
+        linker = EventLinker()
+        roots = linker.get_event_chain(
+            event_id=memory_id,
+            engine=engine,
+            user_id=user_id,
+            max_depth=max_depth,
+            max_nodes=max_nodes,
+        )
+
+        # 应用置信度衰减
+        def apply_decay(nodes, factor):
+            result = []
+            for n in nodes:
+                d = n.to_dict()
+                d["decayed_confidence"] = round(
+                    max(d.get("confidence", 1.0), 0.01) * (factor ** d["depth"]),
+                    4,
+                )
+                if d.get("children"):
+                    d["children"] = apply_decay(n.children, factor)
+                result.append(d)
+            return result
+
+        chain_data = apply_decay(roots, decay_factor)
+        total_nodes = sum(len(r.flatten()) for r in roots)
+        return {
+            "memory_id": memory_id,
+            "chain": chain_data,
+            "total_nodes": total_nodes,
+            "max_depth": max_depth,
+            "decay_factor": decay_factor,
+        }
+    except Exception as e:
+        import traceback
+        _safe_print(f"[Recall][EventChain] 获取衰减因果链失败: {e}")
+        _safe_print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"获取因果链失败: {str(e)}")
+
+
+# ==================== Phase 7.5.C: i18n Endpoint ====================
+
+@app.get("/v1/admin/i18n", tags=["Admin"])
+async def get_i18n_info():
+    """获取 i18n 信息（v7.5）"""
+    from .i18n import get_supported_languages, get_available_keys, DEFAULT_LANG
+    return {
+        "current_lang": _get_config().recall_lang or DEFAULT_LANG,
+        "supported_languages": get_supported_languages(),
+        "translation_keys_count": len(get_available_keys()),
+    }
+
+
+# ==================== Phase 7.5.C: Config Validation Endpoint ====================
+
+@app.get("/v1/admin/config/validate", tags=["Admin"])
+async def validate_config_endpoint():
+    """验证当前配置（v7.5）
+
+    启动时自动运行，也可手动调用。
+    返回 warnings（不 crash）。
+    """
+    try:
+        from .config_validator import validate_config
+        result = validate_config()
+        return result.to_dict()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"配置验证失败: {str(e)}")
+
+
+# ==================== Phase 7.7.A: Redis Cache Endpoints ====================
+
+@app.get("/v1/admin/cache/stats", tags=["Cache"])
+async def cache_stats():
+    """获取缓存统计信息（v7.7）
+
+    返回 L1/L2 命中率、大小等信息。
+    """
+    try:
+        from .cache import get_cache
+        cache = get_cache()
+        if cache is None:
+            return {"enabled": False, "message": "Cache is disabled"}
+        return cache.get_stats()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取缓存统计失败: {str(e)}")
+
+
+@app.post("/v1/admin/cache/invalidate", tags=["Cache"])
+async def cache_invalidate_all():
+    """清除全部缓存（v7.7）"""
+    try:
+        from .cache import get_cache
+        cache = get_cache()
+        if cache is None:
+            return {"enabled": False, "message": "Cache is disabled"}
+        cache.invalidate_all()
+        return {"status": "ok", "message": "All caches invalidated"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"缓存清除失败: {str(e)}")
+
+
+# ==================== Phase 7.7.B: Grafana Dashboard Endpoint ====================
+
+@app.get("/v1/admin/grafana/dashboard", tags=["Observability"])
+async def grafana_dashboard():
+    """返回 Grafana 仪表板 JSON（v7.7）
+
+    可直接导入 Grafana — Import → Paste JSON。
+    """
+    try:
+        import json as _json
+        dashboard_path = os.path.join(
+            os.path.dirname(__file__), 'observability', 'grafana_dashboard.json'
+        )
+        with open(dashboard_path, 'r', encoding='utf-8') as f:
+            dashboard = _json.load(f)
+        return dashboard
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Grafana dashboard JSON not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"加载 Grafana 仪表板失败: {str(e)}")
+
+
+# ==================== Phase 7.7.B: Graph Visualizer Endpoint ====================
+
+@app.get("/v1/admin/graph/visualize", tags=["Observability"])
+async def graph_visualize(
+    user_id: str = Query(default="default", description="用户ID"),
+    namespace: Optional[str] = Query(default=None, description="过滤命名空间"),
+    entity_type: Optional[str] = Query(default=None, description="过滤实体类型"),
+    max_nodes: int = Query(default=200, ge=1, le=1000, description="最大节点数"),
+    max_edges: int = Query(default=500, ge=1, le=2000, description="最大边数"),
+):
+    """知识图谱可视化（v7.7）
+
+    返回交互式 HTML 页面，使用 vis.js 渲染知识图谱。
+    支持搜索、过滤、缩放、拖拽。
+    """
+    from starlette.responses import HTMLResponse
+    try:
+        from .observability.graph_visualizer import extract_graph_data, generate_graph_html
+        engine = get_engine()
+        graph_data = extract_graph_data(
+            engine=engine,
+            user_id=user_id,
+            namespace=namespace,
+            entity_type=entity_type,
+            max_nodes=max_nodes,
+            max_edges=max_edges,
+        )
+        html = generate_graph_html(graph_data)
+        return HTMLResponse(content=html)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"图谱可视化失败: {str(e)}")
+
+
+@app.get("/v1/admin/graph/data", tags=["Observability"])
+async def graph_data_json(
+    user_id: str = Query(default="default", description="用户ID"),
+    namespace: Optional[str] = Query(default=None, description="过滤命名空间"),
+    entity_type: Optional[str] = Query(default=None, description="过滤实体类型"),
+    max_nodes: int = Query(default=200, ge=1, le=1000, description="最大节点数"),
+    max_edges: int = Query(default=500, ge=1, le=2000, description="最大边数"),
+):
+    """知识图谱数据（JSON 格式, v7.7）
+
+    与 /visualize 相同的数据，但返回 JSON 用于自定义前端。
+    """
+    try:
+        from .observability.graph_visualizer import extract_graph_data
+        engine = get_engine()
+        return extract_graph_data(
+            engine=engine,
+            user_id=user_id,
+            namespace=namespace,
+            entity_type=entity_type,
+            max_nodes=max_nodes,
+            max_edges=max_edges,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取图谱数据失败: {str(e)}")
+
+
+# ==================== Phase 7.7.C: Lifecycle Management Endpoint ====================
+
+@app.post("/v1/admin/lifecycle/run", tags=["Admin"])
+async def lifecycle_run():
+    """执行数据生命周期管理（v7.7）
+
+    包含：
+    - 自动归档旧记忆（默认 365 天）
+    - 自动备份数据
+    - 清理临时文件
+    """
+    try:
+        from .lifecycle import LifecycleManager
+        engine = get_engine()
+        mgr = LifecycleManager.from_env(data_root=engine.data_root)
+        result = mgr.run(engine=engine)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"生命周期管理失败: {str(e)}")
+
+
+@app.get("/v1/admin/lifecycle/status", tags=["Admin"])
+async def lifecycle_status():
+    """获取生命周期管理配置状态（v7.7）"""
+    engine = get_engine()
+    _lc_cfg = _get_config()
+    return {
+        "archive_days": _lc_cfg.recall_lifecycle_archive_days,
+        "backup_enabled": _lc_cfg.recall_lifecycle_backup_enabled,
+        "backup_dir": _lc_cfg.recall_lifecycle_backup_dir or os.path.join(engine.data_root, "backups"),
+        "cleanup_temp": _lc_cfg.recall_lifecycle_cleanup_temp,
+        "data_root": engine.data_root,
+    }
+

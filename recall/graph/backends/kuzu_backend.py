@@ -49,12 +49,12 @@ class KuzuGraphBackend(GraphBackend):
         pip install kuzu
     """
     
-    def __init__(self, data_path: str, buffer_pool_size: int = 256):
+    def __init__(self, data_path: str, buffer_pool_size: int = 1024):
         """初始化 Kuzu 后端
         
         Args:
             data_path: 数据库存储路径（目录或数据库文件路径）
-            buffer_pool_size: 缓冲池大小（MB），默认 256MB
+            buffer_pool_size: 缓冲池大小（MB），默认 1024MB
             
         Raises:
             ImportError: 如果 kuzu 未安装
@@ -449,9 +449,18 @@ class KuzuGraphBackend(GraphBackend):
             return False
     
     def close(self):
-        """关闭数据库连接"""
+        """关闭数据库连接
+        
+        Kuzu 没有显式的 close() API，通过删除 Connection 和 Database
+        对象触发底层 C++ 析构函数来释放资源（文件锁、内存映射等）。
+        """
         try:
-            # Kuzu 会自动管理连接
-            pass
-        except Exception:
-            pass
+            if hasattr(self, 'conn') and self.conn is not None:
+                del self.conn
+                self.conn = None
+            if hasattr(self, 'db') and self.db is not None:
+                del self.db
+                self.db = None
+            logger.debug("[KuzuGraphBackend] Connection closed")
+        except Exception as e:
+            logger.warning(f"[KuzuGraphBackend] Error closing connection: {e}")

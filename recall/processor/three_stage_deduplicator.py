@@ -321,7 +321,8 @@ class ThreeStageDeduplicator:
         config: Optional[DedupConfig] = None,
         embedding_backend: Any = None,      # EmbeddingBackend 实例
         llm_client: Any = None,             # LLMClient 实例
-        budget_manager: Any = None          # BudgetManager 实例
+        budget_manager: Any = None,         # BudgetManager 实例
+        prompt_manager: Any = None          # v7.0: PromptManager YAML 模板
     ):
         """初始化去重器
         
@@ -330,11 +331,13 @@ class ThreeStageDeduplicator:
             embedding_backend: Embedding 后端（用于语义匹配）
             llm_client: LLM 客户端（用于边界情况确认）
             budget_manager: 预算管理器
+            prompt_manager: v7.0 PromptManager 实例（可选）
         """
         self.config = config or DedupConfig.default()
         self.embedding_backend = embedding_backend
         self.llm_client = llm_client
         self.budget_manager = budget_manager
+        self.prompt_manager = prompt_manager
         
         # MinHash 和 LSH
         self.minhasher = MinHasher(num_perm=self.config.minhash_num_perm)
@@ -589,10 +592,26 @@ class ThreeStageDeduplicator:
             candidate = candidates[0]
             
             try:
-                prompt = self.DEDUP_PROMPT.format(
-                    item_a=f"{item.name}: {item.content[:100]}" if item.content else item.name,
-                    item_b=f"{candidate.name}: {candidate.content[:100]}" if candidate.content else candidate.name
-                )
+                # v7.0: 优先使用 PromptManager YAML 模板
+                item_a_str = f"{item.name}: {item.content[:100]}" if item.content else item.name
+                item_b_str = f"{candidate.name}: {candidate.content[:100]}" if candidate.content else candidate.name
+                
+                prompt = None
+                if self.prompt_manager:
+                    try:
+                        prompt = self.prompt_manager.render(
+                            'contradiction_detection',
+                            item_a=item_a_str,
+                            item_b=item_b_str
+                        )
+                    except Exception:
+                        pass
+                
+                if prompt is None:
+                    prompt = self.DEDUP_PROMPT.format(
+                        item_a=item_a_str,
+                        item_b=item_b_str
+                    )
                 
                 # 从环境变量读取配置的最大 tokens（去重确认通常只需要很少）
                 import os

@@ -8,8 +8,9 @@ import sys
 # 切换到项目根目录
 os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# 目标配置值 (v4.2)
+# 目标配置值 (v7.0)
 TARGET_CONFIGS = {
+    'RECALL_MODE': 'universal',
     'FORESHADOWING_LLM_ENABLED': 'true',
     'ELEVEN_LAYER_RETRIEVER_ENABLED': 'true',
     'RETRIEVAL_L10_CROSS_ENCODER_ENABLED': 'true',
@@ -20,25 +21,23 @@ TARGET_CONFIGS = {
     'ENTITY_SUMMARY_ENABLED': 'true',
 }
 
-# v4.2 性能优化配置 (新增)
-V42_CONFIGS = {
+# v7.0 性能优化配置
+V70_CONFIGS = {
     'EMBEDDING_REUSE_ENABLED': 'true',
     'UNIFIED_ANALYZER_ENABLED': 'true',
     'UNIFIED_ANALYSIS_MAX_TOKENS': '4000',
     'TURN_API_ENABLED': 'true',
+    'SMART_EXTRACTOR_MODE': 'RULES',
 }
 
 def check_template_files():
     """检查配置模板文件"""
     template_files = [
         'recall/server.py',
-        'start.ps1', 
-        'start.sh',
-        'manage.ps1',
-        'manage.sh'
+        'recall/config_template.env',
     ]
     
-    print('\n📋 1. 配置模板文件检查 (8个目标配置)')
+    print('\n📋 1. 配置模板文件检查 ({0}个目标配置)'.format(len(TARGET_CONFIGS) + len(V70_CONFIGS)))
     print('-' * 50)
     
     all_ok = True
@@ -47,9 +46,9 @@ def check_template_files():
             content = f.read()
         
         issues = []
-        for key, expected_value in TARGET_CONFIGS.items():
+        for key, expected_value in {**TARGET_CONFIGS, **V70_CONFIGS}.items():
             # 匹配行首的配置定义 (排除中文说明中的文本)
-            pattern = rf'^{key}=(true|false|llm|rules|hybrid)\s*$'
+            pattern = rf'^{key}=(\S+)\s*$'
             matches = re.findall(pattern, content, re.MULTILINE | re.IGNORECASE)
             if matches:
                 for val in matches:
@@ -116,21 +115,18 @@ def check_python_defaults():
     return all_ok
 
 
-def check_v42_configs():
-    """检查 v4.2 性能优化配置同步"""
-    print('\n📋 2.5 v4.2 性能优化配置同步检查')
+def check_v70_configs():
+    """检查 v7.0 配置同步"""
+    print('\n📋 2.5 v7.0 性能优化配置同步检查')
     print('-' * 50)
     
-    # 需要检查的文件位置
+    # 需要检查的文件位置（模板已统一到 recall/config_template.env）
     check_locations = {
         'server.py SUPPORTED_CONFIG_KEYS': 'recall/server.py',
         'server.py 默认配置模板': 'recall/server.py',
+        'config_template.env 统一模板': 'recall/config_template.env',
         'start.ps1 supportedKeys': 'start.ps1',
-        'start.ps1 defaultConfig': 'start.ps1',
         'start.sh supported_keys': 'start.sh',
-        'start.sh heredoc 模板': 'start.sh',
-        'manage.ps1 defaultConfig': 'manage.ps1',
-        'manage.sh heredoc 模板': 'manage.sh',
     }
     
     all_ok = True
@@ -140,25 +136,25 @@ def check_v42_configs():
         
         found = []
         missing = []
-        for key in V42_CONFIGS.keys():
+        for key in V70_CONFIGS.keys():
             if key in content:
                 found.append(key)
             else:
                 missing.append(key)
         
-        if len(found) == len(V42_CONFIGS):
-            print(f'✅ {name}: {len(found)}/{len(V42_CONFIGS)} 配置项')
+        if len(found) == len(V70_CONFIGS):
+            print(f'✅ {name}: {len(found)}/{len(V70_CONFIGS)} 配置项')
         else:
-            print(f'❌ {name}: {len(found)}/{len(V42_CONFIGS)} 配置项')
+            print(f'❌ {name}: {len(found)}/{len(V70_CONFIGS)} 配置项')
             print(f'   缺少: {missing}')
             all_ok = False
     
     # 检查配置是否被注释掉（关键检查！）
     print()
-    print('   v4.2 配置注释检查（确保配置未被 # 注释）:')
+    print('   v7.0 配置注释检查（确保配置未被 # 注释）:')
     
     v42_active_configs = ['EMBEDDING_REUSE_ENABLED', 'UNIFIED_ANALYZER_ENABLED', 'TURN_API_ENABLED']
-    template_files = ['recall/server.py', 'start.ps1', 'start.sh', 'manage.ps1', 'manage.sh']
+    template_files = ['recall/server.py', 'recall/config_template.env']
     
     for filepath in template_files:
         with open(filepath, 'r', encoding='utf-8') as f:
@@ -182,7 +178,7 @@ def check_v42_configs():
             print(f'   ❌ {filepath}: 以下配置被注释: {commented_configs}')
             all_ok = False
         elif len(active_configs) == len(v42_active_configs):
-            print(f'   ✅ {filepath}: 所有 v4.2 配置已启用')
+            print(f'   ✅ {filepath}: 所有 v7.0 配置已启用')
         else:
             missing = set(v42_active_configs) - set(active_configs)
             if missing:
@@ -190,10 +186,10 @@ def check_v42_configs():
     
     # 检查 Python 代码中的默认值
     print()
-    print('   v4.2 Python 默认值检查:')
+    print('   v7.0 Python 默认值检查:')
     
     v42_python_checks = [
-        ('recall/engine.py', 'EMBEDDING_REUSE_ENABLED', 'true'),
+        ('recall/memory_ops.py', 'EMBEDDING_REUSE_ENABLED', 'true'),
         ('recall/engine.py', 'UNIFIED_ANALYZER_ENABLED', 'true'),
         ('recall/processor/unified_analyzer.py', 'UNIFIED_ANALYSIS_MAX_TOKENS', '4000'),
         ('recall/server.py', 'TURN_API_ENABLED', 'true'),
@@ -209,12 +205,21 @@ def check_v42_configs():
             matches = re.findall(pattern, content)
             
             if matches:
-                for _, val in matches:
-                    if val.lower() == expected.lower():
-                        print(f'   ✅ {filepath}: {key}={val}')
-                    else:
-                        print(f'   ❌ {filepath}: {key}={val} (应为 {expected})')
-                        all_ok = False
+                # 过滤掉仅用于日志显示的默认值（如 'not set', 'unknown' 等）
+                real_matches = [(k, v) for k, v in matches if v.lower() not in ('not set', 'unknown', 'n/a')]
+                log_matches = [(k, v) for k, v in matches if v.lower() in ('not set', 'unknown', 'n/a')]
+                
+                if real_matches:
+                    for _, val in real_matches:
+                        if val.lower() == expected.lower():
+                            print(f'   ✅ {filepath}: {key}={val}')
+                        else:
+                            print(f'   ❌ {filepath}: {key}={val} (应为 {expected})')
+                            all_ok = False
+                elif log_matches:
+                    print(f'   ⚠️  {filepath}: {key} 仅在日志中引用，无实际默认值')
+                else:
+                    print(f'   ⚠️  {filepath}: {key} 未找到默认值定义')
             else:
                 # 尝试匹配 int(os.environ.get(...)) 模式
                 int_pattern = rf"int\s*\(\s*os\.environ\.get\s*\(\s*['\"]({key})['\"],\s*['\"]([^'\"]+)['\"]"
@@ -336,12 +341,12 @@ def check_hot_reload():
 
 def main():
     print('=' * 70)
-    print('配置同步最终验证报告 (v4.2)')
+    print('配置同步最终验证报告 (v7.0)')
     print('=' * 70)
     
     t1 = check_template_files()
     t2 = check_python_defaults()
-    t2_5 = check_v42_configs()  # v4.2 新增
+    t2_5 = check_v70_configs()  # v7.0
     t3 = check_script_parity()
     check_hot_reload()
     

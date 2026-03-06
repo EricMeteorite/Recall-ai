@@ -41,6 +41,23 @@ from .unified_analyzer import (
     AnalysisTask
 )
 
+# === Recall 7.0 新增: 文档分块器 ===
+from .document_chunker import (
+    chunk as document_chunk,
+    needs_chunking,
+    detect_source_type,
+    ChunkResult,
+    SourceType,
+)
+
+# === Recall 7.3 新增: 时间意图解析 / 事件关联 / 主题聚类 ===
+from .time_intent_parser import TimeIntentParser, TimeRange
+from .event_linker import EventLinker, EventLink, ChainNode
+from .topic_cluster import TopicCluster, TopicInfo, TopicStore
+
+# === Recall 7.0.1 新增: 实体消歧 ===
+from .entity_resolver import EntityResolver
+
 __all__ = [
     'EntityExtractor',
     'ExtractedEntity',
@@ -85,4 +102,24 @@ __all__ = [
     'UnifiedAnalysisInput',
     'UnifiedAnalysisResult',
     'AnalysisTask',
+    
+    # === Recall 7.0 文档分块器导出 ===
+    'document_chunk',
+    'needs_chunking',
+    'detect_source_type',
+    'ChunkResult',
+    'SourceType',
+
+    # === Recall 7.3 新增导出 ===
+    'TimeIntentParser',
+    'TimeRange',
+    'EventLinker',
+    'EventLink',
+    'ChainNode',
+    'TopicCluster',
+    'TopicInfo',
+    'TopicStore',
+
+    # === Recall 7.0.1 新增导出 ===
+    'EntityResolver',
 ]

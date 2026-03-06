@@ -195,7 +195,7 @@ def _create_kuzu_backend(data_path: str) -> GraphBackend:
         
         # Kuzu 后端使用子目录
         kuzu_data_path = os.path.join(data_path, "kuzu")
-        buffer_pool_size = int(os.environ.get("KUZU_BUFFER_POOL_SIZE", "256"))
+        buffer_pool_size = int(os.environ.get("KUZU_BUFFER_POOL_SIZE", "1024"))
         
         return KuzuGraphBackend(kuzu_data_path, buffer_pool_size=buffer_pool_size)
     except ImportError as e:

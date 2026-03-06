@@ -22,36 +22,129 @@ class IndexedEntity:
 
 
 class EntityIndex:
-    """实体索引"""
+    """实体索引
+    
+    v7.0.3: WAL 增量写入模式
+    - 每次 add/update 只追加到 WAL 文件（entity_index.wal.jsonl）
+    - 通过脏标记控制全量快照频率（每 100 次变更或 flush 时执行）
+    - 启动时先加载快照再回放 WAL
+    - 快照使用原子写入保护
+    """
+    
+    WAL_COMPACT_THRESHOLD = 100  # 每 100 次变更后合并 WAL 到快照
     
     def __init__(self, data_path: str):
         self.data_path = data_path
         self.index_dir = os.path.join(data_path, 'indexes')
         self.index_file = os.path.join(self.index_dir, 'entity_index.json')
+        self._wal_file = os.path.join(self.index_dir, 'entity_index.wal.jsonl')
         
         # 内存索引
         self.entities: Dict[str, IndexedEntity] = {}   # id → entity
         self.name_index: Dict[str, str] = {}           # name/alias → id
+        self._dirty: bool = False
+        self._wal_count: int = 0  # WAL 中未合并的变更数
         
         self._load()
+        
+        # v7.0.10: atexit 注册 — 进程退出时确保 WAL 被合并到快照
+        import atexit
+        atexit.register(self._shutdown_flush)
     
     def _load(self):
-        """加载索引"""
+        """加载索引：先加载快照，再回放 WAL"""
+        # 1. 加载快照
         if os.path.exists(self.index_file):
-            with open(self.index_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                for item in data:
-                    entity = IndexedEntity(**item)
-                    self.entities[entity.id] = entity
-                    self.name_index[entity.name.lower()] = entity.id
-                    for alias in entity.aliases:
-                        self.name_index[alias.lower()] = entity.id
+            try:
+                with open(self.index_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    for item in data:
+                        entity = IndexedEntity(**item)
+                        self.entities[entity.id] = entity
+                        self.name_index[entity.name.lower()] = entity.id
+                        for alias in entity.aliases:
+                            self.name_index[alias.lower()] = entity.id
+            except Exception:
+                pass
+        
+        # 2. 回放 WAL（追加在快照之后的增量变更）
+        if os.path.exists(self._wal_file):
+            wal_entries = 0
+            try:
+                with open(self._wal_file, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            item = json.loads(line)
+                            entity = IndexedEntity(**item)
+                            self.entities[entity.id] = entity
+                            self.name_index[entity.name.lower()] = entity.id
+                            for alias in entity.aliases:
+                                self.name_index[alias.lower()] = entity.id
+                            wal_entries += 1
+                        except (json.JSONDecodeError, TypeError):
+                            continue
+            except Exception:
+                pass
+            # WAL 有内容说明需要合并
+            if wal_entries > 0:
+                self._dirty = True
+                self._wal_count = wal_entries
     
     def _save(self):
-        """保存索引"""
+        """保存索引（WAL 增量 + 周期性原子快照）
+        
+        v7.0.3: 每次变更只追加 WAL 行（O(1)），
+        累计超过 WAL_COMPACT_THRESHOLD 次变更后执行全量原子快照。
+        """
+        if not self._dirty:
+            return
+        # 如果 WAL 累积足够多，做一次全量快照并清空 WAL
+        if self._wal_count >= self.WAL_COMPACT_THRESHOLD:
+            self._compact()
+    
+    def _shutdown_flush(self):
+        """v7.0.10: 进程退出时强制刷盘（atexit 回调）"""
+        try:
+            if self._dirty:
+                self._compact()
+        except Exception:
+            pass  # atexit 中不抛异常
+    
+    def _append_wal(self, entity: 'IndexedEntity'):
+        """追加单条变更到 WAL 文件（O(1) 操作）"""
+        try:
+            os.makedirs(self.index_dir, exist_ok=True)
+            with open(self._wal_file, 'a', encoding='utf-8') as f:
+                f.write(json.dumps(asdict(entity), ensure_ascii=False) + '\n')
+            self._wal_count += 1
+        except Exception:
+            pass  # WAL 写入失败不影响内存索引
+    
+    def _compact(self):
+        """合并 WAL 到快照：原子写入全量快照，然后清空 WAL"""
+        from recall.utils.atomic_write import atomic_json_dump
         os.makedirs(self.index_dir, exist_ok=True)
-        with open(self.index_file, 'w', encoding='utf-8') as f:
-            json.dump([asdict(e) for e in self.entities.values()], f, ensure_ascii=False)
+        atomic_json_dump([asdict(e) for e in self.entities.values()], self.index_file)
+        # 清空 WAL
+        try:
+            if os.path.exists(self._wal_file):
+                os.remove(self._wal_file)
+        except Exception:
+            pass
+        self._dirty = False
+        self._wal_count = 0
+    
+    def _mark_dirty(self):
+        """标记数据已变更，需要写入"""
+        self._dirty = True
+    
+    def flush(self):
+        """强制将脏数据写入磁盘（执行全量快照 + 清空 WAL）"""
+        if self._dirty:
+            self._compact()
     
     def add(self, entity: IndexedEntity):
         """添加实体"""
@@ -71,7 +164,10 @@ class EntityIndex:
         for alias in entity.aliases:
             self.name_index[alias.lower()] = entity.id
         
-        self._save()
+        self._mark_dirty()
+        # WAL 增量写入：只追加变更行，不做全量快照
+        self._append_wal(self.entities[entity.id])
+        self._save()  # 检查是否需要 compact
     
     def get_by_name(self, name: str) -> Optional[IndexedEntity]:
         """通过名称或别名查找"""
@@ -143,7 +239,9 @@ class EntityIndex:
             # 更新置信度（取较高值）
             if confidence > existing.confidence:
                 existing.confidence = confidence
-            self._save()
+            self._mark_dirty()
+            self._append_wal(existing)
+            self._save()  # 检查是否需要 compact
         else:
             # 创建新实体
             import uuid
@@ -208,16 +306,18 @@ class EntityIndex:
         # 删除无引用的实体
         for entity_id in entities_to_delete:
             entity = self.entities[entity_id]
-            # 清理名称索引
-            if entity.name.lower() in self.name_index:
+            # v7.0.6: 清理名称索引时，必须校验索引条目确实指向本实体
+            # （之前直接 del，会误删共享同名/别名的其他实体的索引条目）
+            if self.name_index.get(entity.name.lower()) == entity_id:
                 del self.name_index[entity.name.lower()]
             for alias in entity.aliases:
-                if alias.lower() in self.name_index:
+                if self.name_index.get(alias.lower()) == entity_id:
                     del self.name_index[alias.lower()]
             del self.entities[entity_id]
         
         if entities_to_delete or turn_ids:
-            self._save()
+            self._mark_dirty()
+            self._compact()  # 删除操作直接做全量快照（WAL 不支持删除语义）
         
         return len(entities_to_delete)
     
@@ -225,7 +325,8 @@ class EntityIndex:
         """清空所有实体索引"""
         self.entities.clear()
         self.name_index.clear()
-        self._save()
+        self._mark_dirty()
+        self._compact()  # 清空操作直接做全量快照
     
     # === Recall 4.1 新增方法 ===
     
@@ -258,7 +359,9 @@ class EntityIndex:
         if last_summary_update is not None:
             entity.last_summary_update = last_summary_update
         
-        self._save()
+        self._mark_dirty()
+        self._append_wal(entity)
+        self._save()  # 检查是否需要 compact
         return True
     
     def get_entities_needing_summary(self, min_facts: int = 5) -> List[IndexedEntity]:

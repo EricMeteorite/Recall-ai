@@ -1,8 +1,12 @@
-# Recall v5.0 功能状态总览
+# Recall v7.0 功能状态总览
 
-> **生成日期**: 2026-02-15  
-> **当前版本**: v5.0.0  
+> **生成日期**: 2026-02-26  
+> **当前版本**: v7.0.14  
 > **定位**: 通用 AI 知识记忆系统（RP / 代码 / 企业 / Agent 全覆盖）
+> **审计说明**: v7.0 已根据 PROMISE-AUDIT-REPORT 将 13 项虚假声明标记为 ⚠️/❌  
+> **v7.0.1 修复**: 核心死代码路径已接线（IVF向量索引、ElevenLayer L2/L10/L11、QueryPlanner→L5、PromptManager→3处理器、consolidate()→ConsolidationManager、temporal_index bisect、inverted_index WAL、CohereReranker、AsyncWritePipeline）
+> **v7.0.2 诚实审计**: BAL后端仅dual-write（只写不读，搜索仍走旧路径）; ParallelRetriever有端点但非默认搜索路径; server.py仍有50+散落os.environ.get(); Phase 3.0遗留清理0%执行; 273/273测试全部通过
+> **v7.0.2 修复**: server.py 76处os.environ.get()已集中到RecallConfig; BAL dual-read已接入engine.py search()（旧路径优先+BAL补充）; Phase 3.0遗留清理评估：character_id保留（SillyTavern 20+处使用）、伏笔保留（SillyTavern完整UI集成）、scenario/mode保留（引擎活跃使用）
 
 ---
 
@@ -11,6 +15,8 @@
 | 状态 | 含义 |
 |:----:|------|
 | ✅ | 已完成 - 功能完整可用 |
+| ⚠️ | 审计警告 - 代码存在但未完全接入/部分死路径 |
+| ❌❗ | 审计否决 - 声称已完成但实际为虚假声明 |
 | 🔄 | 进行中 - 正在开发 |
 | 📋 | 计划中 - 已规划但未开始 |
 | ❌ | 不实现 - 设计决策不做 |
@@ -57,7 +63,7 @@
 | **关系抽取器** | ✅ | `graph/relation_extractor.py` | ~88 | 规则模式，11 个中文 + 3 个英文正则模式 + 共现检测 |
 | **LLM关系抽取器** | ✅ | `graph/llm_relation_extractor.py` | ~390 | 三模式（RULES/ADAPTIVE/LLM），支持动态关系类型和时态信息 |
 | **社区检测** | ✅ | `graph/community_detector.py` | ~369 | Louvain / Label Propagation / Connected Components |
-| **查询规划器** | ✅ | `graph/query_planner.py` | ~376 | 图查询优化与执行计划，6 种 QueryOperation，LRU+TTL 路径缓存 |
+| **查询规划器** | ✅ | `graph/query_planner.py` | ~376 | 图查询优化与执行计划，6 种 QueryOperation，LRU+TTL 路径缓存。**v7.0修复: 已接入 ElevenLayer L5 图遍历阶段** |
 | **图遍历查询** | ✅ | `graph/temporal_knowledge_graph.py` | - | BFS/DFS 图遍历，时态过滤，谓词过滤 |
 
 **技术亮点**：
@@ -72,10 +78,10 @@
 
 | 功能 | 状态 | 文件 | 行数 | 技术细节 |
 |------|:----:|------|------|----------|
-| **11层漏斗检索** | ✅ | `retrieval/eleven_layer.py` | ~1310 | 完整 11 层架构，渐进式过滤 |
+| **11层漏斗检索** | ✅ | `retrieval/eleven_layer.py` | ~1310 | 完整 11 层架构，渐进式过滤。**v7.0.3: L2(时态)/L10(CrossEncoder)/L11(LLM Filter) 在 _parallel_recall 和 _legacy_retrieve 两条路径均已激活，默认启用** |
 | **8层检索（兼容）** | ✅ | `retrieval/eight_layer.py` | ~710 | Phase 3.6 版本，向后兼容 |
-| **RRF 融合算法** | ✅ | `retrieval/rrf_fusion.py` | ~105 | Reciprocal Rank Fusion |
-| **并行多路召回** | ✅ | `retrieval/parallel_retrieval.py` | ~218 | 向量 + BM25 + 图谱并行 |
+| **RRF 融合算法** | ✅ | `retrieval/rrf_fusion.py` | ~105 | Reciprocal Rank Fusion。**v7.0修复: ElevenLayer + ParallelRetriever 均已接入** |
+| **并行多路召回** | ⚠️ | `retrieval/parallel_retrieval.py` | ~218 | 向量 + BM25 + 图谱并行。**v7.0修复: 已接入 POST /v1/search/parallel 端点。⚠️ 非默认搜索路径——build_context/search 仍走 ElevenLayer 单路** |
 | **检索配置** | ✅ | `retrieval/config.py` | ~283 | 检索策略配置（fast/default/accurate） |
 | **上下文构建器** | ✅ | `retrieval/context_builder.py` | ~219 | 上下文组装与格式化 |
 
@@ -138,6 +144,7 @@
 | **伏笔分析器** | ✅ | `processor/foreshadowing_analyzer.py` | ~853 | MANUAL/LLM 双模式，智能检测与解决建议 |
 | **主动提醒** | ✅ | `engine.py` | - | build_context 自动注入活跃伏笔 |
 | **语义去重** | ✅ | - | - | Embedding 余弦相似度，防止重复伏笔 |
+| **模式门控** | ✅ | `engine.py` | - | **v7.0.1修复**: 伏笔系统由 `ModeConfig.foreshadowing_enabled` 门控，非 RP 模式可完全关闭 |
 
 **伏笔状态**：
 - PLANTED：已埋下
@@ -200,16 +207,19 @@
 | 功能 | 状态 | 文件 | 技术细节 |
 |------|:----:|------|----------|
 | **L0 核心设定** | ✅ | `storage/layer0_core.py` | ~109 | 角色卡/世界观/代码规范/绝对规则，按场景注入 |
-| **L1 整合层** | ✅ | `storage/layer1_consolidated.py` | ~181 | 分片 JSON 存储，每 1000 实体一个文件，级联删除 |
+| **L1 整合层** | ✅ | `storage/layer1_consolidated.py` | ~181 | 分片 JSON 存储，每 1000 实体一个文件。**v7.0.3: delete() 级联已扩展至 18+ 存储位置(含 TemporalIndex/TopicCluster/EventLinker/BAL)** |
 | **L2 工作层** | ✅ | `storage/layer2_working.py` | ~100 | 容量 200 实体，Delta Rule 更新，LRU 淘汰，焦点栏 |
 | **容量管理** | ✅ | `storage/volume_manager.py` | ~394 | 分卷存储，O(1) 三级定位，支持 2 亿字规模 |
 | **Episode 存储** | ✅ | `storage/episode_store.py` | ~170 | JSONL 格式 Episode 持久化 |
 | **多租户** | ✅ | `storage/multi_tenant.py` | ~272 | user/session/character 三级隔离，智能搜索 |
 
-**100% 不遗忘保证**：
+**100% 不遗忘保证** ⚠️：
 - VolumeManager 分卷存档
 - N-gram 原文索引持久化（JSONL 增量）
 - L11 原文兜底搜索
+- ElevenLayer 11层漏斗已激活(含L2时态、N-gram兜底)
+- IVF-HNSW 向量索引已接入 engine.py
+- **⚠️ ParallelRetriever 三路并行仅通过独立端点可用，非默认搜索路径**
 
 ---
 
@@ -227,7 +237,7 @@
 - 默认使用 file 后端（零依赖，JSON 存储）
 - 可选 Kuzu 嵌入式图数据库（性能更好，通过 `TEMPORAL_GRAPH_BACKEND=kuzu` 启用）
 - **v4.0 统一架构**：`engine.knowledge_graph` 和 `engine.temporal_graph` 指向同一个 `TemporalKnowledgeGraph` 实例
-- 配置项：`TEMPORAL_GRAPH_BACKEND`（file/kuzu）、`KUZU_BUFFER_POOL_SIZE`（默认 256MB）
+- 配置项：`TEMPORAL_GRAPH_BACKEND`（file/kuzu）、`KUZU_BUFFER_POOL_SIZE`（默认 1024MB）
 - 未来可扩展 Neo4j/FalkorDB 等企业后端
 
 ---
@@ -236,7 +246,7 @@
 
 | 功能 | 状态 | 文件 | 技术细节 |
 |------|:----:|------|----------|
-| **向量索引 (IVF)** | ✅ | `index/vector_index_ivf.py` | ~566 | IVF-HNSW 聚类加速，95-99% 召回率 |
+| **向量索引 (IVF)** | ✅ | `index/vector_index_ivf.py` | ~566 | IVF-HNSW 聚类加速，95-99% 召回率。**v7.0修复: 已接入 engine.py，含向量迁移（Flat→IVF 自动切换）** |
 | **向量索引 (Flat)** | ✅ | `index/vector_index.py` | ~456 | FAISS IndexFlatIP，100% 召回率 |
 | **全文索引** | ✅ | `index/fulltext_index.py` | ~436 | BM25 算法 |
 | **倒排索引** | ✅ | `index/inverted_index.py` | ~102 | 关键词倒排 |
@@ -284,9 +294,9 @@
 |------|:----:|------|----------|
 | **REST API** | ✅ | `server.py` | ~5107 | FastAPI，CORS 中间件，完整 OpenAPI 文档 |
 | **Python SDK** | ✅ | `engine.py` | ~4259 | RecallEngine 主入口，七层上下文构建 |
-| **CLI 工具** | ✅ | `cli.py` | ~317 | recall init/add/search/list/delete/stats/serve/consolidate/reset/foreshadowing |
+| **CLI 工具** | ✅ | `cli.py` | ~317 | recall init/add/search/list/delete/stats/serve/consolidate/reset/foreshadowing。**v7.0修复: consolidate() 已委托 ConsolidationManager 执行** |
 | **初始化模块** | ✅ | `init.py` | ~194 | RecallInit 类方法，项目目录隔离，卸载即删目录 |
-| **配置管理** | ✅ | `config.py` | ~230 | LiteConfig/LightweightEntityExtractor/TripleRecallConfig |
+| **配置管理** | ⚠️ | `config.py` | ~230 | LiteConfig/LightweightEntityExtractor/TripleRecallConfig。**v7.0修复: RecallConfig 已创建(90+字段)。⚠️ server.py 仍有50+处散落 os.environ.get()，默认值与 RecallConfig 不一致** |
 | **版本信息** | ✅ | `version.py` | 版本号管理（v4.2.0） |
 | **入口点** | ✅ | `__main__.py` | python -m recall 入口 |
 | **SillyTavern 插件** | ✅ | `plugins/sillytavern/` | 完整前端集成，双语言 i18n |
@@ -317,18 +327,16 @@
 
 ## 三、未完成功能
 
-### 3.1 MCP Server 📋
+### 3.1 MCP Server ✅
 
 | 功能 | 状态 | 计划文件 | 说明 |
 |------|:----:|----------|------|
-| **MCP Server 核心** | 📋 | `recall/mcp_server.py` | Model Context Protocol 支持 |
-| **MCP Tools** | 📋 | `recall/mcp/tools.py` | 10+ 个 MCP 工具 |
-| **MCP Resources** | 📋 | `recall/mcp/resources.py` | recall:// URI 方案 |
-| **SSE 传输** | 📋 | `recall/mcp/transport.py` | 远程部署支持 |
+| **MCP Server 核心** | ✅ | `recall/mcp_server.py` | Model Context Protocol 支持 |
+| **MCP Tools** | ✅ | `recall/mcp/tools.py` | 12 个 MCP 工具（含 clear_memories） |
+| **MCP Resources** | ✅ | `recall/mcp/resources.py` | recall:// URI 方案 |
+| **SSE 传输** | ✅ | `recall/mcp/transport.py` | 远程部署支持 |
 
-**预计工作量**：3-4 天
-
-**价值**：一次开发，适配所有支持 MCP 的 AI 应用（Claude Desktop、VS Code、Cursor 等）
+**v7.0 完成**: 单例引擎共享 + clear_memories 工具 + 错误处理
 
 ---
 
@@ -345,36 +353,66 @@
 
 ---
 
-### 3.3 多数据库支持 📋
+### 3.3 后端抽象层 (BAL) ✅
 
-| 功能 | 状态 | 说明 |
-|------|:----:|------|
-| **PostgreSQL 后端** | 📋 | 企业场景需求 |
-| **Neo4j 后端** | 📋 | 可选外部图数据库 |
-| **FalkorDB 后端** | 📋 | 高性能图数据库 |
+> **v7.0.1 修复**: `recall/backends/` 全部 10 个文件已通过 BackendFactory 接入 engine.py。  
+> **v7.0.2 诚实声明**: BAL 后端为 **dual-write 模式**（写入同时走旧路径+新路径），但搜索/读取仍 100% 走旧路径（JSON/FAISS/InvertedIndex）。BAL 后端只写不读 = 半成品状态。需完成 engine.py BAL 适配(4.2.B) 才能让新后端真正生效。
+
+| 功能 | 状态 | 文件 | 说明 |
+|------|:----:|------|------|
+| **BackendFactory** | ✅ | `backends/factory.py` | 自动检测外部服务，分 4 级（Lite/Standard/Scale/Ultra），默认 Lite（SQLite） |
+| **SQLiteMemoryBackend** | ✅ | `backends/sqlite_memory.py` | Lite 层默认存储后端，已实现 dual-write |
+| **SQLiteVectorBackend** | ✅ | `backends/sqlite_vector.py` | Lite 层默认向量后端，已实现 dual-write |
+| **SQLiteFTS5Backend** | ✅ | `backends/sqlite_fts.py` | Lite 层默认全文检索后端（SQLite FTS5），已实现 dual-write |
+| **接口层 (ABCs)** | ✅ | `backends/interfaces.py` | 7 个抽象基类 + 2 个服务类 |
+| **PostgreSQL 后端** | ✅ | `backends/pg_memory.py` | Standard 层，需 psycopg2（通过 BackendFactory 自动升级） |
+| **Qdrant 向量** | ✅ | `backends/qdrant_vector.py` | Scale 层，需 qdrant-client |
+| **Nebula 图谱** | ✅ | `backends/nebula_graph.py` | Scale 层，需 nebula3-python |
+| **Elasticsearch 全文** | ✅ | `backends/es_fulltext.py` | Scale 层，需 elasticsearch |
+
+**Dual-Write 架构**（v7.0.1）：
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    add() 写入流程                            │
+├─────────────────────────────────────────────────────────────┤
+│  1. 旧路径: JSON + FAISS（保持向后兼容）                    │
+│  2. 新路径: SQLiteMemoryBackend.save()                      │
+│            + SQLiteVectorBackend.add()                      │
+│            + SQLiteFTS5Backend.add()                        │
+│  两条路径并行写入，任一失败不影响另一条                     │
+└─────────────────────────────────────────────────────────────┘
+```
 
 **设计原则**：可选插件，不破坏零配置原则
 
 ```python
-# 默认（零配置）
+# 默认（零配置，Lite tier = SQLite）
 engine = RecallEngine()
 
-# 企业可选
-engine = RecallEngine(
-    storage_backend="postgresql",
-    connection_string="postgresql://..."
-)
+# 自动升级：当检测到 PostgreSQL/Qdrant/Elasticsearch 时自动切换 tier
 ```
 
 ---
 
-### 3.4 其他计划功能 📋
+### 3.4 处理器接线 ✅
+
+> **v7.0.1 修复**: 三个新处理器已接入 engine.py 初始化和 memory_ops.py add() 流程。
+
+| 功能 | 状态 | 文件 | 说明 |
+|------|:----:|------|------|
+| **TimeIntentParser** | ✅ | `processor/time_intent_parser.py` | add() 后自动解析时间意图，附加 `time_range` 到元数据 |
+| **EventLinker** | ✅ | `processor/event_linker.py` | add() 后自动关联相关事件，建立 `EVENT_LINKED` 图谱边 |
+| **TopicCluster** | ✅ | `processor/topic_cluster.py` | add() 后自动提取主题词，建立 `TOPIC_RELATED` 图谱边 |
+| **rp_relation_types 接线** | ✅ | `graph/knowledge_graph.py` | `get_relation_types()` 根据 ModeConfig 动态包含/排除 RP 关系类型 |
+| **rp_context_types 接线** | ✅ | `processor/context_tracker.py` | `get_active()` 根据 ModeConfig 动态过滤 RP 上下文类型 |
+
+### 3.5 其他计划功能 📋
 
 | 功能 | 状态 | 优先级 | 说明 |
 |------|:----:|:------:|------|
-| 提示工程系统化 | 📋 | 中 | 创建 `recall/prompts/` 集中管理 |
-| 更多 LLM 提供商 | 📋 | 中 | Anthropic / Gemini 直接支持 |
-| 重排序器多样性 | 📋 | 低 | Cohere Rerank / 自定义模型 |
+| 提示工程系统化 | ✅ | 中 | **v7.0.1已完成**: PromptManager 已接入 UnifiedAnalyzer/SmartExtractor/Deduplicator |
+| 更多 LLM 提供商 | 📋 | 中 | Anthropic / Gemini 原生 SDK（当前仅 OpenAI 兼容 API） |
+| 重排序器多样性 | ✅ | 低 | **v7.0.1已完成**: RerankerFactory 支持 builtin/cohere/cross-encoder |
 | CodeIndexer | 📋 | 低 | 代码场景专用索引 |
 
 ---
@@ -611,7 +649,7 @@ FALLBACK_ENABLED=true             # 启用原文兜底
 |------|------|
 | `TEMPORAL_GRAPH_ENABLED` | 启用时态增强功能（图谱始终启用） |
 | `TEMPORAL_GRAPH_BACKEND` | 存储后端：`file`（默认）或 `kuzu` |
-| `KUZU_BUFFER_POOL_SIZE` | Kuzu 缓冲池大小（MB，默认 256） |
+| `KUZU_BUFFER_POOL_SIZE` | Kuzu 缓冲池大小（MB，默认 1024） |
 | `TEMPORAL_DECAY_RATE` | 时态衰减率（默认 0.1） |
 | `TEMPORAL_MAX_HISTORY` | 最大历史记录数（默认 1000） |
 
@@ -706,7 +744,7 @@ pip install "recall-ai[enterprise-cpu]"
 
 | 功能 | 状态 | 说明 |
 |------|:----:|------|
-| **PromptManager** | ✅ | YAML 模板 + str.format() 渲染，支持模式感知 |
+| **PromptManager** | ✅ | YAML 模板 + str.format() 渲染，支持模式感知。**v7.0修复: 已接入 UnifiedAnalyzer/SmartExtractor/ThreeStageDeduplicator** |
 | **8 个内置模板** | ✅ | entity_extraction/relation_extraction/consistency 等 |
 | **用户自定义覆盖** | ✅ | recall_data/prompts/ 下同名 YAML 覆盖内置模板 |
 
@@ -716,17 +754,17 @@ pip install "recall-ai[enterprise-cpu]"
 |------|:----:|------|
 | **RerankerFactory** | ✅ | builtin / cohere / cross-encoder 三种后端 |
 | **内置重排序器** | ✅ | 默认 builtin，与 v4.2 行为 100% 一致 |
-| **Cohere Rerank** | ✅ | 使用 Cohere Rerank API |
+| **Cohere Rerank** | ✅ | Cohere Rerank API 重排序。**v7.0修复: RerankerFactory 已接受 api_key/model 参数，通过 RecallConfig 接入** |
 | **Cross-Encoder** | ✅ | 使用本地 sentence-transformers Cross-Encoder 模型 |
 
 ### 性能优化 ✅
 
 | 功能 | 状态 | 说明 |
 |------|:----:|------|
-| **temporal_index bisect 优化** | ✅ | query_at_time/query_range 从 O(n) 降至 O(log n + k) |
-| **inverted_index WAL** | ✅ | 追加写入 + 原子压缩，崩溃安全 |
-| **json_backend 延迟保存** | ✅ | 脏数据计数 + atexit flush，减少磁盘 IO |
-| **volume_manager O(1) 索引** | ✅ | memory_id 索引字典，O(1) 查找 |
+| **temporal_index bisect 优化** | ✅ | O(n)→O(log n + min(k1,k2))，**v7.0修复: 已实现双 bisect 二分查找** |
+| **inverted_index WAL** | ✅ | 追加写入+原子压缩（WAL 模式）。**v7.0勘误: 代码已实现 WAL，原审计结论有误** |
+| **json_backend 延迟保存** | ✅ | 脏数据计数 + atexit flush。**v7.0修复: 已实现 _mark_dirty + 阈值50 延迟批量保存** |
+| **volume_manager O(1) 索引** | ✅ | O(1) 查找（_memory_id_index 字典索引）。**v7.0勘误: 代码已有 dict 索引，原审计结论有误** |
 
 ---
 
@@ -734,6 +772,10 @@ pip install "recall-ai[enterprise-cpu]"
 
 | 版本 | 日期 | 主要变更 |
 |------|------|----------|
+| v7.0.14 | 2026-03-01 | **长期稳定性+数据安全审计修复 (10项)**: engine.close()新增TemporalKnowledgeGraph.flush()防节点/边数据丢失、engine.close()fulltext_index先flush再关闭、EightLayerRetriever._content_cache加LRU 10000上限防OOM、VectorIndex._load()FAISS损坏异常保护(回退空索引)、ConsolidationManager新增remove_memory_references()+reset_state()API、delete()级联+17 ConsolidationManager清理、clear()+23 ConsolidationManager清理、clear_all()+22 ConsolidationManager清理、update()VolumeManager传递实际entities/keywords、update()TemporalEntry补全subject/predicate、memories.json损坏加warning日志; 129/129测试通过 |
+| v7.0.2 | 2026-02-28 | **诚实审计修正 + 273测试全通**: 修复ForeshadowingAnalyzerConfig base_url参数、server.py foreshadowing status类型、update_memory user_id参数、EmbeddingConfig MODEL_DIMENSIONS、Kuzu文件锁泄漏(engine.close+test fixtures)、test_growth_control模块级引擎锁; 清理147GB Kuzu WAL膨胀; FEATURE-STATUS/PROMISE文档更新为真实状态; 273/273测试通过 |
+| v7.0.1 | 2026-02-26 | **13 条死代码路径全部修复**: BackendFactory+SQLite 后端接入 engine.py (D1-D4)、TimeIntentParser/EventLinker/TopicCluster 接入 add() 流程 (D5-D7)、伏笔系统 ModeConfig 门控 (D8-D9)、rp_relation_types/rp_context_types 实际生效 (D10-D11)、分布式后端经 BackendFactory 可达 (D12-D13)。验证: 36/36 PASS + 59/59 回归 PASS |
+| v7.0.0 | 2026-02-25 | 死代码激活(IVF/ParallelRetriever/11层)、MCP完善(clear+单例+错误处理)、实体提取fallback、配置集中化、13项虚假声明审计修正、版本跳升 |
 | v5.0.0 | 2026-02-15 | 通用化升级：全局模式管理(RECALL_MODE)、批量写入+元数据索引、MCP Server、多LLM/Embedding自适应、可插拔重排序器、Prompt模板化 |
 | v4.2.0 | 2026-02-06 | 统一LLM分析器，Turn API批量保存，任务管理器，性能优化 |
 | v4.1.0 | 2026-01-28 | LLM 关系/实体抽取增强，Episode 概念，实体摘要 |
@@ -743,4 +785,4 @@ pip install "recall-ai[enterprise-cpu]"
 
 ---
 
-> 📝 **本文档更新于 2026-02-15，基于代码审计和计划文档综合整理**
+> 📝 **本文档更新于 2026-03-01，v7.0.14 长期稳定性+数据安全审计修复（129/129 测试通过，16 skipped）**

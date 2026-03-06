@@ -24,6 +24,7 @@ class VolumeManager:
         self.config = self.DEFAULT_CONFIG.copy()
         self.loaded_volumes: Dict[int, 'VolumeData'] = {}  # volume_id -> VolumeData
         self.file_locks: Dict[int, threading.Lock] = {}      # 并发控制
+        self._meta_lock = threading.Lock()  # v7.0.5: 保护 file_locks 的 check-then-create
         self._init_storage()
         self._memory_id_index: Dict[str, int] = {}
         self._index_file = os.path.join(data_path, "memory_id_index.json")
@@ -44,10 +45,15 @@ class VolumeManager:
                 self._memory_id_index = {}
     
     def _save_memory_id_index(self):
-        """保存 memory_id 索引"""
+        """保存 memory_id 索引（原子写入）"""
         try:
-            with open(self._index_file, 'w', encoding='utf-8') as f:
+            # v7.0.9: 原子写入 — tmp + fsync + rename
+            tmp_file = self._index_file + '.tmp'
+            with open(tmp_file, 'w', encoding='utf-8') as f:
                 json.dump(self._memory_id_index, f, ensure_ascii=False)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_file, self._index_file)
         except IOError:
             pass
     
@@ -136,9 +142,11 @@ class VolumeManager:
     
     def _get_lock(self, volume_id: int) -> threading.Lock:
         """获取卷级别的锁"""
-        if volume_id not in self.file_locks:
-            self.file_locks[volume_id] = threading.Lock()
-        return self.file_locks[volume_id]
+        # v7.0.5: 修复竞态条件 — _meta_lock 已在 __init__ 中初始化
+        with self._meta_lock:
+            if volume_id not in self.file_locks:
+                self.file_locks[volume_id] = threading.Lock()
+            return self.file_locks[volume_id]
     
     def _load_or_create_manifest(self) -> dict:
         """加载或创建全局manifest"""
@@ -153,10 +161,15 @@ class VolumeManager:
         }
     
     def _save_manifest(self):
-        """保存manifest"""
+        """保存manifest（原子写入）"""
         manifest_path = os.path.join(self.data_path, "manifest.json")
-        with open(manifest_path, 'w', encoding='utf-8') as f:
+        # v7.0.9: 原子写入 — tmp + fsync + rename
+        tmp_path = manifest_path + '.tmp'
+        with open(tmp_path, 'w', encoding='utf-8') as f:
             json.dump(self.manifest, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, manifest_path)
     
     def get_next_turn_number(self) -> int:
         """获取下一个轮次号"""
@@ -280,6 +293,35 @@ class VolumeManager:
         
         return results
     
+    def remove_by_memory_id(self, memory_id: str) -> bool:
+        """从 memory_id 索引中移除指定记忆的引用
+        
+        注意：L3 存档的 JSONL 数据文件不做物理删除（append-only 设计），
+        仅清理内存索引，防止后续通过 memory_id 查找到已删除的记忆。
+        
+        Args:
+            memory_id: 要移除的记忆ID
+        
+        Returns:
+            bool: 是否成功移除
+        """
+        removed = False
+        # 从 memory_id 索引中移除
+        if memory_id in self._memory_id_index:
+            del self._memory_id_index[memory_id]
+            self._save_memory_id_index()
+            removed = True
+        # 从已加载卷的缓存中移除
+        for volume in self.loaded_volumes.values():
+            turns_to_remove = [
+                turn_num for turn_num, data in volume.cached_turns.items()
+                if data.get('memory_id') == memory_id
+            ]
+            for turn_num in turns_to_remove:
+                del volume.cached_turns[turn_num]
+                removed = True
+        return removed
+
     def flush(self):
         """强制持久化所有已加载的卷
         
@@ -407,10 +449,10 @@ class VolumeData:
                     f.write(json.dumps(turn_data, ensure_ascii=False) + '\n')
                     self._persisted_turns.add(turn_num)  # 标记为已持久化
         
-        # 保存卷索引
+        # 保存卷索引（v7.0.10: 原子写入）
+        from recall.utils.atomic_write import atomic_json_dump
         index_path = os.path.join(self.base_path, "volume_index.json")
-        with open(index_path, 'w', encoding='utf-8') as f:
-            json.dump(self.index, f, ensure_ascii=False, indent=2)
+        atomic_json_dump(self.index, index_path, ensure_ascii=False, indent=2)
     
     def load_all_to_memory(self):
         """将整个卷加载到内存（用于热卷）"""

@@ -37,6 +37,7 @@ class ConsolidatedMemory:
         self.data_path = data_path
         self.storage_dir = os.path.join(data_path, 'L1_consolidated')
         self.entities: Dict[str, ConsolidatedEntity] = {}
+        self._dirty: bool = False  # A13: 脏标记，仅在有变更时写入
         self._load()
     
     def _load(self):
@@ -55,21 +56,55 @@ class ConsolidatedMemory:
                         self.entities[entity.id] = entity
     
     def _save(self):
-        """保存长期记忆（分片存储）"""
+        """保存长期记忆（分片存储，原子写入：tmp+rename 防止断电损坏，仅在脏标记为 True 时写入）"""
+        if not self._dirty:
+            return
+        from recall.utils.atomic_write import atomic_json_dump
         os.makedirs(self.storage_dir, exist_ok=True)
         
         # 每1000个实体一个文件
         entities_list = list(self.entities.values())
         chunk_size = 1000
         
+        # v7.0.7: 先计算新分片数量
+        # v7.0.8: 修复竞态 — 先写入新分片，再删除多余旧分片
+        # 防止写入新分片前崩溃导致数据永久丢失
+        new_shard_count = max(1, (len(entities_list) + chunk_size - 1) // chunk_size) if entities_list else 0
+        
+        # 先写入所有新分片
         for i in range(0, len(entities_list), chunk_size):
             chunk = entities_list[i:i+chunk_size]
             file_path = os.path.join(self.storage_dir, f'entities_{i//chunk_size+1:04d}.json')
-            with open(file_path, 'w', encoding='utf-8') as f:
-                json.dump([asdict(e) for e in chunk], f, ensure_ascii=False, indent=2)
+            atomic_json_dump([asdict(e) for e in chunk], file_path, indent=2)
+        
+        # 然后删除多余的旧分片文件（实体数量减少时旧分片残留导致已删除实体"复活"）
+        try:
+            existing_files = sorted(
+                f for f in os.listdir(self.storage_dir)
+                if f.startswith('entities_') and f.endswith('.json')
+            )
+            for old_file in existing_files[new_shard_count:]:
+                old_path = os.path.join(self.storage_dir, old_file)
+                try:
+                    os.remove(old_path)
+                except OSError:
+                    pass
+        except OSError:
+            pass  # 目录可能不存在（首次保存）
+        
+        self._dirty = False
+    
+    def _mark_dirty(self):
+        """标记数据已变更，需要写入"""
+        self._dirty = True
+    
+    def flush(self):
+        """强制将脏数据写入磁盘"""
+        if self._dirty:
+            self._save()
     
     def add_or_update(self, entity: ConsolidatedEntity):
-        """添加或更新实体"""
+        """添加或更新实体（仅标记脏，不立即写盘；由 flush()/close() 或显式 save() 统一持久化）"""
         if entity.id in self.entities:
             existing = self.entities[entity.id]
             existing.verification_count += 1
@@ -85,7 +120,7 @@ class ConsolidatedMemory:
                     existing.source_memory_ids.append(mid)
         else:
             self.entities[entity.id] = entity
-        self._save()
+        self._mark_dirty()
     
     def get(self, entity_id: str) -> Optional[ConsolidatedEntity]:
         """获取实体"""
@@ -175,6 +210,7 @@ class ConsolidatedMemory:
             del self.entities[entity_id]
         
         if entities_to_delete or modified:
+            self._mark_dirty()
             self._save()
         
         return len(entities_to_delete)

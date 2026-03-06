@@ -68,6 +68,10 @@ class VectorIndex:
         self._enabled = True
         
         self._setup()
+        
+        # v7.0.11: atexit 注册 — 进程退出时确保 FAISS 索引和 mapping 被保存
+        import atexit
+        atexit.register(self._atexit_save)
     
     def _setup(self):
         """初始化设置"""
@@ -86,7 +90,7 @@ class VectorIndex:
         """加载已有配置或自动选择"""
         if os.path.exists(self.config_file):
             try:
-                with open(self.config_file, 'r') as f:
+                with open(self.config_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                 return EmbeddingConfig(
                     backend=EmbeddingBackendType(data.get('backend', 'local')),
@@ -102,15 +106,15 @@ class VectorIndex:
         return auto_select_backend()
     
     def _save_config(self):
-        """保存配置"""
+        """保存配置（v7.0.10: 原子写入）"""
         data = {
             'backend': self.embedding_config.backend.value,
             'local_model': self.embedding_config.local_model,
             'api_model': self.embedding_config.api_model,
             'dimension': self.dimension
         }
-        with open(self.config_file, 'w') as f:
-            json.dump(data, f, indent=2)
+        from recall.utils.atomic_write import atomic_json_dump
+        atomic_json_dump(data, self.config_file, indent=2)
     
     @property
     def enabled(self) -> bool:
@@ -147,7 +151,15 @@ class VectorIndex:
         import faiss
         
         if os.path.exists(self.index_file):
-            self._index = faiss.read_index(self.index_file)
+            # v7.0.14: 保护 faiss.read_index — 文件损坏时回退到空索引
+            try:
+                self._index = faiss.read_index(self.index_file)
+            except (RuntimeError, Exception) as e:
+                _safe_print(f"[VectorIndex] 警告: FAISS 索引文件损坏，将创建空索引: {e}")
+                self._index = faiss.IndexFlatIP(self.dimension)
+                self.turn_mapping = []
+                self._save_config()
+                return
             
             # 检查维度是否匹配
             if self._index.d != self.dimension:
@@ -157,24 +169,29 @@ class VectorIndex:
                 self.turn_mapping = []
                 self._save_config()
             elif os.path.exists(self.mapping_file):
-                with open(self.mapping_file, 'r') as f:
-                    self.turn_mapping = json.load(f)
+                try:
+                    with open(self.mapping_file, 'r', encoding='utf-8') as f:
+                        self.turn_mapping = json.load(f)
+                except (json.JSONDecodeError, Exception) as e:
+                    _safe_print(f"[VectorIndex] 警告: mapping 文件损坏，将重建: {e}")
+                    self.turn_mapping = []
         else:
             # 创建新索引
             self._index = faiss.IndexFlatIP(self.dimension)
             self._save_config()
     
     def _save(self):
-        """保存索引"""
+        """保存索引（v7.0.10: mapping 文件原子写入）"""
         if not self._enabled or self._index is None:
             return
         
         import faiss
         
+        # FAISS 索引写入（faiss 内部无原子保护，但损坏概率低）
         faiss.write_index(self._index, self.index_file)
         
-        with open(self.mapping_file, 'w') as f:
-            json.dump(self.turn_mapping, f)
+        from recall.utils.atomic_write import atomic_json_dump
+        atomic_json_dump(self.turn_mapping, self.mapping_file)
     
     def clear(self):
         """清空向量索引"""
@@ -398,6 +415,13 @@ class VectorIndex:
         
         return result
     
+    def _atexit_save(self):
+        """atexit 回调 — 确保退出时保存索引（v7.0.11）"""
+        try:
+            self._save()
+        except Exception:
+            pass
+
     def close(self):
         """关闭并保存"""
         self._save()

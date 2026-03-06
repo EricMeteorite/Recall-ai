@@ -1,24 +1,8 @@
-"""伏笔数据模型"""
+"""伏笔数据模型 — v7.0 兼容性存根
 
-from pydantic import BaseModel
-from typing import List, Optional
+重新导出 processor.foreshadowing 中的 Foreshadowing 类，保持 models 包的向后兼容。
+"""
 
-from .base import ForeshadowingStatus
+from recall.processor.foreshadowing import Foreshadowing
 
-
-class Foreshadowing(BaseModel):
-    """伏笔模型"""
-    id: str
-    created_turn: int
-    content: str
-    summary: str
-    trigger_keywords: List[str]
-    trigger_combinations: List[List[str]] = []
-    trigger_entities: List[str] = []
-    content_embedding: Optional[List[float]] = None
-    status: ForeshadowingStatus = ForeshadowingStatus.UNRESOLVED
-    resolution_turn: Optional[int] = None
-    resolution_content: Optional[str] = None
-    remind_after_turns: int = 100
-    last_reminded: Optional[int] = None
-    importance: str = "MEDIUM"  # HIGH, MEDIUM, LOW
+__all__ = ['Foreshadowing']

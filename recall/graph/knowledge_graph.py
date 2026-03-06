@@ -8,15 +8,20 @@ from collections import defaultdict
 
 
 def get_relation_types() -> dict:
-    """根据当前模式返回合并后的关系类型字典
+    """返回全部关系类型字典
     
-    RP 模式: RP_RELATION_TYPES + GENERAL_RELATION_TYPES
-    通用/知识库模式: 仅 GENERAL_RELATION_TYPES
+    v7.0: 根据 ModeConfig.rp_relation_types 决定是否包含 RP 关系。
+    默认包含所有关系（UNIVERSAL 模式）。
+    设置 RP_RELATION_TYPES=false 可排除 RP 特化关系。
     """
-    from recall.mode import get_mode_config, RecallMode
-    cfg = get_mode_config()
     base = dict(KnowledgeGraph.GENERAL_RELATION_TYPES)
-    if cfg.rp_relation_types:
+    try:
+        from ..mode import get_mode_config
+        mode = get_mode_config()
+        if mode.rp_relation_types:
+            base.update(KnowledgeGraph.RP_RELATION_TYPES)
+    except Exception:
+        # 回退：包含所有关系
         base.update(KnowledgeGraph.RP_RELATION_TYPES)
     return base
 
@@ -113,7 +118,7 @@ class KnowledgeGraph:
                     self._index_relation(rel)
     
     def _save(self):
-        """保存图谱"""
+        """保存图谱（v7.0.10: 原子写入）"""
         os.makedirs(os.path.dirname(self.graph_file) if os.path.dirname(self.graph_file) else '.', exist_ok=True)
         
         # 收集所有关系
@@ -126,8 +131,8 @@ class KnowledgeGraph:
                     seen.add(key)
                     all_relations.append(asdict(rel))
         
-        with open(self.graph_file, 'w', encoding='utf-8') as f:
-            json.dump({'relations': all_relations}, f, ensure_ascii=False, indent=2)
+        from recall.utils.atomic_write import atomic_json_dump
+        atomic_json_dump({'relations': all_relations}, self.graph_file, ensure_ascii=False, indent=2)
     
     def _index_relation(self, rel: Relation):
         """索引一个关系"""

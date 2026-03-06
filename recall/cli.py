@@ -192,8 +192,7 @@ def stats():
         f"[bold]Recall v{stats['version']}[/bold]\n"
         f"数据目录: {stats['data_root']}\n"
         f"轻量模式: {'是' if stats['lightweight'] else '否'}\n"
-        f"用户数: {stats['storage']['scopes']}\n"
-        f"活跃伏笔: {stats['foreshadowings']['active']}",
+        f"用户数: {stats.get('global', {}).get('total_scopes', 0)}",
         title="📊 统计信息"
     ))
 
@@ -249,67 +248,6 @@ def reset(user, confirm):
         console.print(f"[green]✓[/green] 用户 {user} 的记忆已重置")
     else:
         console.print("[green]✓[/green] 所有记忆已重置")
-
-
-@main.group()
-def foreshadowing():
-    """伏笔管理"""
-    pass
-
-
-@foreshadowing.command('plant')
-@click.argument('content')
-@click.option('--importance', '-i', default=0.5, help='重要性 (0-1)')
-def plant_foreshadowing(content, importance):
-    """埋下伏笔"""
-    from .engine import RecallEngine
-    
-    engine = RecallEngine(lightweight=True)
-    fsh = engine.plant_foreshadowing(content, importance=importance)
-    
-    console.print(f"[green]✓[/green] 伏笔已埋下")
-    console.print(f"  ID: {fsh.id}")
-
-
-@foreshadowing.command('list')
-def list_foreshadowing():
-    """列出活跃伏笔"""
-    from .engine import RecallEngine
-    
-    engine = RecallEngine(lightweight=True)
-    active = engine.get_active_foreshadowings()
-    
-    if not active:
-        console.print("[yellow]暂无活跃伏笔[/yellow]")
-        return
-    
-    table = Table(title="活跃伏笔")
-    table.add_column("ID", style="dim")
-    table.add_column("内容", max_width=50)
-    table.add_column("状态")
-    table.add_column("重要性", justify="right")
-    
-    for f in active:
-        content = f.content[:50] + "..." if len(f.content) > 50 else f.content
-        table.add_row(f.id[:12], content, f.status.value, f"{f.importance:.1f}")
-    
-    console.print(table)
-
-
-@foreshadowing.command('resolve')
-@click.argument('foreshadowing_id')
-@click.argument('resolution')
-def resolve_foreshadowing(foreshadowing_id, resolution):
-    """解决伏笔"""
-    from .engine import RecallEngine
-    
-    engine = RecallEngine(lightweight=True)
-    success = engine.resolve_foreshadowing(foreshadowing_id, resolution)
-    
-    if success:
-        console.print(f"[green]✓[/green] 伏笔已解决")
-    else:
-        console.print(f"[red]✗[/red] 解决失败（伏笔不存在？）")
 
 
 if __name__ == '__main__':

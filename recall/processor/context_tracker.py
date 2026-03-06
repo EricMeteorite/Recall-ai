@@ -395,14 +395,19 @@ class ContextTracker:
             self.contexts[cache_key] = []
     
     def _save_user(self, user_id: str, character_id: str = "default"):
-        """保存用户/角色的上下文"""
+        """保存用户/角色的上下文（原子写入）"""
         cache_key = self._get_cache_key(user_id, character_id)
         filepath = self._get_storage_path(user_id, character_id)
         # 确保目录存在
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
         contexts = self.contexts.get(cache_key, [])
-        with open(filepath, 'w', encoding='utf-8') as f:
+        # v7.0.9: 原子写入 — tmp + fsync + rename
+        tmp_file = filepath + '.tmp'
+        with open(tmp_file, 'w', encoding='utf-8') as f:
             json.dump([c.to_dict() for c in contexts], f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_file, filepath)
     
     def set_memory_provider(self, provider):
         """设置记忆提供回调函数
@@ -772,9 +777,13 @@ class ContextTracker:
                                 lines_to_keep.append(line)
                 
                 if found_data:
-                    # 重写归档文件（移除已恢复的条件）
-                    with open(archive_path, 'w', encoding='utf-8') as f:
+                    # 重写归档文件（移除已恢复的条件）（v7.0.10: 原子写入）
+                    tmp_archive = archive_path + '.tmp'
+                    with open(tmp_archive, 'w', encoding='utf-8') as f:
                         f.writelines(lines_to_keep)
+                        f.flush()
+                        os.fsync(f.fileno())
+                    os.replace(tmp_archive, archive_path)
                     break
             except Exception as e:
                 logger.error(f"[ContextTracker] 读取归档文件失败: {e}")
@@ -846,8 +855,13 @@ class ContextTracker:
                                 lines_to_keep.append(line)
                 
                 if deleted:
-                    with open(archive_path, 'w', encoding='utf-8') as f:
+                    # v7.0.10: 原子写入
+                    tmp_archive = archive_path + '.tmp'
+                    with open(tmp_archive, 'w', encoding='utf-8') as f:
                         f.writelines(lines_to_keep)
+                        f.flush()
+                        os.fsync(f.fileno())
+                    os.replace(tmp_archive, archive_path)
                     logger.info(f"[ContextTracker] 已彻底删除归档条件: {context_id}")
                     break
             except Exception as e:
@@ -923,9 +937,9 @@ class ContextTracker:
             
             if all_characters:
                 # 清空该用户所有角色的内存数据
-                keys_to_delete = [k for k in self._user_data.keys() if k.startswith(f"{user_id}/")]
+                keys_to_delete = [k for k in self.contexts.keys() if k.startswith(f"{user_id}/")]
                 for key in keys_to_delete:
-                    del self._user_data[key]
+                    del self.contexts[key]
                 
                 # 清空该用户目录下所有角色的磁盘数据
                 if self.base_path:
@@ -936,8 +950,8 @@ class ContextTracker:
             else:
                 # 清空内存中的数据
                 cache_key = f"{user_id}/{character_id}"
-                if cache_key in self._user_data:
-                    del self._user_data[cache_key]
+                if cache_key in self.contexts:
+                    del self.contexts[cache_key]
                 
                 # 清空磁盘数据
                 if self.base_path:
@@ -965,7 +979,7 @@ class ContextTracker:
         
         try:
             # 清空内存中的所有数据
-            self._user_data.clear()
+            self.contexts.clear()
             
             # 清空磁盘上的所有数据
             if self.base_path and os.path.exists(self.base_path):
@@ -1435,13 +1449,26 @@ class ContextTracker:
         return ctx
     
     def get_active(self, user_id: str = "default", character_id: str = "default") -> List[PersistentContext]:
-        """获取所有活跃的持久上下文"""
+        """获取所有活跃的持久上下文
+        
+        v7.0: 根据 ModeConfig.rp_context_types 决定是否包含 RP 特化上下文类型。
+        """
         # 确保数据已加载
         self._ensure_loaded(user_id, character_id)
         
         cache_key = self._get_cache_key(user_id, character_id)
         if cache_key not in self.contexts:
             return []
+        
+        # v7.0: 检查是否过滤 RP 上下文类型
+        filter_rp = False
+        try:
+            from ..mode import get_mode_config
+            mode = get_mode_config()
+            if not mode.rp_context_types:
+                filter_rp = True
+        except Exception:
+            pass
         
         now = time.time()
         active = []
@@ -1451,6 +1478,9 @@ class ContextTracker:
                 continue
             if ctx.expires_at and ctx.expires_at < now:
                 ctx.is_active = False
+                continue
+            # v7.0: 如果 RP 上下文类型已禁用，跳过 RP 特有条目
+            if filter_rp and ctx.context_type in RP_CONTEXT_TYPES:
                 continue
             active.append(ctx)
         
@@ -1559,11 +1589,7 @@ class ContextTracker:
             result = self._extract_with_rules(text, user_id, character_id)
         
         if result:
-            # v5.0: 模式感知过滤 — 非 RP 模式下过滤掉 RP 特有上下文类型
-            from recall.mode import get_mode_config
-            if not get_mode_config().rp_context_types:
-                result = [ctx for ctx in result if ctx.context_type not in RP_CONTEXT_TYPES]
-            
+            # v7.0: 统一模式，所有上下文类型始终可用，不再过滤
             _safe_print(f"[ContextTracker] ✅ 提取完成: 新增 {len(result)} 条条件")
             for ctx in result:
                 _safe_print(f"[ContextTracker]    🌱 [{ctx.context_type.value}] {ctx.content[:50]}{'...' if len(ctx.content) > 50 else ''}")

@@ -98,8 +98,24 @@ class FullTextIndex:
         # 脏标记
         self._dirty = False
         
+        # v7.0.8: 添加自动保存计数器 + atexit 兜底
+        self._add_count = 0
+        self._auto_save_interval = 50  # 每 50 次 add 自动保存
+        
         # 加载
         self._load()
+        
+        # v7.0.8: atexit 注册 — 进程退出时保存脏数据，防止数据丢失
+        import atexit
+        atexit.register(self._atexit_flush)
+    
+    def _atexit_flush(self):
+        """进程退出时保存未持久化的数据"""
+        try:
+            if self._dirty:
+                self._save()
+        except Exception:
+            pass
     
     def _default_stopwords(self) -> Set[str]:
         """默认停用词"""
@@ -171,8 +187,15 @@ class FullTextIndex:
             }
         }
         
-        with open(self.index_file, 'w', encoding='utf-8') as f:
+        # v7.0.8: 原子写入 — 先写临时文件再重命名，防止断电损坏
+        tmp_file = self.index_file + '.tmp'
+        with open(tmp_file, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+        
+        # 原子替换（Windows 上 os.replace 是原子的对于同一卷）
+        os.replace(tmp_file, self.index_file)
         
         self._dirty = False
     
@@ -256,6 +279,11 @@ class FullTextIndex:
         self.avg_doc_length = self.total_doc_length / self.doc_count if self.doc_count > 0 else 0
         
         self._dirty = True
+        
+        # v7.0.8: 定期自动保存，防止进程异常退出时数据丢失
+        self._add_count += 1
+        if self._add_count % self._auto_save_interval == 0:
+            self._save()
     
     def remove(self, doc_id: str) -> bool:
         """移除文档
